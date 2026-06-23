@@ -3,10 +3,14 @@ import { HighlightStyle } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
 
 export const unicodeLayoutTheme = EditorView.theme({
-  "&": { height: "100%", backgroundColor: "#ffffff", color: "#333333" },
-  ".cm-content": { fontFamily: "monospace, 'MiSans Khmer', sans-serif", fontSize: "15px", padding: "10px 0" },
-  ".cm-line": { padding: "0 12px", lineHeight: "1.7", overflow: "visible !important" },
-  ".cm-gutters": { backgroundColor: "#f9f9f9", color: "#858585", borderRight: "1px solid #e0e0e0" }
+  "&": { 
+      height: "100%", 
+      fontFamily: "ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace, 'MiSans Khmer', sans-serif", 
+      fontSize: "14px", 
+      lineHeight: "1.7" 
+  },
+  ".cm-line": { padding: "0 12px", overflow: "visible !important" },
+  ".cm-gutters": { borderRight: "1px solid var(--ui-border)" }
 });
 
 export const typstSyntaxHighlighting = HighlightStyle.define([

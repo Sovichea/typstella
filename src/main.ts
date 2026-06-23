@@ -3,10 +3,11 @@ import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { getEditorExtensions } from "./editor/extensions";
+import { getEditorExtensions, themeCompartment, getThemeExtension, applyUIThemeVariables, wrapCompartment } from "./editor/extensions";
 import { setEditorDiagnosticsEffect } from "./editor/diagnostics";
 import type { EditorDiagnostic, EditorDiagnosticSeverity } from "./editor/diagnostics";
 import { WorkspaceExplorer } from "./components/explorer";
@@ -100,8 +101,61 @@ class TypstryWorkspaceController {
     this.bindGlobalEvents();
     this.initResizers();
     this.initUndockPreview();
+    this.initThemeSelector();
+    this.initWordWrap();
     this.renderLogConsole();
     this.setLogConsoleVisible(false);
+  }
+
+  private initThemeSelector() {
+    const themeSelector = document.getElementById("editor-theme-selector") as HTMLSelectElement;
+    if (themeSelector) {
+      // Try to load saved theme
+      const savedTheme = localStorage.getItem("typstry-theme") || "default";
+      themeSelector.value = savedTheme;
+      applyUIThemeVariables(savedTheme);
+      if (savedTheme !== "default") {
+          this.editorInstance.dispatch({
+              effects: themeCompartment.reconfigure(getThemeExtension(savedTheme))
+          });
+      }
+
+      themeSelector.addEventListener("change", (e) => {
+        const themeName = (e.target as HTMLSelectElement).value;
+        localStorage.setItem("typstry-theme", themeName);
+        applyUIThemeVariables(themeName);
+        this.editorInstance.dispatch({
+          effects: themeCompartment.reconfigure(getThemeExtension(themeName))
+        });
+      });
+    }
+  }
+
+  private initWordWrap() {
+    const wrapToggleBtn = document.getElementById("word-wrap-toggle");
+    const wrapLabel = document.getElementById("word-wrap-label");
+    
+    if (wrapToggleBtn && wrapLabel) {
+      // Load preference from localStorage, default to true
+      let isWrapEnabled = localStorage.getItem("typstry-word-wrap") !== "false";
+      
+      const applyWrapState = () => {
+        wrapLabel.textContent = isWrapEnabled ? "Wrap: On" : "Wrap: Off";
+        this.editorInstance.dispatch({
+            effects: wrapCompartment.reconfigure(isWrapEnabled ? EditorView.lineWrapping : [])
+        });
+      };
+
+      // Apply initial state
+      applyWrapState();
+
+      // Toggle listener
+      wrapToggleBtn.addEventListener("click", () => {
+        isWrapEnabled = !isWrapEnabled;
+        localStorage.setItem("typstry-word-wrap", isWrapEnabled.toString());
+        applyWrapState();
+      });
+    }
   }
 
   private async ensureDependencies() {
@@ -888,6 +942,41 @@ class TypstryWorkspaceController {
         this.explorer.loadWorkspace(selected);
       }
     });
+
+    document.getElementById("action-open-folder")?.addEventListener("click", async () => {
+      const selected = await open({ directory: true, multiple: false });
+      if (typeof selected === "string") {
+        this.workspaceRootPath = selected;
+        this.explorer.loadWorkspace(selected);
+      }
+    });
+    document.getElementById("action-toggle-layout")?.addEventListener("click", () => this.switchViewLayoutMode());
+    document.getElementById("action-toggle-logs")?.addEventListener("click", () => this.toggleLogConsole());
+
+    // Menu Bar Dropdown logic
+    const dropdownContainers = document.querySelectorAll(".dropdown-container");
+    dropdownContainers.forEach(container => {
+      container.addEventListener("click", (e) => {
+        const isActive = container.classList.contains("active");
+        // Close all dropdowns
+        dropdownContainers.forEach(c => c.classList.remove("active"));
+        if (!isActive) {
+          container.classList.add("active");
+        }
+        e.stopPropagation();
+      });
+    });
+
+    // Close on outside click
+    document.addEventListener("click", () => {
+      dropdownContainers.forEach(c => c.classList.remove("active"));
+    });
+
+    const appWindow = getCurrentWindow();
+    document.getElementById("titlebar-minimize")?.addEventListener("click", () => appWindow.minimize());
+    document.getElementById("titlebar-maximize")?.addEventListener("click", () => appWindow.toggleMaximize());
+    document.getElementById("titlebar-close")?.addEventListener("click", () => appWindow.close());
+
     this.logConsoleToggle.addEventListener("click", () => this.toggleLogConsole());
     this.logConsoleClose.addEventListener("click", () => this.setLogConsoleVisible(false));
     this.logConsoleClear.addEventListener("click", () => {
@@ -978,7 +1067,7 @@ class TypstryWorkspaceController {
     let isResizingExplorer = false;
 
     if (explorerResizer && explorerSidebar) {
-      explorerResizer.addEventListener("mousedown", (e) => {
+      explorerResizer.addEventListener("mousedown", () => {
         isResizingExplorer = true;
         explorerResizer.classList.add("resizing");
         document.body.style.cursor = "col-resize";
@@ -1019,7 +1108,7 @@ class TypstryWorkspaceController {
     let isResizingEditor = false;
 
     if (editorPreviewResizer && inputContainer && workspaceViewport && previewContainerWrapper) {
-      editorPreviewResizer.addEventListener("mousedown", (e) => {
+      editorPreviewResizer.addEventListener("mousedown", () => {
         isResizingEditor = true;
         editorPreviewResizer.classList.add("resizing");
         document.body.style.cursor = "col-resize";

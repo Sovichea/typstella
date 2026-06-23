@@ -8,6 +8,43 @@
 </head>
 <body>
   <div id="app-shell">
+    <div data-tauri-drag-region class="titlebar">
+      <div class="titlebar-left">
+        <img src="/assets/typstry-ico.svg" class="titlebar-icon" width="16" height="16" />
+        <div class="menu-item dropdown-container">
+          <div class="menu-label">File</div>
+          <div class="dropdown-menu">
+            <div class="dropdown-item" id="action-open-folder">Open Workspace Folder... <span class="hotkey">Ctrl+O</span></div>
+          </div>
+        </div>
+        <div class="menu-item dropdown-container">
+          <div class="menu-label">View</div>
+          <div class="dropdown-menu">
+            <div class="dropdown-item" id="action-toggle-layout">Switch Workspace Layout <span class="hotkey">Ctrl+M</span></div>
+          </div>
+        </div>
+        <div class="menu-item dropdown-container">
+          <div class="menu-label">Terminal</div>
+          <div class="dropdown-menu">
+            <div class="dropdown-item" id="action-toggle-logs">Toggle Log Console <span class="hotkey">Ctrl+`</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="titlebar-center" data-tauri-drag-region>
+        <div class="titlebar-text">Typstry Pro</div>
+      </div>
+      <div class="titlebar-right">
+        <div class="titlebar-button" id="titlebar-minimize">
+          <svg viewBox="0 0 10 1" fill="currentColor" width="10" height="1"><rect width="10" height="1"></rect></svg>
+        </div>
+        <div class="titlebar-button" id="titlebar-maximize">
+          <svg viewBox="0 0 10 10" fill="currentColor" width="10" height="10"><path d="M1,1v8h8V1H1z M8,8H2V2h6V8z"></path></svg>
+        </div>
+        <div class="titlebar-button" id="titlebar-close">
+          <svg viewBox="0 0 10 10" fill="currentColor" width="10" height="10"><path d="M10,1.4L8.6,0L5,3.6L1.4,0L0,1.4L3.6,5L0,8.6L1.4,10L5,6.4L8.6,10L10,8.6L6.4,5L10,1.4z"></path></svg>
+        </div>
+      </div>
+    </div>
     <div id="app-container">
       <div id="explorer-sidebar"></div>
       <div class="resizer" id="explorer-resizer"></div>
@@ -21,7 +58,7 @@
         <div class="resizer" id="editor-preview-resizer"></div>
         <div id="preview-container-wrapper">
           <div class="preview-actions">
-            <button id="undock-preview-btn" title="Undock Preview" style="padding: 4px 8px; cursor: pointer; border: 1px solid #c8c8c8; background: #ffffff; border-radius: 4px; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <button id="undock-preview-btn" title="Undock Preview" style="padding: 4px 8px; cursor: pointer; border: 1px solid var(--ui-border); background: var(--ui-bg); color: var(--ui-text); border-radius: 4px; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
               <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M14 2H8v1.5h4.5v4.5H14V2zm-2 10H4V6h3.5V4.5H3.5a.5.5 0 0 0-.5.5v7.5a.5.5 0 0 0 .5.5h8.5a.5.5 0 0 0 .5-.5V9H12v3z"/></svg>
             </button>
           </div>
@@ -52,6 +89,19 @@
       <button id="dock-preview-status-btn" class="status-button hidden" type="button" title="Dock preview back to editor">
         <span class="status-label">Dock Preview</span>
       </button>
+      <button id="word-wrap-toggle" class="status-button" type="button" title="Toggle Word Wrap" style="margin-left: auto;">
+        <span class="status-label" id="word-wrap-label">Wrap: On</span>
+      </button>
+      <select id="editor-theme-selector" class="status-select" title="Change Theme" style="margin-left: 0;">
+        <option value="default">Default Light</option>
+        <option value="githubLight">GitHub Light</option>
+        <option value="githubDark">GitHub Dark</option>
+        <option value="oneDark">One Dark</option>
+        <option value="dracula">Dracula</option>
+        <option value="material">Material Dark</option>
+        <option value="materialLight">Material Light</option>
+        <option value="nord">Nord</option>
+      </select>
     </div>
   </div>
   <script type="module" src="/src/main.ts"></script>
