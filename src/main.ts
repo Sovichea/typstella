@@ -1,7 +1,9 @@
 import "./style.css";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { invoke } from "@tauri-apps/api/core";
+import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { getEditorExtensions } from "./editor/extensions";
@@ -96,6 +98,8 @@ class TypstryWorkspaceController {
     this.initExplorer();
     await this.initLsp();
     this.bindGlobalEvents();
+    this.initResizers();
+    this.initUndockPreview();
     this.renderLogConsole();
     this.setLogConsoleVisible(false);
   }
@@ -966,6 +970,127 @@ class TypstryWorkspaceController {
     return Array.from(this.wysiwymContainer.querySelectorAll(".wysiwym-block"))
       .map(b => b.classList.contains("heading") ? `= ${b.textContent?.trim()}` : b.textContent?.trim())
       .join("\n");
+  }
+
+  private initResizers() {
+    const explorerResizer = document.getElementById("explorer-resizer");
+    const explorerSidebar = document.getElementById("explorer-sidebar");
+    let isResizingExplorer = false;
+
+    if (explorerResizer && explorerSidebar) {
+      explorerResizer.addEventListener("mousedown", (e) => {
+        isResizingExplorer = true;
+        explorerResizer.classList.add("resizing");
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+      });
+
+      document.addEventListener("mousemove", (e) => {
+        if (!isResizingExplorer) return;
+        const newWidth = Math.max(150, Math.min(e.clientX, 800));
+        explorerSidebar.style.width = `${newWidth}px`;
+      });
+
+      document.addEventListener("mouseup", () => {
+        if (isResizingExplorer) {
+          isResizingExplorer = false;
+          explorerResizer.classList.remove("resizing");
+          document.body.style.cursor = "";
+          document.body.style.userSelect = "";
+        }
+      });
+      
+      // Toggle minimize explorer on double click resizer
+      explorerResizer.addEventListener("dblclick", () => {
+        if (explorerSidebar.style.display === "none" || explorerSidebar.classList.contains("hidden")) {
+           explorerSidebar.classList.remove("hidden");
+           explorerSidebar.style.display = "block";
+        } else {
+           explorerSidebar.classList.add("hidden");
+           explorerSidebar.style.display = "none";
+        }
+      });
+    }
+
+    const editorPreviewResizer = document.getElementById("editor-preview-resizer");
+    const inputContainer = document.getElementById("input-container-wrapper");
+    const previewContainerWrapper = document.getElementById("preview-container-wrapper");
+    const workspaceViewport = document.getElementById("workspace-viewport");
+    let isResizingEditor = false;
+
+    if (editorPreviewResizer && inputContainer && workspaceViewport && previewContainerWrapper) {
+      editorPreviewResizer.addEventListener("mousedown", (e) => {
+        isResizingEditor = true;
+        editorPreviewResizer.classList.add("resizing");
+        document.body.style.cursor = "col-resize";
+        document.body.style.userSelect = "none";
+      });
+
+      document.addEventListener("mousemove", (e) => {
+        if (!isResizingEditor) return;
+        const viewportRect = workspaceViewport.getBoundingClientRect();
+        const newWidth = e.clientX - viewportRect.left;
+        const percentage = Math.max(10, Math.min((newWidth / viewportRect.width) * 100, 90));
+        inputContainer.style.width = `${percentage}%`;
+        previewContainerWrapper.style.width = `${100 - percentage}%`;
+      });
+
+      document.addEventListener("mouseup", () => {
+        if (isResizingEditor) {
+          isResizingEditor = false;
+          editorPreviewResizer.classList.remove("resizing");
+          document.body.style.cursor = "";
+          document.body.style.userSelect = "";
+        }
+      });
+    }
+  }
+
+  private initUndockPreview() {
+    const undockBtn = document.getElementById("undock-preview-btn");
+    const previewContainerWrapper = document.getElementById("preview-container-wrapper");
+    const previewContainer = document.getElementById("preview-render-pane");
+    const editorPreviewResizer = document.getElementById("editor-preview-resizer");
+    const inputContainer = document.getElementById("input-container-wrapper");
+    const dockStatusBtn = document.getElementById("dock-preview-status-btn");
+    let externalWindow: WebviewWindow | null = null;
+
+    const restoreDock = () => {
+        if (externalWindow) {
+            externalWindow.close();
+        }
+        externalWindow = null;
+        if (previewContainerWrapper) previewContainerWrapper.style.display = "flex";
+        if (editorPreviewResizer) editorPreviewResizer.style.display = "block";
+        if (inputContainer) inputContainer.style.width = "50%";
+        if (dockStatusBtn) dockStatusBtn.classList.add("hidden");
+    };
+
+    if (dockStatusBtn) {
+        dockStatusBtn.addEventListener("click", restoreDock);
+    }
+    
+    if (undockBtn && previewContainer && previewContainerWrapper) {
+      undockBtn.addEventListener("click", async () => {
+        const iframe = previewContainer.querySelector('iframe');
+        if (iframe && iframe.src) {
+            previewContainerWrapper.style.display = "none";
+            if (editorPreviewResizer) editorPreviewResizer.style.display = "none";
+            if (inputContainer) inputContainer.style.width = "100%";
+            if (dockStatusBtn) dockStatusBtn.classList.remove("hidden");
+            
+            try {
+                await openUrl(iframe.src);
+            } catch (err) {
+                console.error("Shell open failed", err);
+                alert("Could not open external preview window.");
+                restoreDock();
+            }
+        } else {
+            alert("Live preview is not currently active.");
+        }
+      });
+    }
   }
 }
 

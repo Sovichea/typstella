@@ -10,6 +10,7 @@
   <div id="app-shell">
     <div id="app-container">
       <div id="explorer-sidebar"></div>
+      <div class="resizer" id="explorer-resizer"></div>
       <div id="workspace-viewport">
         <div id="input-container-wrapper">
           <div id="code-editor-pane" class="input-pane"></div>
@@ -17,7 +18,15 @@
             <div class="wysiwym-container"></div>
           </div>
         </div>
-        <div id="preview-render-pane"></div>
+        <div class="resizer" id="editor-preview-resizer"></div>
+        <div id="preview-container-wrapper">
+          <div class="preview-actions">
+            <button id="undock-preview-btn" title="Undock Preview" style="padding: 4px 8px; cursor: pointer; border: 1px solid #c8c8c8; background: #ffffff; border-radius: 4px; display: flex; align-items: center; justify-content: center; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M14 2H8v1.5h4.5v4.5H14V2zm-2 10H4V6h3.5V4.5H3.5a.5.5 0 0 0-.5.5v7.5a.5.5 0 0 0 .5.5h8.5a.5.5 0 0 0 .5-.5V9H12v3z"/></svg>
+            </button>
+          </div>
+          <div id="preview-render-pane"></div>
+        </div>
       </div>
     </div>
     <section id="log-console" class="hidden" aria-label="Log console">
@@ -39,6 +48,9 @@
       <button id="log-console-toggle" class="status-button" type="button" data-state="ok" aria-expanded="false">
         <span class="status-label">Logs</span>
         <span id="diagnostic-count" class="status-count">0</span>
+      </button>
+      <button id="dock-preview-status-btn" class="status-button hidden" type="button" title="Dock preview back to editor">
+        <span class="status-label">Dock Preview</span>
       </button>
     </div>
   </div>

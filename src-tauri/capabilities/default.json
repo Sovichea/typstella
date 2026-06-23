@@ -1,19 +1,16 @@
 {
   "identifier": "default",
   "description": "Allow core plugins and dialog access",
-  "windows": ["*"],
+  "windows": [
+    "*"
+  ],
   "permissions": [
     "core:default",
+    "core:window:default",
+    "core:window:allow-create",
+    "core:webview:default",
     "dialog:default",
-    "fs:default",
-    {
-      "identifier": "fs:allow-read",
-      "allow": [{ "path": "$HOME/**" }, { "path": "C:/**" }]
-    },
-    {
-      "identifier": "fs:allow-write",
-      "allow": [{ "path": "$HOME/**" }, { "path": "C:/**" }]
-    },
-    "shell:default"
+    "shell:default",
+    "shell:allow-open"
   ]
 }
