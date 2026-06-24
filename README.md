@@ -89,5 +89,4 @@ The compiled binaries will be placed in `src-tauri/target/release/`.
 - [ ] Interactive Document Outline (Table of Contents) sidebar for quick navigation
 - [ ] Integrated Typst Package Manager UI
 - [ ] Multi-tab support for editing multiple files simultaneously
-- [ ] Advanced Export Dialog (PDF, SVG, PNG) with configuration options
 - [ ] Visual Toolbar for inserting Typst math symbols, fractions, and code snippets

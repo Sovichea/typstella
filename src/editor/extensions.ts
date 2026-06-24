@@ -2,6 +2,7 @@ import { Extension, Compartment } from "@codemirror/state";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { lineNumbers, highlightActiveLineGutter, highlightActiveLine, drawSelection, dropCursor, keymap, EditorView } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { search, searchKeymap } from "@codemirror/search";
 import { unicodeLayoutTheme, typstSyntaxHighlighting } from "./themes";
 import { syntaxHighlighting } from "@codemirror/language";
 import { typstLanguage } from "./typstLanguage";
@@ -22,8 +23,9 @@ export function getEditorExtensions(): Extension[] {
     editorDiagnosticsExtension,
     indentationMarkers(),
     wrapCompartment.of(EditorView.lineWrapping),
+    search({ top: true }),
     themeCompartment.of([unicodeLayoutTheme, syntaxHighlighting(typstSyntaxHighlighting)]),
-    keymap.of([...defaultKeymap, ...historyKeymap])
+    keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap])
   ];
 }
 

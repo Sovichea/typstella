@@ -198,3 +198,90 @@ body, html { width: 100vw; height: 100vh; background-color: var(--ui-bg); overfl
 .welcome-item-icon { width: 20px; font-size: 14px; margin-right: 12px; display: flex; justify-content: center; opacity: 0.8; }
 .welcome-item-text { flex: 1; font-size: 14px; color: var(--ui-header-text); }
 .welcome-item-hotkey { font-size: 12px; color: var(--ui-text); opacity: 0.5; }
+
+/* CodeMirror Search Panel Styling */
+.cm-panels {
+  background-color: transparent !important;
+  border: none !important;
+}
+
+.cm-panel.cm-search {
+  background-color: var(--ui-bg) !important;
+  color: var(--ui-text) !important;
+  border: 1px solid var(--ui-border) !important;
+  border-top: none !important;
+  padding: 8px 12px 12px 12px !important;
+  font-family: inherit !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 8px !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+  position: absolute !important;
+  top: 0 !important;
+  right: 20px !important;
+  border-radius: 0 0 6px 6px !important;
+  z-index: 100 !important;
+  max-width: 420px !important;
+}
+
+.cm-panel.cm-search input[type="text"],
+.cm-panel.cm-search .cm-textfield {
+  background-color: var(--ui-bg) !important;
+  color: var(--ui-text) !important;
+  border: 1px solid var(--ui-border) !important;
+  border-radius: 3px !important;
+  padding: 4px 6px !important;
+  font-size: 12px !important;
+  outline: none !important;
+  width: 140px !important;
+}
+
+.cm-panel.cm-search input[type="text"]:focus,
+.cm-panel.cm-search .cm-textfield:focus {
+  border-color: #007fd4 !important;
+}
+
+.cm-panel.cm-search button,
+.cm-panel.cm-search .cm-button {
+  background-color: transparent !important;
+  color: var(--ui-text) !important;
+  border: 1px solid transparent !important;
+  border-radius: 3px !important;
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+  cursor: pointer !important;
+  background-image: none !important;
+  text-transform: capitalize !important;
+}
+
+.cm-panel.cm-search button:hover,
+.cm-panel.cm-search .cm-button:hover {
+  background-color: var(--ui-hover) !important;
+}
+
+.cm-panel.cm-search label {
+  font-size: 12px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  cursor: pointer !important;
+  margin-right: 4px !important;
+}
+
+.cm-panel.cm-search .cm-search-close {
+  position: absolute !important;
+  top: 4px !important;
+  right: 4px !important;
+  padding: 2px 6px !important;
+  font-size: 16px !important;
+  opacity: 0.7 !important;
+  border: none !important;
+  background: none !important;
+}
+
+.cm-panel.cm-search .cm-search-close:hover {
+  opacity: 1 !important;
+  background-color: var(--ui-hover) !important;
+  border-radius: 4px !important;
+}

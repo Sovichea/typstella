@@ -1489,6 +1489,74 @@ class TypstryWorkspaceController {
   }
 
   private bindGlobalEvents() {
+    document.addEventListener("keydown", (e) => {
+      const isMac = navigator.userAgent.toLowerCase().includes("mac");
+      const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+      
+      // Block common function keys (except F3 which we handle conditionally)
+      if (["F5", "F6", "F7", "F11"].includes(e.key)) {
+        e.preventDefault();
+      }
+      
+      // Block specific browser shortcuts (that we don't map below)
+      if (cmdOrCtrl && ["r", "p", "j", "u", "d"].includes(e.key.toLowerCase())) {
+        e.preventDefault();
+      }
+      
+      // Block browser's Find/Replace shortcuts only if not in an input/textarea/editor
+      if (e.key === "F3" || (cmdOrCtrl && ["f", "g", "h"].includes(e.key.toLowerCase()))) {
+         const active = document.activeElement;
+         if (!active || (!active.classList.contains("cm-content") && active.tagName !== "INPUT" && active.tagName !== "TEXTAREA" && !active.closest('.cm-panel'))) {
+             e.preventDefault();
+         }
+      }
+      
+      if (cmdOrCtrl && e.shiftKey && ["i", "c", "j", "r"].includes(e.key.toLowerCase())) {
+        e.preventDefault();
+      }
+      
+      // App Keymappings
+      if (cmdOrCtrl && !e.shiftKey && !e.altKey) {
+        switch (e.key.toLowerCase()) {
+          case "s":
+            e.preventDefault();
+            document.getElementById("action-save-file")?.click();
+            break;
+          case "o":
+            e.preventDefault();
+            document.getElementById("action-open-folder")?.click();
+            break;
+          case "n":
+            e.preventDefault();
+            document.getElementById("action-new-file")?.click();
+            break;
+          case "b":
+            e.preventDefault();
+            document.getElementById("action-toggle-sidebar")?.click();
+            break;
+          case "e":
+            e.preventDefault();
+            document.getElementById("action-export-pdf")?.click();
+            break;
+          case "q":
+            e.preventDefault();
+            document.getElementById("action-exit")?.click();
+            break;
+          case "`":
+            e.preventDefault();
+            document.getElementById("action-toggle-logs")?.click();
+            break;
+        }
+      }
+
+      if (e.altKey && !cmdOrCtrl && !e.shiftKey) {
+        if (e.key.toLowerCase() === "z") {
+          e.preventDefault();
+          document.getElementById("action-toggle-word-wrap")?.click();
+        }
+      }
+    });
+
     listen("menu-toggle-layout", () => this.switchViewLayoutMode());
     listen("menu-toggle-log-console", () => this.toggleLogConsole());
     listen("menu-open-folder", async () => {
@@ -1611,6 +1679,15 @@ class TypstryWorkspaceController {
           container.classList.add("active");
         }
         e.stopPropagation();
+      });
+
+      container.addEventListener("mouseenter", () => {
+        // If any dropdown is already active, open this one on hover
+        const isAnyActive = Array.from(dropdownContainers).some(c => c.classList.contains("active"));
+        if (isAnyActive && !container.classList.contains("active")) {
+          dropdownContainers.forEach(c => c.classList.remove("active"));
+          container.classList.add("active");
+        }
       });
     });
 
