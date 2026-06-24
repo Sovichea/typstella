@@ -604,7 +604,7 @@ class TypstryWorkspaceController {
               this.clearPendingForwardSync();
               this.updateEditorUnicodeFontState(currentText);
               this.handleContentMutation(currentText);
-            } else if (update.selectionSet) {
+            } else if (this.shouldForwardSyncSelectionUpdate(update)) {
               this.scheduleForwardSync(this.forwardSyncDebounceMs);
             }
           })
@@ -612,7 +612,23 @@ class TypstryWorkspaceController {
       }),
       parent: this.codeRenderPane
     });
+    this.codeRenderPane.addEventListener("click", (event) => {
+      if ((event.target as HTMLElement).closest(".cm-editor")) {
+        this.scheduleForwardSync(this.forwardSyncDebounceMs);
+      }
+    });
     this.updateEditorUnicodeFontState(initialDocument);
+  }
+
+  private shouldForwardSyncSelectionUpdate(update: { selectionSet: boolean; transactions: readonly { isUserEvent(event: string): boolean }[] }): boolean {
+    if (!update.selectionSet) {
+      return false;
+    }
+
+    return update.transactions.some((transaction) =>
+      transaction.isUserEvent("select.pointer") ||
+      transaction.isUserEvent("select.search")
+    );
   }
 
   private bindEditorFontBreadcrumb() {
