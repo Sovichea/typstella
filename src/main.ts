@@ -71,6 +71,8 @@ type EditorTab = {
   latestVersion: number;
   selectionAnchor: number;
   selectionHead: number;
+  scrollTop?: number;
+  scrollLeft?: number;
 };
 
 const systemMonospaceFontStack = "ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace";
@@ -1269,6 +1271,8 @@ $
     tab.latestVersion = this.latestDocumentVersion;
     tab.selectionAnchor = selection.anchor;
     tab.selectionHead = selection.head;
+    tab.scrollTop = this.editorInstance.scrollDOM.scrollTop;
+    tab.scrollLeft = this.editorInstance.scrollDOM.scrollLeft;
   }
 
   private updateActiveTabContent(content: string) {
@@ -1347,6 +1351,7 @@ $
 
     this.renderEditorTabs();
     this.updateWorkspaceViewportVisibility();
+    this.saveWorkspaceState();
   }
 
   private async activateEditorTab(path: string, persistCurrent = true) {
@@ -1356,6 +1361,7 @@ $
         this.renderEditorTabs();
       }
       this.editorInstance.focus();
+      this.saveWorkspaceState();
       return;
     }
 
@@ -1383,6 +1389,13 @@ $
       });
     } finally {
       this.isLoadingFile = false;
+    }
+
+    if (tab.scrollTop !== undefined || tab.scrollLeft !== undefined) {
+      requestAnimationFrame(() => {
+        if (tab.scrollTop !== undefined) this.editorInstance.scrollDOM.scrollTop = tab.scrollTop;
+        if (tab.scrollLeft !== undefined) this.editorInstance.scrollDOM.scrollLeft = tab.scrollLeft;
+      });
     }
 
     this.activeFilePath = path;
@@ -1421,6 +1434,7 @@ $
     }
     this.updateWorkspaceViewportVisibility();
     this.editorInstance.focus();
+    this.saveWorkspaceState();
   }
 
   private async initLsp() {
@@ -2335,21 +2349,108 @@ $
     
     // Bind click events
     recentSection.querySelectorAll('.recent-project-item').forEach(el => {
-      el.addEventListener('click', () => {
+      el.addEventListener('click', async () => {
         const path = (el as HTMLElement).dataset.path;
-        if (path) this.openWorkspace(path);
+        if (path) await this.openWorkspace(path);
       });
     });
   }
 
-  private openWorkspace(selected: string) {
+  private saveWorkspaceState() {
+    if (!this.workspaceRootPath) return;
+    
+    this.persistActiveTabState();
+    
+    const inputContainer = document.getElementById("input-container-wrapper");
+    const explorerSidebar = document.getElementById("explorer-sidebar");
+    
+    const state = {
+      activeFilePath: this.activeFilePath,
+      openTabs: this.openTabs.map(tab => ({
+        path: tab.path,
+        selectionAnchor: tab.selectionAnchor,
+        selectionHead: tab.selectionHead,
+        scrollTop: tab.scrollTop,
+        scrollLeft: tab.scrollLeft
+      })),
+      inputContainerWidthPct: inputContainer?.style.width ? parseFloat(inputContainer.style.width) : 50,
+      explorerSidebarWidthPx: explorerSidebar?.style.width ? parseInt(explorerSidebar.style.width, 10) : 250
+    };
+    
+    localStorage.setItem(`typstry-workspace-${this.workspaceRootPath}`, JSON.stringify(state));
+  }
+
+  private async restoreWorkspaceState(workspacePath: string) {
+    try {
+      const stored = localStorage.getItem(`typstry-workspace-${workspacePath}`);
+      if (!stored) return;
+      
+      const state = JSON.parse(stored);
+      
+      if (state.inputContainerWidthPct) {
+        const inputContainer = document.getElementById("input-container-wrapper");
+        const previewContainerWrapper = document.getElementById("preview-container-wrapper");
+        if (inputContainer && previewContainerWrapper) {
+          inputContainer.style.width = `${state.inputContainerWidthPct}%`;
+          previewContainerWrapper.style.width = `${100 - state.inputContainerWidthPct}%`;
+        }
+      }
+      
+      if (state.explorerSidebarWidthPx) {
+        const explorerSidebar = document.getElementById("explorer-sidebar");
+        if (explorerSidebar) {
+          explorerSidebar.style.width = `${state.explorerSidebarWidthPx}px`;
+        }
+      }
+      
+      if (state.openTabs && Array.isArray(state.openTabs)) {
+        for (const tabInfo of state.openTabs) {
+          try {
+             const contents: string = await invoke("read_workspace_file", { path: tabInfo.path });
+             this.openTabs.push({
+               path: tabInfo.path,
+               content: contents,
+               savedContent: contents,
+               isDirty: false,
+               previewRootPath: null,
+               version: 1,
+               latestVersion: 1,
+               selectionAnchor: tabInfo.selectionAnchor || 0,
+               selectionHead: tabInfo.selectionHead || 0,
+               scrollTop: tabInfo.scrollTop,
+               scrollLeft: tabInfo.scrollLeft
+             });
+          } catch(e) {
+             console.warn("Failed to restore tab:", tabInfo.path, e);
+          }
+        }
+        this.renderEditorTabs();
+      }
+      
+      if (state.activeFilePath && this.openTabs.some(t => t.path === state.activeFilePath)) {
+         await this.activateEditorTab(state.activeFilePath, false);
+      } else if (this.openTabs.length > 0) {
+         await this.activateEditorTab(this.openTabs[0].path, false);
+      }
+    } catch(e) {
+      console.warn("Failed to restore workspace state:", e);
+    }
+  }
+
+  private async openWorkspace(selected: string) {
+    if (this.workspaceRootPath && this.workspaceRootPath !== selected) {
+      this.closeProject();
+    }
     this.workspaceRootPath = selected;
     this.explorer.loadWorkspace(selected);
     this.updateWorkspaceViewportVisibility();
     this.addRecentProject(selected);
+    await this.restoreWorkspaceState(selected);
   }
 
   private closeProject() {
+    this.saveWorkspaceState();
+    
     this.workspaceRootPath = null;
     this.activeFilePath = null;
     this.previewRootPath = null;
@@ -2370,6 +2471,10 @@ $
   }
 
   private bindGlobalEvents() {
+    window.addEventListener("beforeunload", () => {
+      this.saveWorkspaceState();
+    });
+
     document.addEventListener("keydown", (e) => {
       const isMac = navigator.userAgent.toLowerCase().includes("mac");
       const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
@@ -2443,14 +2548,14 @@ $
     listen("menu-open-folder", async () => {
       const selected = await open({ directory: true, multiple: false });
       if (typeof selected === "string") {
-        this.openWorkspace(selected);
+        await this.openWorkspace(selected);
       }
     });
 
     document.getElementById("action-open-folder")?.addEventListener("click", async () => {
       const selected = await open({ directory: true, multiple: false });
       if (typeof selected === "string") {
-        this.openWorkspace(selected);
+        await this.openWorkspace(selected);
       }
     });
     
@@ -2929,6 +3034,7 @@ $
           explorerResizer.classList.remove("resizing");
           document.body.style.cursor = "";
           document.body.style.userSelect = "";
+          this.saveWorkspaceState();
         }
       });
       
@@ -2973,6 +3079,7 @@ $
           editorPreviewResizer.classList.remove("resizing");
           document.body.style.cursor = "";
           document.body.style.userSelect = "";
+          this.saveWorkspaceState();
         }
       });
     }
