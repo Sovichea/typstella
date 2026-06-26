@@ -40,7 +40,7 @@ This file serves as a consolidated reference for the architectural decisions, pa
 - `start_tinymist_lsp()` kills any prior child, increments a generation guard, spawns local `tinymist.exe lsp`, and forwards stdio JSON-RPC as `lsp-rx`/`lsp-status` events.
 - `send_lsp_message()` pushes JSON strings into an MPSC channel; frontend must send fully serialized JSON-RPC payloads.
 - `check_typst_document()` writes a hidden sibling `.stem.typstry-check.typ`, compiles SVG with short diagnostics, parses stderr, then deletes temp files.
-- `compile_typst_document()` currently writes `.stem.preview.typ`, compiles SVG page files, returns combined SVG markup, and deletes temp SVGs. Despite the UI label "Export PDF", this command does not currently produce a PDF path.
+- `compile_typst_document()` writes a hidden sibling `.stem.export.typ`, compiles a real PDF to the active file's sibling `.pdf`, deletes the temp input, and returns the PDF path string.
 
 ### C. LSP/Preview Flow (`src/compiler/lsp.ts`)
 - Frontend does not connect directly to `ws://127.0.0.1:8589`; Rust owns Tinymist stdio and frontend listens to `lsp-rx`.
@@ -48,8 +48,8 @@ This file serves as a consolidated reference for the architectural decisions, pa
 - Initialization disables Tinymist auto export (`exportPdf/exportSvg/exportPng: "never"`) and enables preview background host `127.0.0.1:8589`.
 - `startPreview(path)` must pass raw OS paths, not file URIs. It sends `tinymist.pinMain`, `tinymist.focusMain`, then `tinymist.doStartPreview` with `arguments: [[path]]`.
 - Preview result normalization handles string results and object shapes containing `staticServerAddr`, `staticServerPort`, or `dataPlanePort`.
-- Server requests handled locally: capability registration, message requests, workspace configuration, and `window/showDocument` for inverse sync.
-- LSP positions use UTF-8 byte offsets; all CodeMirror conversions must go through the helper methods, especially for Khmer/CJK/emoji/non-ASCII content.
+- Server requests handled locally: capability registration, message requests, workspace configuration, and `window/showDocument` for inverse sync. `window/showDocument` positions are URI-scoped; switch/load the reported file before applying its line/character.
+- LSP positions use the server-negotiated `positionEncoding` from initialize capabilities. Tinymist 0.15.2 advertises `utf-16`; do not hardcode UTF-8 byte offsets. All CodeMirror conversions must go through `TinymistLspClient` helper methods.
 
 ### D. Live Sync, Diagnostics, and Preview Highlight
 - Typing calls `handleContentMutation()`, queues `pendingLspSyncText`, and debounces `textDocument/didChange` by 350 ms.
@@ -59,7 +59,7 @@ This file serves as a consolidated reference for the architectural decisions, pa
 - Forward preview sync is a controlled hack: selected word is temporarily wrapped with `#text(fill:rgb("#fe0102"))[...]`, sent as a preview-only version, scrolled into view in the iframe, then reverted to editor text.
 - Preview highlight only runs when `activeFilePath === previewRootPath`; library/template files receive diagnostics but no live preview highlight.
 - Highlightable ranges exclude comments, raw inline code, math, block comments, and Typst code-expression spans (`#set`, `#show`, function calls, etc.).
-- Inverse sync maps Tinymist `window/showDocument` source positions back through the temporary highlight mapping when present, then suppresses the next forward sync to avoid loops.
+- Inverse sync maps Tinymist `window/showDocument` source positions back through the temporary highlight mapping when present, then optionally refines the collapsed CodeMirror cursor using the clicked iframe text node/offset. Preview HTML is mounted as `srcdoc` with a `<base>` tag when available so the iframe DOM stays readable while Tinymist assets still resolve. It does not trigger forward preview sync/highlighting.
 
 ### E. WYSIWYM Mode
 - WYSIWYM is a secondary DOM editing view, not the source of truth. Switching from Code to WYSIWYM calls `mapMarkupToWysiwym()`, switching back serializes with `mapWysiwymToMarkup()`.
@@ -110,6 +110,7 @@ This file serves as a consolidated reference for the architectural decisions, pa
 ## 3. UI Theme System
 - CSS custom variables (`--ui-bg`, `--ui-text`, `--ui-monospace-color`, etc.) are updated dynamically on theme switch via `applyUIThemeVariables` in `src/editor/extensions.ts`.
 - Themes define a custom `monospace` hex value to ensure that equation/code block text matches the active editor theme palette.
+- Cursor, selection, rainbow brackets, matching bracket outlines, and Typst function tokens are theme-scoped CSS variables. Keep function highlighting as a narrow `typstFunctionHighlighting` layer using `--editor-function-color`; do not replace the whole syntax theme.
 
 ---
 
@@ -124,8 +125,12 @@ This file serves as a consolidated reference for the architectural decisions, pa
 | **String Font** | Sans-serif font for `tags.string`. | Monospace font (`var(--editor-code-font)`). | Strings are internal configuration arguments (e.g. `lang: "en"`), not output visual content. |
 | **Escaped Auto-Close**| Keymaps or custom command overrides. | `EditorView.inputHandler` checking `from - 1 === "\\"`. | Keymaps didn't intercept autocomplete insertions; `inputHandler` filters them first. |
 | **Tinymist Transport** | Frontend raw WebSocket client assumptions. | Rust spawns Tinymist stdio and frontend uses `lsp-rx`/`send_lsp_message` IPC. | CSP allows local sockets for preview assets, but JSON-RPC currently flows through Tauri events/commands. |
-| **LSP Positions** | Treating LSP `character` as JS string offset. | Convert UTF-8 byte offsets to/from JS offsets before moving CodeMirror selections. | Non-ASCII scripts break cursor, diagnostic, completion, and inverse-sync positions if byte offsets are ignored. |
+| **LSP Positions** | Hardcoding LSP `character` as UTF-8 bytes or plain JS offsets. | Read Tinymist `capabilities.positionEncoding` and convert through `TinymistLspClient` helpers. | Tinymist 0.15.2 uses `utf-16`; wrong encoding breaks Khmer/non-ASCII inverse sync, diagnostics, hover, and completion positions. |
+| **Inverse Sync Target File** | Applying `window/showDocument` line/character to whichever tab is active. | Read `params.uri`, normalize slash/case differences, switch/load that file, then compute the CodeMirror cursor. | Preview clicks can target `main.typ` or an included source while another tab is active; ignoring URI lands on the wrong code location. |
+| **Inverse Sync Selection** | Selecting a word around the mapped preview-click cursor. | Use a collapsed CodeMirror cursor at the exact mapped `window/showDocument` position. | Word expansion is unreliable for Khmer, punctuation, short words, and numbers; source position accuracy is the only stable contract. |
+| **Coarse Preview Source Spans** | Trusting Tinymist `window/showDocument` character offsets as exact inside rendered text runs, or guessing with parenthetical heuristics. | Mount preview HTML through same-origin `srcdoc`, capture clicked iframe text node/offset, and search that text within Tinymist's reported source line. | Tinymist can map a whole rendered run to an earlier inline span; DOM text context is needed to place the cursor after inline constructs. |
 | **Preview Highlight Sync** | Persisting the red `#text(...)` wrapper as document content. | Track preview-only versions, suppress diagnostics briefly, then immediately send a revert `didChange`. | Forward sync mutates only Tinymist's transient document state; saved/editor text must stay untouched. |
 | **Preview Root Files** | Starting preview from any opened `.typ` file. | `resolve_preview_main` chooses `main.typ`, `index.typ`, `document.typ`, nearest workspace ancestor candidate, or renderable current file. | Template/library files can be active editor files but should not always become the preview root. |
 | **Workspace Restore** | Assuming unsaved tabs survive restart. | Restore tab paths and reload file contents from disk. | `localStorage` stores layout/selection only; dirty content is intentionally not serialized. |
-| **Export PDF Action** | Trusting `compile_typst_document` to return a PDF path. | Current command compiles SVG preview pages and returns combined SVG markup. | UI says "Export PDF", but backend behavior is SVG-oriented; fix command/UI together before relying on export status. |
+| **Export PDF Action** | Trusting SVG preview compilation to satisfy "Export PDF". | `compile_typst_document` now compiles `.stem.export.typ` to `file_stem.pdf` and returns that PDF path. | Preview SVG and export PDF are separate workflows; keep future preview changes out of the export command. |
+| **Function Highlighting Themes** | Relying on third-party CodeMirror themes where function tokens can match content color, or overriding broad syntax layers. | Set per-theme `--editor-function-color` and add only a narrow function-token highlighter after theme/font layers. | This preserves existing theme syntax while making Typst functions distinct from prose/content across all themes. |

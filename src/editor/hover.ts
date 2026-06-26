@@ -10,6 +10,7 @@ export function createHoverTooltip(getClient: () => TinymistLspClient | undefine
     const uri = getUri();
     
     if (!client || !uri) return null;
+    if (!shouldRequestTypstHover(view, pos)) return null;
 
     const doc = view.state.doc;
     const lspPos = client.lspPositionFromEditorPosition(doc, pos);
@@ -67,6 +68,134 @@ export function createHoverTooltip(getClient: () => TinymistLspClient | undefine
       return null;
     }
   });
+}
+
+function shouldRequestTypstHover(view: EditorView, pos: number): boolean {
+  const line = view.state.doc.lineAt(pos);
+  const offset = Math.max(0, Math.min(pos - line.from, line.length));
+  const token = typstIdentifierAt(line.text, offset);
+  if (!token) return false;
+
+  if (token.hashPrefixed) return true;
+  if (!/^[A-Za-z_][\w.-]*$/.test(token.text)) return false;
+  if (isFunctionCallLike(line.text, token.to)) return true;
+
+  return isInsideTypstCodeExpression(line.text, token.from);
+}
+
+function typstIdentifierAt(lineText: string, offset: number): { from: number; to: number; text: string; hashPrefixed: boolean } | null {
+  if (lineText[offset] === "#") {
+    const from = offset + 1;
+    const to = scanIdentifierEnd(lineText, from);
+    const text = lineText.slice(from, to);
+    return text ? { from, to, text, hashPrefixed: true } : null;
+  }
+
+  let from = offset;
+  if (from > 0 && !isIdentifierChar(lineText[from]) && isIdentifierChar(lineText[from - 1])) {
+    from--;
+  }
+
+  if (!isIdentifierChar(lineText[from])) return null;
+
+  while (from > 0 && isIdentifierChar(lineText[from - 1])) from--;
+  const to = scanIdentifierEnd(lineText, from);
+  const text = lineText.slice(from, to);
+  const hashPrefixed = from > 0 && lineText[from - 1] === "#" && !isEscaped(lineText, from - 1);
+
+  return text ? { from, to, text, hashPrefixed } : null;
+}
+
+function scanIdentifierEnd(text: string, from: number): number {
+  let to = from;
+  while (to < text.length && isIdentifierChar(text[to])) to++;
+  return to;
+}
+
+function isIdentifierChar(char: string | undefined): boolean {
+  return !!char && /[A-Za-z0-9_.-]/.test(char);
+}
+
+function isFunctionCallLike(lineText: string, tokenEnd: number): boolean {
+  let cursor = tokenEnd;
+  while (cursor < lineText.length && /\s/.test(lineText[cursor])) cursor++;
+  return lineText[cursor] === "(" || lineText[cursor] === "[";
+}
+
+function isInsideTypstCodeExpression(lineText: string, tokenStart: number): boolean {
+  const hashIndex = findNearestUnescapedHash(lineText, tokenStart);
+  if (hashIndex < 0) return false;
+
+  const expressionPrefix = lineText.slice(hashIndex + 1, tokenStart);
+  const state = scanTypstExpressionPrefix(expressionPrefix);
+  if (state.inString || state.lineComment) return false;
+
+  const trimmedPrefix = expressionPrefix.trimStart();
+  const startsCodeLine = /^(?:let|set|show|import|include|if|else|for|while|return|break|continue)\b/.test(trimmedPrefix);
+  const insideCodeDelimiter = state.parenDepth > 0 || state.braceDepth > 0;
+
+  if (state.bracketDepth > 0 && !insideCodeDelimiter) return false;
+  return startsCodeLine || insideCodeDelimiter;
+}
+
+function findNearestUnescapedHash(text: string, before: number): number {
+  for (let index = before - 1; index >= 0; index--) {
+    if (text[index] === "#" && !isEscaped(text, index)) return index;
+  }
+  return -1;
+}
+
+function isEscaped(text: string, index: number): boolean {
+  let slashCount = 0;
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor--) {
+    slashCount++;
+  }
+  return slashCount % 2 === 1;
+}
+
+function scanTypstExpressionPrefix(text: string): {
+  parenDepth: number;
+  braceDepth: number;
+  bracketDepth: number;
+  inString: boolean;
+  lineComment: boolean;
+} {
+  let parenDepth = 0;
+  let braceDepth = 0;
+  let bracketDepth = 0;
+  let inString = false;
+  let lineComment = false;
+
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (lineComment) break;
+
+    if (inString) {
+      if (char === "\"" && !isEscaped(text, index)) inString = false;
+      continue;
+    }
+
+    if (char === "/" && next === "/") {
+      lineComment = true;
+      break;
+    }
+
+    if (char === "\"" && !isEscaped(text, index)) {
+      inString = true;
+      continue;
+    }
+
+    if (char === "(") parenDepth++;
+    if (char === ")") parenDepth = Math.max(0, parenDepth - 1);
+    if (char === "{") braceDepth++;
+    if (char === "}") braceDepth = Math.max(0, braceDepth - 1);
+    if (char === "[") bracketDepth++;
+    if (char === "]") bracketDepth = Math.max(0, bracketDepth - 1);
+  }
+
+  return { parenDepth, braceDepth, bracketDepth, inString, lineComment };
 }
 
 function parseMarkdown(md: string): string {

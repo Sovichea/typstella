@@ -7,7 +7,7 @@ This document serves as the core knowledge base and skill reference for the Typs
 - **Desktop Framework:** Tauri v2 (Rust + Webview)
 - **Frontend Core:** Vite + Vanilla TypeScript (No UI frameworks like React or Vue)
 - **Editor Engine:** CodeMirror 6
-- **Language Server:** Tinymist LSP (WebSocket connection to `127.0.0.1:8589`)
+- **Language Server:** Tinymist LSP spawned by the Rust backend and bridged to the frontend over Tauri IPC (`lsp-rx`, `lsp-status`, `send_lsp_message`). Tinymist preview assets may still use local `127.0.0.1` ports.
 - **CLI Dependency:** The host machine must have the `typst` CLI installed and available in the system PATH.
 
 ## 2. Architecture & Process Boundaries
@@ -16,14 +16,14 @@ The application operates across distinct processes and contexts:
 ### 2.1 Rust Native Layer (`src-tauri/`)
 - **Entry Point:** `src/main.rs` hands off to `lib::run()`.
 - **Tauri Plugins:** Relies heavily on `@tauri-apps/plugin-fs` (file system), `@tauri-apps/plugin-shell` (CLI invocation), and `@tauri-apps/plugin-dialog` (OS file pickers).
-- **Compilation Engine:** The native backend exposes a `compile_typst_document` command that orchestrates local `typst` CLI compilations inside a `tempfile` isolated directory and pipes back the resulting PDF buffer.
+- **Compilation Engine:** The native backend exposes `check_typst_document` for SVG-based diagnostics and `compile_typst_document` for exporting the active document to a sibling PDF path via the local `typst` CLI.
 - **Security:** `tauri.conf.json` enforces a strict CSP that explicitly allows `ws://127.0.0.1:8589` for Tinymist LSP SVG streaming.
 
 ### 2.2 Webview Frontend Layer (`src/`)
 - **Orchestrator (`main.ts`):** Handles the global application state (`TypstryWorkspaceController`). Toggles between `CODE` (CodeMirror) and `WYSIWYM` (Rich Text Block) views. Listens to native Tauri menu events (`menu-toggle-layout`, `menu-open-folder`).
 - **File Explorer (`components/explorer.ts`):** A custom virtual DOM tree renderer that uses `tauri-plugin-fs` to scan and traverse workspace directories locally.
 - **CodeMirror Integration (`editor/`):** Contains `extensions.ts` and `themes.ts`. Implements a highly customized, dark-themed Unicode-compliant editor layout with basic Typst token matching.
-- **LSP Interface (`compiler/lsp.ts`):** Connects to the standalone Tinymist LSP via raw WebSockets. Maps `textDocument/didChange` events and intercepts `tinymist/preview/svgStream` to render live visual feedback inside the Webview DOM.
+- **LSP Interface (`compiler/lsp.ts`):** Talks to the Rust-owned Tinymist process via JSON-RPC messages forwarded over Tauri IPC. Maps `textDocument/didChange`, diagnostics, hover/completion requests, preview startup commands, and inverse sync events.
 
 ## 3. Implementation Rules & Best Practices
 1. **Never use React/Vue/Svelte:** This project strictly uses `document.createElement`, `DocumentFragment`, and Vanilla TS/HTML/CSS for maximum performance and minimum footprint.

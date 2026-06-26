@@ -298,8 +298,8 @@ async fn compile_typst_document(
     let parent = path.parent().unwrap_or(std::path::Path::new(""));
     let file_stem = path.file_stem().unwrap_or_default().to_string_lossy();
 
-    let input_path = parent.join(format!(".{}.preview.typ", file_stem));
-    let output_path_template = parent.join(format!(".{}.preview-{{p}}.svg", file_stem));
+    let input_path = parent.join(format!(".{}.export.typ", file_stem));
+    let output_path = path.with_extension("pdf");
 
     let mut file = std::fs::File::create(&input_path).map_err(|e| format!("IO Failure: {}", e))?;
     std::io::Write::write_all(&mut file, source_code.as_bytes())
@@ -319,10 +319,8 @@ async fn compile_typst_document(
 
     let output = command
         .arg("compile")
-        .arg("--format")
-        .arg("svg")
         .arg(&input_path)
-        .arg(output_path_template.to_string_lossy().as_ref())
+        .arg(&output_path)
         .output()
         .map_err(|e| format!("Host binary execution blocked: {}", e))?;
 
@@ -333,22 +331,7 @@ async fn compile_typst_document(
         return Err(stderr_string);
     }
 
-    let mut combined_svg = String::new();
-    let mut page = 1;
-    loop {
-        let page_path = parent.join(format!(".{}.preview-{}.svg", file_stem, page));
-        if !page_path.exists() {
-            break;
-        }
-
-        if let Ok(svg) = std::fs::read_to_string(&page_path) {
-            combined_svg.push_str(&format!("<div class='typst-page' style='margin-bottom: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);'>\n{}\n</div>", svg));
-        }
-        let _ = std::fs::remove_file(&page_path);
-        page += 1;
-    }
-
-    Ok(combined_svg)
+    Ok(output_path.to_string_lossy().to_string())
 }
 
 #[tauri::command]

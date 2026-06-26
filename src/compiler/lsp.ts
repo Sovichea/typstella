@@ -49,17 +49,20 @@ export type LspEditorSelection = {
   head?: number;
 };
 
+type LspPositionEncoding = "utf-8" | "utf-16" | "utf-32";
+
 export class TinymistLspClient {
   private requestId = 0;
   private editorView?: EditorView;
   private latestPreviewUrl = "";
   private latestPreviewDataPlaneUrl = "";
+  private positionEncoding: LspPositionEncoding = "utf-16";
   private pendingRequests = new Map<number, { resolve: (res: any) => void; reject: (err: any) => void; timeout?: number }>();
 
   constructor(
     private onSvgPreviewStream: (svgContent: string) => void,
     private onStatus: (status: LspStatus) => void = () => {},
-    private onInverseSync: (position: LspSourcePosition, defaultCursorPos: number) => number | LspEditorSelection | void = () => {},
+    private onInverseSync: (uri: string | undefined, position: LspSourcePosition) => number | LspEditorSelection | void | Promise<number | LspEditorSelection | void> = () => {},
     private onDiagnostics: (uri: string, diagnostics: LspDiagnostic[], version?: number) => void = () => {},
     private onLog: (entry: LspLogEntry) => void = () => {}
   ) {}
@@ -171,7 +174,7 @@ export class TinymistLspClient {
     const doc = this.editorView!.state.doc;
     const lineNumber = Math.max(1, Math.min(position.line + 1, doc.lines)); // LSP is 0-indexed, CodeMirror line() is 1-indexed
     const lineInfo = doc.line(lineNumber);
-    const character = this.utf8ByteOffsetToStringOffset(lineInfo.text, position.character ?? 0);
+    const character = this.stringOffsetFromLspCharacter(lineInfo.text, position.character ?? 0);
     return lineInfo.from + character;
   }
 
@@ -180,8 +183,50 @@ export class TinymistLspClient {
     const characterOffset = offset - lineInfo.from;
     return {
       line: lineInfo.number - 1,
-      character: this.stringOffsetToUtf8ByteOffset(lineInfo.text, characterOffset)
+      character: this.lspCharacterFromStringOffset(lineInfo.text, characterOffset)
     };
+  }
+
+  public stringOffsetFromLspCharacter(text: string, character: number): number {
+    const target = Math.max(0, character);
+
+    if (this.positionEncoding === "utf-16") {
+      return Math.min(target, text.length);
+    }
+
+    if (this.positionEncoding === "utf-32") {
+      let codePoints = 0;
+      let offset = 0;
+      for (const char of text) {
+        if (codePoints >= target) break;
+        codePoints++;
+        offset += char.length;
+      }
+      return offset;
+    }
+
+    return this.utf8ByteOffsetToStringOffset(text, target);
+  }
+
+  public lspCharacterFromStringOffset(text: string, stringOffset: number): number {
+    const target = Math.max(0, Math.min(stringOffset, text.length));
+
+    if (this.positionEncoding === "utf-16") {
+      return target;
+    }
+
+    if (this.positionEncoding === "utf-32") {
+      let codePoints = 0;
+      let offset = 0;
+      for (const char of text) {
+        if (offset >= target) break;
+        codePoints++;
+        offset += char.length;
+      }
+      return codePoints;
+    }
+
+    return this.stringOffsetToUtf8ByteOffset(text, target);
   }
 
   private stringOffsetToUtf8ByteOffset(text: string, stringOffset: number): number {
@@ -232,6 +277,7 @@ export class TinymistLspClient {
               reject(new Error(payload.error.message ?? "Tinymist initialize failed"));
               return;
             }
+            this.positionEncoding = this.normalizePositionEncoding(payload.result?.capabilities?.positionEncoding);
             this.sendNotification("initialized", {});
             resolve();
           }
@@ -296,6 +342,10 @@ export class TinymistLspClient {
         workspaceFolders: null
       }, id);
     });
+  }
+
+  private normalizePositionEncoding(value: unknown): LspPositionEncoding {
+    return value === "utf-8" || value === "utf-16" || value === "utf-32" ? value : "utf-16";
   }
 
   public openTextDocument(uri: string, text: string, version: number): Promise<void> {
@@ -502,29 +552,7 @@ export class TinymistLspClient {
         return;
       }
       case "window/showDocument": {
-        this.sendResponse(payload.id, { success: true });
-        if (this.editorView) {
-          const position = payload.params?.selection?.start;
-          if (!position || typeof position.line !== "number") return;
-
-          try {
-            const defaultCursorPos = this.editorPositionFromLspPosition(position);
-            const mappedSelection = this.onInverseSync(position, defaultCursorPos);
-            const selection = typeof mappedSelection === "number"
-              ? { anchor: mappedSelection }
-              : mappedSelection && typeof mappedSelection.anchor === "number"
-                ? mappedSelection
-                : { anchor: defaultCursorPos };
-            const scrollPos = selection.head ?? selection.anchor;
-            this.editorView.dispatch({
-              selection,
-              effects: EditorView.scrollIntoView(scrollPos, { y: "center" })
-            });
-            this.editorView.focus();
-          } catch (err) {
-            console.warn("Could not scroll to preview source position", position, err);
-          }
-        }
+        void this.handleShowDocumentRequest(payload);
         return;
       }
       default:
@@ -532,6 +560,33 @@ export class TinymistLspClient {
           return;
         }
         this.sendResponse(payload.id, null);
+    }
+  }
+
+  private async handleShowDocumentRequest(payload: any) {
+    this.sendResponse(payload.id, { success: true });
+    const position = payload.params?.selection?.start;
+    if (!position || typeof position.line !== "number") return;
+
+    try {
+      const uri = typeof payload.params?.uri === "string" ? payload.params.uri : undefined;
+      const mappedSelection = await this.onInverseSync(uri, position);
+      if (!this.editorView) return;
+
+      const defaultCursorPos = this.editorPositionFromLspPosition(position);
+      const selection = typeof mappedSelection === "number"
+        ? { anchor: mappedSelection }
+        : mappedSelection && typeof mappedSelection.anchor === "number"
+          ? mappedSelection
+          : { anchor: defaultCursorPos };
+      const scrollPos = selection.head ?? selection.anchor;
+      this.editorView.dispatch({
+        selection,
+        effects: EditorView.scrollIntoView(scrollPos, { y: "center" })
+      });
+      this.editorView.focus();
+    } catch (err) {
+      console.warn("Could not scroll to preview source position", position, err);
     }
   }
 

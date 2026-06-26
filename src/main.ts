@@ -52,6 +52,12 @@ type PreviewHighlightMapping = {
   highlightedLineText: string;
 };
 
+type PreviewTextClick = {
+  text: string;
+  offset: number;
+  timestamp: number;
+};
+
 type EditorFontCandidate = {
   id: string;
   language: string;
@@ -123,6 +129,7 @@ class TypstryWorkspaceController {
   private pendingPreviewSyncPollTimer: number | null = null;
   private suppressNextForwardSync = false;
   private previewHighlightMapping: PreviewHighlightMapping | null = null;
+  private pendingPreviewTextClick: PreviewTextClick | null = null;
   private readonly previewOnlyVersions = new Set<number>();
   private previewOnlyDiagnosticsSuppressedUntil = 0;
   private latestDocumentVersion = 1;
@@ -520,6 +527,14 @@ class TypstryWorkspaceController {
     window.addEventListener("message", (e) => {
       if (e.data?.type === "HIDE_CONTEXT_MENU") {
          contextMenu.style.display = "none";
+      } else if (e.data?.type === "PREVIEW_TEXT_CLICK") {
+        if (typeof e.data.text === "string" && typeof e.data.offset === "number") {
+          this.pendingPreviewTextClick = {
+            text: e.data.text,
+            offset: e.data.offset,
+            timestamp: Date.now()
+          };
+        }
       } else if (e.data?.type === "SHOW_PREVIEW_CONTEXT_MENU" && this.previewIframe) {
         const iframeRect = this.previewIframe.getBoundingClientRect();
         let x = iframeRect.left + e.data.x;
@@ -1420,7 +1435,7 @@ $
         this.previewPane.innerHTML = `<div style="padding: 20px; color: #007acc; font-family: sans-serif;">Starting live preview server...</div>`;
         const previewUrl = await this.startPreviewWithRestart(this.previewRootPath, tab.content);
         if (previewUrl) {
-          this.mountPreviewFrame(previewUrl);
+          await this.mountPreviewFrame(previewUrl);
         } else {
           this.previewPane.innerHTML = `<div style="padding: 20px; color: red; font-family: sans-serif;">Failed to start live preview server after restart. Check the log console for details.</div>`;
         }
@@ -1443,7 +1458,7 @@ $
     this.lspClient = new TinymistLspClient(
       () => {},
       (status) => this.setLspStatus(status),
-      (position, defaultCursorPos) => this.handleInverseSync(position, defaultCursorPos),
+      (uri, position) => this.handleInverseSync(uri, position),
       (uri, diagnostics, version) => this.handleLspDiagnostics(uri, diagnostics, version),
       (entry) => this.appendLspLog(entry)
     );
@@ -1458,9 +1473,9 @@ $
   }
 
   private async loadFile(path: string) {
-    const existingTab = this.openTabs.find((tab) => tab.path === path);
+    const existingTab = this.openTabs.find((tab) => this.filePathKey(tab.path) === this.filePathKey(path));
     if (existingTab) {
-      await this.activateEditorTab(path);
+      await this.activateEditorTab(existingTab.path);
       return;
     }
 
@@ -1858,13 +1873,25 @@ $
     this.clearPendingForwardSync();
   }
 
-  private handleInverseSync(position: LspSourcePosition, defaultCursorPos: number): number {
-    this.suppressForwardSyncOnce();
+  private async handleInverseSync(uri: string | undefined, position: LspSourcePosition): Promise<number> {
+    const targetPath = uri ? this.filePathFromUri(uri) : null;
+    const existingTargetTab = targetPath
+      ? this.openTabs.find((tab) => this.filePathKey(tab.path) === this.filePathKey(targetPath))
+      : null;
+    const resolvedTargetPath = existingTargetTab?.path ?? targetPath;
+    if (resolvedTargetPath && this.filePathKey(resolvedTargetPath) !== this.filePathKey(this.activeFilePath ?? "")) {
+      this.previewHighlightMapping = null;
+      await this.loadFile(resolvedTargetPath);
+    }
+
+    if (this.activeMode === "WYSIWYM") {
+      this.switchViewLayoutMode();
+    }
+
+    this.clearPendingForwardSync();
+    const defaultCursorPos = this.editorPositionFromLspPosition(position) ?? 0;
     const cursor = this.previewSourcePositionToEditorCursor(position, defaultCursorPos);
-    window.setTimeout(() => {
-      void this.renderHighlightedPreviewAtCursor(cursor);
-    }, 0);
-    return cursor;
+    return this.refineInverseSyncCursorFromPreviewText(position, cursor);
   }
 
   private previewSourcePositionToEditorCursor(position: LspSourcePosition, defaultCursorPos: number): number {
@@ -1873,7 +1900,9 @@ $
       return defaultCursorPos;
     }
 
-    const highlightedOffset = this.utf8ByteOffsetToStringOffset(mapping.highlightedLineText, position.character ?? 0);
+    const highlightedOffset = this.lspClient
+      ? this.lspClient.stringOffsetFromLspCharacter(mapping.highlightedLineText, position.character ?? 0)
+      : this.utf8ByteOffsetToStringOffset(mapping.highlightedLineText, position.character ?? 0);
     let originalOffset: number;
 
     if (highlightedOffset < mapping.originalStart) {
@@ -1892,14 +1921,96 @@ $
     return Math.max(line.from, Math.min(mapping.lineFrom + originalOffset, line.to));
   }
 
-  private mountPreviewFrame(previewUrl: string) {
+  private refineInverseSyncCursorFromPreviewText(position: LspSourcePosition, fallbackCursor: number): number {
+    const click = this.pendingPreviewTextClick;
+    this.pendingPreviewTextClick = null;
+    if (!click || Date.now() - click.timestamp > 1500 || !click.text.trim()) {
+      return fallbackCursor;
+    }
+
+    const doc = this.editorInstance.state.doc;
+    const lineNumber = Math.max(1, Math.min(position.line + 1, doc.lines));
+    const line = doc.line(lineNumber);
+    const match = this.findPreviewTextMatchInSourceLine(line.text, click.text, click.offset);
+    if (!match) {
+      return fallbackCursor;
+    }
+
+    return Math.max(line.from, Math.min(line.from + match.sourceOffset, line.to));
+  }
+
+  private findPreviewTextMatchInSourceLine(sourceLine: string, previewText: string, previewOffset: number): { sourceOffset: number } | null {
+    const text = previewText.replace(/\s+/g, " ");
+    const offset = Math.max(0, Math.min(previewOffset, text.length));
+    const sourceLineForSearch = sourceLine.replace(/\s+/g, " ");
+
+    const direct = this.findPreviewSnippetInSourceLine(sourceLineForSearch, text, offset);
+    if (direct) return direct;
+
+    const before = text.slice(Math.max(0, offset - 24), offset).trimStart();
+    const after = text.slice(offset, Math.min(text.length, offset + 48)).trimEnd();
+    const around = `${before}${after}`;
+    return this.findPreviewSnippetInSourceLine(sourceLineForSearch, around, Math.min(before.length, around.length));
+  }
+
+  private findPreviewSnippetInSourceLine(sourceLine: string, snippet: string, snippetOffset: number): { sourceOffset: number } | null {
+    const trimmedSnippet = snippet.trim();
+    if (trimmedSnippet.length < 2) {
+      return null;
+    }
+
+    let index = sourceLine.indexOf(trimmedSnippet);
+    if (index !== -1) {
+      const leadingTrim = snippet.length - snippet.trimStart().length;
+      return { sourceOffset: index + Math.max(0, snippetOffset - leadingTrim) };
+    }
+
+    for (let size = Math.min(32, trimmedSnippet.length); size >= 3; size--) {
+      const start = Math.max(0, Math.min(snippetOffset, trimmedSnippet.length) - Math.floor(size / 2));
+      const probe = trimmedSnippet.slice(start, start + size);
+      if (probe.length < 3) continue;
+      index = sourceLine.indexOf(probe);
+      if (index !== -1) {
+        return { sourceOffset: index + Math.floor(probe.length / 2) };
+      }
+    }
+
+    return null;
+  }
+
+  private async mountPreviewFrame(previewUrl: string) {
     this.previewPane.innerHTML = "";
     const iframe = document.createElement("iframe");
-    iframe.src = previewUrl;
     iframe.className = "preview-frame";
     iframe.addEventListener("load", () => this.suppressPreviewRippleStyles());
     this.previewPane.appendChild(iframe);
     this.previewIframe = iframe;
+
+    const previewHtml = this.lspClient ? await this.lspClient.getPreviewHtml() : "";
+    if (previewHtml) {
+      iframe.srcdoc = this.buildPreviewSrcdoc(previewUrl, previewHtml);
+      return;
+    }
+
+    iframe.src = previewUrl;
+  }
+
+  private buildPreviewSrcdoc(previewUrl: string, previewHtml: string): string {
+    const baseHref = previewUrl.endsWith("/") ? previewUrl : `${previewUrl}/`;
+    const base = `<base href="${this.escapeHtmlAttribute(baseHref)}">`;
+    if (/<head[^>]*>/i.test(previewHtml)) {
+      return previewHtml.replace(/<head([^>]*)>/i, `<head$1>${base}`);
+    }
+
+    return `${base}${previewHtml}`;
+  }
+
+  private escapeHtmlAttribute(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
   }
 
   private suppressPreviewRippleStyles() {
@@ -1912,11 +2023,51 @@ $
       style.textContent = ".typst-jump-ripple{display:none!important;animation:none!important;}";
       doc.head.appendChild(style);
 
+      doc.addEventListener("click", (event) => {
+        const point = this.previewTextPointFromMouseEvent(doc, event);
+        if (!point) return;
+
+        window.postMessage({
+          type: "PREVIEW_TEXT_CLICK",
+          text: point.text,
+          offset: point.offset
+        }, window.location.origin);
+      }, true);
+
       // Try to disable the native context menu inside the preview iframe
       doc.addEventListener("contextmenu", e => e.preventDefault());
     } catch {
       // The preview server may be cross-origin; in that case Tinymist owns its internals.
     }
+  }
+
+  private previewTextPointFromMouseEvent(doc: Document, event: MouseEvent): { text: string; offset: number } | null {
+    const rangeFromPoint = (doc as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    }).caretRangeFromPoint?.(event.clientX, event.clientY);
+
+    if (rangeFromPoint?.startContainer.nodeType === Node.TEXT_NODE) {
+      return {
+        text: rangeFromPoint.startContainer.textContent ?? "",
+        offset: rangeFromPoint.startOffset
+      };
+    }
+
+    const positionFromPoint = (doc as Document & {
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    }).caretPositionFromPoint?.(event.clientX, event.clientY);
+
+    if (positionFromPoint?.offsetNode.nodeType === Node.TEXT_NODE) {
+      return {
+        text: positionFromPoint.offsetNode.textContent ?? "",
+        offset: positionFromPoint.offset
+      };
+    }
+
+    const target = event.target as Element | null;
+    const text = target?.textContent?.trim();
+    return text ? { text, offset: Math.floor(text.length / 2) } : null;
   }
 
   private buildHighlightedPreviewSource(cursor: number): { text: string; scrollLine: number; scrollCharacter: number; mapping: PreviewHighlightMapping } | null {
@@ -1939,7 +2090,9 @@ $
     return {
       text: `${text.slice(0, range.from)}${prefix}${text.slice(range.from, range.to)}${suffix}${text.slice(range.to)}`,
       scrollLine: line.number - 1,
-      scrollCharacter: this.utf8ByteLength(highlightedLinePrefix),
+      scrollCharacter: this.lspClient
+        ? this.lspClient.lspCharacterFromStringOffset(highlightedLinePrefix, highlightedLinePrefix.length)
+        : this.utf8ByteLength(highlightedLinePrefix),
       mapping: {
         lineNumber: line.number,
         lineFrom: line.from,
@@ -2193,6 +2346,10 @@ $
     return uri;
   }
 
+  private filePathKey(path: string): string {
+    return path.replace(/\\/g, "/").toLowerCase();
+  }
+
   private fileNameFromPath(path: string): string {
     const normalizedPath = path.replace(/\\/g, "/");
     const parts = normalizedPath.split("/");
@@ -2321,6 +2478,10 @@ $
   }
 
   private editorPositionFromLspPosition(position: LspSourcePosition): number | null {
+    if (this.lspClient) {
+      return this.lspClient.editorPositionFromLspPosition(position);
+    }
+
     const doc = this.editorInstance.state.doc;
     if (!doc.length) return 0;
 
