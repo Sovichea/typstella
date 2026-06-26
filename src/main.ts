@@ -122,11 +122,13 @@ class TypstryWorkspaceController {
   private lspReady = false;
   private readonly lspSyncDebounceMs = 350;
   private readonly forwardSyncDebounceMs = 120;
+  private readonly previewHighlightVisibleMs = 2200;
   private pendingLspSyncTimer: number | null = null;
   private pendingLspSyncPath: string | null = null;
   private pendingLspSyncText: string | null = null;
   private pendingForwardSyncTimer: number | null = null;
   private pendingPreviewSyncPollTimer: number | null = null;
+  private pendingPreviewRevertTimer: number | null = null;
   private suppressNextForwardSync = false;
   private previewHighlightMapping: PreviewHighlightMapping | null = null;
   private pendingPreviewTextClick: PreviewTextClick | null = null;
@@ -648,11 +650,6 @@ class TypstryWorkspaceController {
         ]
       }),
       parent: this.codeRenderPane
-    });
-    this.codeRenderPane.addEventListener("click", (event) => {
-      if ((event.target as HTMLElement).closest(".cm-editor")) {
-        this.scheduleForwardSync(this.forwardSyncDebounceMs);
-      }
     });
     this.updateEditorUnicodeFontState(initialDocument);
   }
@@ -1732,8 +1729,9 @@ $
     this.previewHighlightMapping = previewHighlight.mapping;
     const version = ++this.currentVersion;
     this.previewOnlyVersions.add(version);
-    this.previewOnlyDiagnosticsSuppressedUntil = Date.now() + 2000;
+    this.previewOnlyDiagnosticsSuppressedUntil = Date.now() + this.previewHighlightVisibleMs + 2000;
     this.clearPendingPreviewSyncPoll();
+    this.clearPendingPreviewRevert();
 
     await this.lspClient.notifyTextChange(
       this.filePathToUri(this.activeFilePath),
@@ -1819,7 +1817,7 @@ $
              iframeWin.scrollTo({ top: scrollY, left: scrollX, behavior: 'smooth' });
           }
 
-          this.revertSyncText();
+          this.schedulePreviewHighlightRevert();
         } else if (attempts >= maxAttempts) {
           if (this.pendingPreviewSyncPollTimer) {
             window.clearInterval(this.pendingPreviewSyncPollTimer);
@@ -1837,6 +1835,14 @@ $
         }
       }
     }, 100);
+  }
+
+  private schedulePreviewHighlightRevert() {
+    this.clearPendingPreviewRevert();
+    this.pendingPreviewRevertTimer = window.setTimeout(() => {
+      this.pendingPreviewRevertTimer = null;
+      this.revertSyncText();
+    }, this.previewHighlightVisibleMs);
   }
 
   private revertSyncText() {
@@ -1858,6 +1864,13 @@ $
     if (this.pendingPreviewSyncPollTimer) {
       window.clearInterval(this.pendingPreviewSyncPollTimer);
       this.pendingPreviewSyncPollTimer = null;
+    }
+  }
+
+  private clearPendingPreviewRevert() {
+    if (this.pendingPreviewRevertTimer) {
+      window.clearTimeout(this.pendingPreviewRevertTimer);
+      this.pendingPreviewRevertTimer = null;
     }
   }
 
