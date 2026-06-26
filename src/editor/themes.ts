@@ -61,7 +61,7 @@ export const typstFontHighlighting = HighlightStyle.define([
   { tag: [tags.operator, tags.punctuation], fontFamily: "var(--editor-code-font) !important" },
   { tag: tags.heading, scale: 1.15, fontFamily: "'MiSans Latin', var(--active-unicode-font, 'MiSans Khmer'), sans-serif !important" },
   { tag: tags.comment, fontFamily: "'MiSans Latin', var(--active-unicode-font, 'MiSans Khmer'), sans-serif !important" },
-  { tag: tags.string, fontFamily: "'MiSans Latin', var(--active-unicode-font, 'MiSans Khmer'), sans-serif !important" },
+  { tag: tags.string, fontFamily: "var(--editor-code-font) !important" },
   { tag: tags.content, fontFamily: "'MiSans Latin', var(--active-unicode-font, 'MiSans Khmer'), sans-serif !important" },
   { tag: [tags.literal, tags.monospace], fontFamily: "var(--editor-code-font) !important", color: "var(--ui-monospace-color) !important" },
   { tag: [tags.strong, tags.emphasis, tags.list, tags.link, tags.url], fontFamily: "'MiSans Latin', var(--active-unicode-font, 'MiSans Khmer'), sans-serif !important" }
