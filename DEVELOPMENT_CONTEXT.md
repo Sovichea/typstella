@@ -11,6 +11,7 @@ This file serves as a consolidated reference for the architectural decisions, pa
 - **Core Files**:
   - `index.html`: Single-page DOM scaffold. `src/main.ts` binds hardcoded element IDs directly, so DOM ID changes must be paired with controller updates.
   - `src/main.ts`: Main app orchestrator (`TypstryWorkspaceController`), workspace/tabs, commands, preview sync, WYSIWYM mode, diagnostics, localStorage state.
+  - `src/settings.ts`: Versioned application-settings schema, defaults, validation, and numeric bounds.
   - `src/components/explorer.ts`: Recursive workspace file tree, inline create/rename input, direct `read_workspace_dir` IPC use.
   - `src/compiler/lsp.ts`: Tinymist JSON-RPC client over Tauri IPC events/commands, not a browser WebSocket.
   - `src/editor/typstLanguage.ts`: StreamLanguage-based parser for Typst.
@@ -24,16 +25,17 @@ This file serves as a consolidated reference for the architectural decisions, pa
   - `src-tauri/capabilities/default.json`: Grants broad FS/plugin permissions; frontend assumes these commands are available.
 
 ### A. Frontend Controller Flow (`src/main.ts`)
-- `bootstrap()` order matters: recent projects, CodeMirror, explorer, toolbar, events/resizers/theme/wrap/context menu/logs, show window, `ensureDependencies()`, then `initLsp()`.
+- `bootstrap()` order matters: load settings, recent projects, CodeMirror, apply settings, explorer/toolbars/events/settings UI, show window, `ensureDependencies()`, then `initLsp()`.
 - App visibility: welcome/editor/preview/explorer are toggled by `updateWorkspaceViewportVisibility()` based on `workspaceRootPath` and `activeFilePath`.
 - Open tabs are in-memory `EditorTab` objects with `content`, `savedContent`, dirty flag, preview root, versions, selection, and scroll positions.
 - Workspace persistence is localStorage-only under `typstry-workspace-${workspaceRootPath}`. It stores tab paths/selection/scroll/split widths, then reloads content from disk; unsaved tab contents are not persisted across app restart.
 - Recent projects are localStorage-only under `typstry-recent-projects`, max 5 entries.
-- Word wrap and theme are localStorage settings (`typstry-word-wrap`, `typstry-theme`) wired through CodeMirror compartments and CSS variables.
+- Application preferences live in the platform app-config `settings.json`; `typstry-word-wrap` and `typstry-theme` localStorage keys are migration inputs only and are removed after the first successful JSON save.
 - Unicode editor font detection scans active text for non-ASCII script ranges; Khmer bundled fonts load via `FontFace`, other script candidates depend on installed fonts and may require restart.
 
 ### B. Tauri IPC Contract (`src-tauri/src/lib.rs`)
 - File commands: `read_workspace_file`, `save_workspace_file`, `create_workspace_dir`, `rename_workspace_file`, `copy_workspace_file`, `read_workspace_dir`, `move_to_trash`, `reveal_in_explorer`.
+- Settings commands: `load_app_settings` and `save_app_settings`; Rust owns config-path resolution and pretty JSON disk I/O while TypeScript owns schema normalization.
 - Preview/document commands: `resolve_preview_main`, `check_typst_document`, `compile_typst_document`.
 - Toolchain/LSP commands: `ensure_toolchain`, `start_tinymist_lsp`, `send_lsp_message`.
 - `ensure_toolchain()` downloads Windows `tinymist.exe` v0.15.2 and `typst.exe` v0.15.0 into Tauri app local data via PowerShell. This path is Windows-centric.
@@ -57,6 +59,7 @@ This file serves as a consolidated reference for the architectural decisions, pa
 - Fallback diagnostics run via `typst compile --diagnostic-format short --format svg` after each sync and are ignored if version/path is stale.
 - LSP diagnostics are ignored for stale versions, temporary preview-only versions, package/preview files, and the known multi-image page template message.
 - Forward preview sync is a controlled hack: selected word is temporarily wrapped with `#text(fill:rgb("#fe0102"))[...]`, sent as a preview-only version, scrolled into view in the iframe, then reverted to editor text.
+- Preview root resolution checks the active tab's in-memory content first: renderable active files preview themselves even when `main.typ` exists; declaration-only/library files fall back to the nearest `main.typ`, `index.typ`, or `document.typ`.
 - Preview highlight only runs when `activeFilePath === previewRootPath`; library/template files receive diagnostics but no live preview highlight.
 - Highlightable ranges exclude comments, raw inline code, math, block comments, and Typst code-expression spans (`#set`, `#show`, function calls, etc.).
 - Inverse sync maps Tinymist `window/showDocument` source positions back through the temporary highlight mapping when present, then optionally refines the collapsed CodeMirror cursor using the clicked iframe text node/offset. Preview HTML is mounted as `srcdoc` with a `<base>` tag when available so the iframe DOM stays readable while Tinymist assets still resolve. It does not trigger forward preview sync/highlighting.
@@ -114,6 +117,12 @@ This file serves as a consolidated reference for the architectural decisions, pa
 - Themes define a custom `monospace` hex value to ensure that equation/code block text matches the active editor theme palette.
 - Cursor, selection, rainbow brackets, matching bracket outlines, and Typst function/reference-variable tokens are theme-scoped CSS variables. Keep their highlighting as narrow override layers using `--editor-function-color` and `--editor-variable-color`; do not replace the whole syntax theme.
 
+### Settings Persistence and Runtime Application
+- `src/settings.ts` is the canonical v1 schema. Always normalize loaded or edited values; do not trust manually edited JSON or bypass numeric bounds.
+- `settings.json` is global application configuration under Tauri's `app_config_dir`, not a workspace file. The UI shows and reveals the resolved path.
+- Appearance/editor/preview changes apply immediately. CodeMirror features are reconfigured through dedicated compartments; never reconstruct the editor to apply a setting.
+- Settings writes are debounced. Invalid JSON falls back in memory without silently overwriting the user's file until the user changes or resets a setting.
+
 ---
 
 ## 4. Architectural Lessons & Pitfalls Log
@@ -132,10 +141,11 @@ This file serves as a consolidated reference for the architectural decisions, pa
 | **Inverse Sync Selection** | Selecting a word around the mapped preview-click cursor. | Use a collapsed CodeMirror cursor at the exact mapped `window/showDocument` position. | Word expansion is unreliable for Khmer, punctuation, short words, and numbers; source position accuracy is the only stable contract. |
 | **Coarse Preview Source Spans** | Trusting Tinymist `window/showDocument` character offsets as exact inside rendered text runs, or guessing with parenthetical heuristics. | Mount preview HTML through same-origin `srcdoc`, capture clicked iframe text node/offset, and search that text within Tinymist's reported source line. | Tinymist can map a whole rendered run to an earlier inline span; DOM text context is needed to place the cursor after inline constructs. |
 | **Preview Highlight Sync** | Persisting the red `#text(...)` wrapper as document content. | Track preview-only versions, suppress diagnostics briefly, then immediately send a revert `didChange`. | Forward sync mutates only Tinymist's transient document state; saved/editor text must stay untouched. |
-| **Preview Root Files** | Starting preview from any opened `.typ` file. | `resolve_preview_main` chooses `main.typ`, `index.typ`, `document.typ`, nearest workspace ancestor candidate, or renderable current file. | Template/library files can be active editor files but should not always become the preview root. |
+| **Preview Root Files** | Resolving ancestor `main.typ` before inspecting the active file. | Prefer renderable in-memory active content, then fall back to nearest `main.typ`, `index.typ`, or `document.typ`. | Otherwise merely having `main.typ` prevents every other renderable file from previewing itself; declaration-only libraries still need the entry-point fallback. |
 | **Workspace Restore** | Assuming unsaved tabs survive restart. | Restore tab paths and reload file contents from disk. | `localStorage` stores layout/selection only; dirty content is intentionally not serialized. |
 | **Export PDF Action** | Trusting SVG preview compilation to satisfy "Export PDF". | `compile_typst_document` now compiles `.stem.export.typ` to `file_stem.pdf` and returns that PDF path. | Preview SVG and export PDF are separate workflows; keep future preview changes out of the export command. |
 | **Function Highlighting Themes** | Relying on third-party CodeMirror themes where function tokens can match content color, or overriding broad syntax layers. | Set per-theme `--editor-function-color` and add only a narrow function-token highlighter after theme/font layers. | This preserves existing theme syntax while making Typst functions distinct from prose/content across all themes. |
 | **Markup Content Blocks** | Ignoring `]` in markup mode. | Detect `]` in markup mode and pop `[` from the bracket stack. | Without this, the parser remained permanently trapped in markup mode after inline content blocks (like `[*Hello*]`), preventing function calls on subsequent lines from being highlighted. |
 | **Function Bold Styling** | Bold function names (`fontWeight: "700"`). | Remove bold weight styling from all function highlights. | The user requested normal font weight for functions. |
 | **Contextual Typst Highlighting** | Giving every `#` or identifier one fixed tag and styling only markup delimiters. | Track markup ranges, exclude trailing labels, classify `#` from its following expression, and tag references separately from declarations. | `StreamLanguage` styles only emitted spans; `#emph`, `#values.at(0)`, strings, keywords, heading whitespace, and labels require explicit semantic boundaries. |
+| **Application Settings** | Keeping theme/wrap in scattered localStorage keys or rebuilding CodeMirror for each preference. | Normalize one versioned `settings.json`, persist it through Rust IPC, and apply editor toggles through compartments. | Native config paths are platform-specific; schema validation, migration, debounced writes, and live reconfiguration must remain separate concerns. |

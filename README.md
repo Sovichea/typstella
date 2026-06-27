@@ -22,6 +22,7 @@ A lightweight, local-first Typst editor with seamless Code and WYSIWYM toggles, 
 * **True Local-First Experience**: No cloud dependencies. Everything compiles instantly on your local machine.
 * **Live PDF Preview**: Powered by the highly optimized Tinymist LSP running in a Rust background process with bidirectional scroll sync.
 * **Focus-Driven UI**: A custom, frameless window design, persistent multi-tab workspace state (preserving open tabs, split ratios, and cursor positions), and integrated native-feel search and replace.
+* **Native Settings System**: A compact settings panel with live editor reconfiguration and a versioned `settings.json` stored in the platform application-config directory.
 * **Context-Aware Editor & Bracket Colorizer**: Implements intelligent syntax recognition, skipping bracket coloring inside comments, strings, and equations. Integrates theme-aware monospace coloring for raw code/equations, nested function coloring without requiring `#` prefixes, and precise parsing of escaped symbols (like `\$` for literal dollars and ignoring URL comments).
 * **Blazing Fast**: Built on Tauri v2 and Bun, resulting in a tiny memory footprint compared to Electron-based editors.
 
@@ -30,7 +31,39 @@ A lightweight, local-first Typst editor with seamless Code and WYSIWYM toggles, 
 * `Ctrl + K`, `Ctrl + O`: Open Workspace
 * `Ctrl + B`: Toggle Explorer Sidebar
 * `Ctrl + M`: Switch Layout (Code vs WYSIWYM)
+* `Ctrl + ,`: Open Settings
+* `Alt + Z`: Toggle Word Wrap
 * `Ctrl + ` `: Toggle Log Console
+
+## Settings
+
+Open Settings from **File → Settings**, the status bar, or `Ctrl + ,`. Changes apply immediately and are persisted to `settings.json`; the panel displays the exact platform-specific file path and can reveal it in the system file manager.
+
+```json
+{
+  "version": 1,
+  "appearance": {
+    "theme": "default",
+    "editorFontSize": 14,
+    "editorLineHeight": 1.7
+  },
+  "editor": {
+    "wordWrap": true,
+    "tabSize": 2,
+    "lineNumbers": true,
+    "highlightActiveLine": true,
+    "autoCloseBrackets": true,
+    "indentationGuides": true
+  },
+  "preview": {
+    "cursorSync": true,
+    "syncDebounceMs": 120,
+    "highlightDurationMs": 2200
+  }
+}
+```
+
+Invalid or missing fields fall back to bounded defaults. Existing theme and word-wrap values from older releases are migrated from `localStorage` the first time the settings file is created.
 
 ## Tech Stack & Architecture
 * **Core Framework**: [Tauri v2](https://v2.tauri.app/)
@@ -123,9 +156,9 @@ The compiled binaries will be placed in `src-tauri/target/release/`.
   - [x] Nested function/identifier highlighting without `#` in code mode
   - [x] Escaped character handling (correctly parses `\$` as literal and prevents false comment/reference triggers)
   - [x] Escaped symbol auto-closing prevention
-- [ ] Settings panel / configuration file (`settings.json`)
-  - [ ] UI for editing user preferences
-  - [ ] Persistent settings storage
+- [x] Settings panel / configuration file (`settings.json`)
+  - [x] UI for appearance, editor, and preview preferences
+  - [x] Native persistent settings storage and legacy preference migration
 - [ ] Integrate Khmer word segmentation engine for accurate text highlighting and selection in the preview pane
   - [ ] Research and integrate WASM segmentation engine
   - [ ] Hook engine into preview highlight logic
