@@ -115,6 +115,7 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
 fn resolve_preview_main(
     file_path: String,
     workspace_root_path: Option<String>,
+    file_contents: Option<String>,
 ) -> Result<Option<String>, String> {
     let path = std::path::PathBuf::from(&file_path);
     if path.extension().and_then(|ext| ext.to_str()) != Some("typ") {
@@ -126,6 +127,16 @@ fn resolve_preview_main(
         if lower_name == "main.typ" || lower_name == "index.typ" || lower_name == "document.typ" {
             return Ok(Some(path.to_string_lossy().to_string()));
         }
+    }
+
+    let contents = match file_contents {
+        Some(contents) => contents,
+        None => {
+            std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?
+        }
+    };
+    if typst_file_has_renderable_content(&contents) {
+        return Ok(Some(path.to_string_lossy().to_string()));
     }
 
     let workspace_root = workspace_root_path.map(std::path::PathBuf::from);
@@ -150,13 +161,7 @@ fn resolve_preview_main(
         }
     }
 
-    let contents =
-        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?;
-    if typst_file_has_renderable_content(&contents) {
-        Ok(Some(path.to_string_lossy().to_string()))
-    } else {
-        Ok(None)
-    }
+    Ok(None)
 }
 
 fn typst_file_has_renderable_content(contents: &str) -> bool {
@@ -332,6 +337,65 @@ async fn compile_typst_document(
     }
 
     Ok(output_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod preview_main_tests {
+    use super::resolve_preview_main;
+
+    #[test]
+    fn renderable_active_file_takes_priority_over_workspace_main() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let main_path = workspace.path().join("main.typ");
+        let chapter_path = workspace.path().join("chapter.typ");
+        std::fs::write(&main_path, "Main document").expect("write main");
+        std::fs::write(&chapter_path, "Chapter document").expect("write chapter");
+
+        let resolved = resolve_preview_main(
+            chapter_path.to_string_lossy().to_string(),
+            Some(workspace.path().to_string_lossy().to_string()),
+            None,
+        )
+        .expect("resolve preview");
+
+        assert_eq!(resolved, Some(chapter_path.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn workspace_main_remains_fallback_for_declaration_only_file() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let main_path = workspace.path().join("main.typ");
+        let library_path = workspace.path().join("library.typ");
+        std::fs::write(&main_path, "Main document").expect("write main");
+        std::fs::write(&library_path, "#let helper = 1").expect("write library");
+
+        let resolved = resolve_preview_main(
+            library_path.to_string_lossy().to_string(),
+            Some(workspace.path().to_string_lossy().to_string()),
+            None,
+        )
+        .expect("resolve preview");
+
+        assert_eq!(resolved, Some(main_path.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn in_memory_contents_determine_renderability() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let main_path = workspace.path().join("main.typ");
+        let draft_path = workspace.path().join("draft.typ");
+        std::fs::write(&main_path, "Main document").expect("write main");
+        std::fs::write(&draft_path, "#let draft = true").expect("write draft");
+
+        let resolved = resolve_preview_main(
+            draft_path.to_string_lossy().to_string(),
+            Some(workspace.path().to_string_lossy().to_string()),
+            Some("Unsaved rendered draft".to_string()),
+        )
+        .expect("resolve preview");
+
+        assert_eq!(resolved, Some(draft_path.to_string_lossy().to_string()));
+    }
 }
 
 #[tauri::command]

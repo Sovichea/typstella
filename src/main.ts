@@ -1490,7 +1490,8 @@ $
     this.activeFilePath = path;
     this.previewRootPath = await invoke<string | null>("resolve_preview_main", {
       filePath: path,
-      workspaceRootPath: this.workspaceRootPath
+      workspaceRootPath: this.workspaceRootPath,
+      fileContents: tab.content
     });
     tab.previewRootPath = this.previewRootPath;
     this.clearPendingLspSync();
