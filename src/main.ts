@@ -85,7 +85,7 @@ type EditorTab = {
   foldRanges: EditorFoldRange[] | null;
 };
 
-const systemMonospaceFontStack = "ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace";
+const systemMonospaceFontStack = "'DejaVu Sans Mono', ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace";
 
 const editorUnicodeFontRules: Array<EditorFontCandidate & { pattern: RegExp }> = [
   {

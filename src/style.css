@@ -10,6 +10,34 @@
   font-weight: bold;
 }
 
+@font-face {
+  font-family: 'DejaVu Sans Mono';
+  src: url('./assets/fonts/DejaVuSansMono-Regular.woff2') format('woff2');
+  font-weight: normal;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'DejaVu Sans Mono';
+  src: url('./assets/fonts/DejaVuSansMono-Bold.woff2') format('woff2');
+  font-weight: bold;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'DejaVu Sans Mono';
+  src: url('./assets/fonts/DejaVuSansMono-Oblique.woff2') format('woff2');
+  font-weight: normal;
+  font-style: italic;
+}
+
+@font-face {
+  font-family: 'DejaVu Sans Mono';
+  src: url('./assets/fonts/DejaVuSansMono-BoldOblique.woff2') format('woff2');
+  font-weight: bold;
+  font-style: italic;
+}
+
 :root {
   --ui-bg: #fcfcfc;
   --ui-text: #333333;
@@ -32,19 +60,20 @@
   --editor-bracket-2: #22863a;
   --editor-bracket-3: #d73a49;
   --editor-bracket-4: #b31d28;
+  --editor-variable-color: #5b21b6;
   --editor-function-color: #0f766e;
 }
 
 .bracket-color-0,
-.bracket-color-0 * { color: var(--editor-bracket-0) !important; font-weight: bold !important; }
+.bracket-color-0 * { color: var(--editor-bracket-0) !important; }
 .bracket-color-1,
-.bracket-color-1 * { color: var(--editor-bracket-1) !important; font-weight: bold !important; }
+.bracket-color-1 * { color: var(--editor-bracket-1) !important; }
 .bracket-color-2,
-.bracket-color-2 * { color: var(--editor-bracket-2) !important; font-weight: bold !important; }
+.bracket-color-2 * { color: var(--editor-bracket-2) !important; }
 .bracket-color-3,
-.bracket-color-3 * { color: var(--editor-bracket-3) !important; font-weight: bold !important; }
+.bracket-color-3 * { color: var(--editor-bracket-3) !important; }
 .bracket-color-4,
-.bracket-color-4 * { color: var(--editor-bracket-4) !important; font-weight: bold !important; }
+.bracket-color-4 * { color: var(--editor-bracket-4) !important; }
 
 * {
   box-sizing: border-box;

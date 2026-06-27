@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { lineNumbers, highlightActiveLineGutter, highlightActiveLine, drawSelection, dropCursor, keymap, EditorView } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { search, searchKeymap } from "@codemirror/search";
-import { baseEditorLayoutTheme, editorFontTheme, typstColorHighlighting, typstFontHighlighting, typstFunctionHighlighting } from "./themes";
+import { baseEditorLayoutTheme, editorFontTheme, typstColorHighlighting, typstFontHighlighting, typstFunctionHighlighting, typstSemanticHighlighting, typstVariableHighlighting } from "./themes";
 import { codeFolding, foldGutter, foldKeymap, foldService, syntaxHighlighting } from "@codemirror/language";
 import { typstLanguage } from "./typstLanguage";
 import { editorDiagnosticsExtension } from "./diagnostics";
@@ -112,7 +112,9 @@ export function getThemeExtension(themeName: string): Extension {
     }
     
     baseExtensions.push(syntaxHighlighting(typstFontHighlighting));
+    baseExtensions.push(syntaxHighlighting(typstVariableHighlighting));
     baseExtensions.push(syntaxHighlighting(typstFunctionHighlighting));
+    baseExtensions.push(syntaxHighlighting(typstSemanticHighlighting));
     return baseExtensions;
 }
 
@@ -138,6 +140,7 @@ type ThemeColorVariables = {
   bracketMismatchBg: string;
   brackets: [string, string, string, string, string];
   functionColor: string;
+  variableColor: string;
 };
 
 const lightEditorVisibility = {
@@ -153,8 +156,9 @@ const lightEditorVisibility = {
   bracketMatchOutline: "#005cc5",
   bracketMismatchBg: "rgba(215, 58, 73, 0.16)",
   brackets: ["#005cc5", "#6f42c1", "#22863a", "#d73a49", "#b31d28"],
-  functionColor: "#0f766e"
-} satisfies Pick<ThemeColorVariables, "cursor" | "cursorContrast" | "cursorShadow" | "cursorGlow" | "cursorContrastShadow" | "cursorContrastGlow" | "selection" | "selectionFocus" | "selectionOutline" | "bracketMatchOutline" | "bracketMismatchBg" | "brackets" | "functionColor">;
+  functionColor: "#005cc5",
+  variableColor: "#5b21b6"
+} satisfies Pick<ThemeColorVariables, "cursor" | "cursorContrast" | "cursorShadow" | "cursorGlow" | "cursorContrastShadow" | "cursorContrastGlow" | "selection" | "selectionFocus" | "selectionOutline" | "bracketMatchOutline" | "bracketMismatchBg" | "brackets" | "functionColor" | "variableColor">;
 
 const darkEditorVisibility = {
   cursor: "#79c0ff",
@@ -169,12 +173,13 @@ const darkEditorVisibility = {
   bracketMatchOutline: "#79c0ff",
   bracketMismatchBg: "rgba(255, 123, 114, 0.22)",
   brackets: ["#79c0ff", "#d2a8ff", "#7ee787", "#ffa657", "#ff7b72"],
-  functionColor: "#d2a8ff"
-} satisfies Pick<ThemeColorVariables, "cursor" | "cursorContrast" | "cursorShadow" | "cursorGlow" | "cursorContrastShadow" | "cursorContrastGlow" | "selection" | "selectionFocus" | "selectionOutline" | "bracketMatchOutline" | "bracketMismatchBg" | "brackets" | "functionColor">;
+  functionColor: "#79c0ff",
+  variableColor: "#d2a8ff"
+} satisfies Pick<ThemeColorVariables, "cursor" | "cursorContrast" | "cursorShadow" | "cursorGlow" | "cursorContrastShadow" | "cursorContrastGlow" | "selection" | "selectionFocus" | "selectionOutline" | "bracketMatchOutline" | "bracketMismatchBg" | "brackets" | "functionColor" | "variableColor">;
 
 const themeColors: Record<string, ThemeColorVariables> = {
-  default: { bg: "#fcfcfc", text: "#333333", border: "#e0e0e0", hover: "#e4e6f1", select: "#d7e8f5", header: "#616161", mode: "light", monospace: "#0f766e", ...lightEditorVisibility },
-  githubLight: { bg: "#ffffff", text: "#24292f", border: "#d0d7de", hover: "#f3f4f6", select: "#ddf4ff", header: "#57606a", mode: "light", monospace: "#0550ae", ...lightEditorVisibility, functionColor: "#8250df" },
+  default: { bg: "#fcfcfc", text: "#333333", border: "#e0e0e0", hover: "#e4e6f1", select: "#d7e8f5", header: "#616161", mode: "light", monospace: "#005cc5", ...lightEditorVisibility },
+  githubLight: { bg: "#ffffff", text: "#24292f", border: "#d0d7de", hover: "#f3f4f6", select: "#ddf4ff", header: "#57606a", mode: "light", monospace: "#0550ae", ...lightEditorVisibility, functionColor: "#0969da", variableColor: "#6639ba" },
   githubDark: { bg: "#0d1117", text: "#c9d1d9", border: "#30363d", hover: "#161b22", select: "#21262d", header: "#8b949e", mode: "dark", monospace: "#a5d6ff", ...darkEditorVisibility },
   dracula: {
     bg: "#282a36", text: "#f8f8f2", border: "#44475a", hover: "#44475a", select: "#6272a4", header: "#6272a4", mode: "dark", monospace: "#8be9fd",
@@ -186,7 +191,8 @@ const themeColors: Record<string, ThemeColorVariables> = {
     bracketMatchOutline: "#8be9fd",
     bracketMismatchBg: "rgba(255, 85, 85, 0.22)",
     brackets: ["#8be9fd", "#ff79c6", "#50fa7b", "#f1fa8c", "#ffb86c"],
-    functionColor: "#50fa7b"
+    functionColor: "#8be9fd",
+    variableColor: "#bd93f9"
   },
   material: {
     bg: "#263238", text: "#eeffff", border: "#37474f", hover: "#2c3b41", select: "#314549", header: "#546e7a", mode: "dark", monospace: "#80cbc4",
@@ -198,7 +204,8 @@ const themeColors: Record<string, ThemeColorVariables> = {
     bracketMatchOutline: "#80cbc4",
     bracketMismatchBg: "rgba(255, 83, 112, 0.22)",
     brackets: ["#80cbc4", "#c792ea", "#c3e88d", "#ffcb6b", "#ff5370"],
-    functionColor: "#c792ea"
+    functionColor: "#82aaff",
+    variableColor: "#c792ea"
   },
   materialLight: {
     bg: "#fafafa", text: "#90a4ae", border: "#e0e0e0", hover: "#f0f0f0", select: "#e0e0e0", header: "#90a4ae", mode: "light", monospace: "#39adb5",
@@ -210,7 +217,8 @@ const themeColors: Record<string, ThemeColorVariables> = {
     bracketMatchOutline: "#00796b",
     bracketMismatchBg: "rgba(198, 40, 40, 0.14)",
     brackets: ["#00796b", "#5e35b1", "#2e7d32", "#c62828", "#ef6c00"],
-    functionColor: "#7b1fa2"
+    functionColor: "#005cc5",
+    variableColor: "#6a1b9a"
   },
   nord: {
     bg: "#2e3440", text: "#d8dee9", border: "#434c5e", hover: "#3b4252", select: "#434c5e", header: "#4c566a", mode: "dark", monospace: "#88c0d0",
@@ -222,9 +230,10 @@ const themeColors: Record<string, ThemeColorVariables> = {
     bracketMatchOutline: "#88c0d0",
     bracketMismatchBg: "rgba(191, 97, 106, 0.22)",
     brackets: ["#88c0d0", "#b48ead", "#a3be8c", "#ebcb8b", "#bf616a"],
-    functionColor: "#b48ead"
+    functionColor: "#88c0d0",
+    variableColor: "#b48ead"
   },
-  oneDark: { bg: "#282c34", text: "#abb2bf", border: "#181a1f", hover: "#2c313a", select: "#292d3e", header: "#5c6370", mode: "dark", monospace: "#56b6c2", ...darkEditorVisibility, functionColor: "#61afef" }
+  oneDark: { bg: "#282c34", text: "#abb2bf", border: "#181a1f", hover: "#2c313a", select: "#292d3e", header: "#5c6370", mode: "dark", monospace: "#56b6c2", ...darkEditorVisibility, functionColor: "#61afef", variableColor: "#c678dd" }
 };
 
 export async function applyUIThemeVariables(themeName: string) {
@@ -251,6 +260,7 @@ export async function applyUIThemeVariables(themeName: string) {
         document.documentElement.style.setProperty(`--editor-bracket-${index}`, color);
     });
     document.documentElement.style.setProperty("--editor-function-color", colors.functionColor);
+    document.documentElement.style.setProperty("--editor-variable-color", colors.variableColor);
     
     try {
         await getCurrentWindow().setTheme(colors.mode);

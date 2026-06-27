@@ -91,10 +91,12 @@ This file serves as a consolidated reference for the architectural decisions, pa
   - Pushed as `[` if matched in code mode (represents a code content block; returns `"punctuation"`, colored).
   - Pushed as `"[standalone]"` if matched in markup/text mode (returns `"content"`, not colored).
   - Popping matches either `[` or `[standalone]`, preserving correct token types.
+  - In markup mode, matching `]` checks if the stack top is `[` and pops it, ensuring the parser correctly returns to code mode after inline content blocks (like `[*Hello*]`).
 
 ### D. Keywords and Functions in Nested Code
 - **Without Hash (`#`)**: Inside code mode (e.g. inside function arguments), keywords like `none`, `auto`, `true`, `false`, `let`, etc. are highlighted without requiring the `#` prefix.
-- **Nested Functions**: Functions called inside code blocks or parameters (e.g., `cetz.canvas(...)` or `draw-line(...)`) are matched using `/[A-Za-z_][\w.-]*(?=\s*(?:\(|\[))/` and highlighted as function names. Note that function names in code mode can contain hyphens and dots.
+- **Nested Functions**: Functions called inside code blocks or parameters (e.g., `cetz.canvas(...)` or `draw-line(...)`) are matched using `/[A-Za-z_][\w.-]*(?=\s*(?:\(|\[))/` and highlighted as function names. Note that function names in code mode can contain hyphens and dots. All bold styling (`fontWeight: "700"`) has been removed from functions to keep function name rendering clean and consistent.
+- **Strong & Emphasis Styling**: Strong (`*text*`) and Emphasis (`_text_`) markup are explicitly styled with `fontWeight: "bold"` and `fontStyle: "italic"` respectively in the color theme style definition.
 
 ### E. Escape Sequences & Edge Cases
 - **High-Priority Escape Matching**: Escaped characters (`\\.` like `\$`) are parsed first. They return `"content"` (or `null` in code), ensuring a literal `\$` does not prematurely trigger or close equation blocks.
@@ -110,7 +112,7 @@ This file serves as a consolidated reference for the architectural decisions, pa
 ## 3. UI Theme System
 - CSS custom variables (`--ui-bg`, `--ui-text`, `--ui-monospace-color`, etc.) are updated dynamically on theme switch via `applyUIThemeVariables` in `src/editor/extensions.ts`.
 - Themes define a custom `monospace` hex value to ensure that equation/code block text matches the active editor theme palette.
-- Cursor, selection, rainbow brackets, matching bracket outlines, and Typst function tokens are theme-scoped CSS variables. Keep function highlighting as a narrow `typstFunctionHighlighting` layer using `--editor-function-color`; do not replace the whole syntax theme.
+- Cursor, selection, rainbow brackets, matching bracket outlines, and Typst function/reference-variable tokens are theme-scoped CSS variables. Keep their highlighting as narrow override layers using `--editor-function-color` and `--editor-variable-color`; do not replace the whole syntax theme.
 
 ---
 
@@ -134,3 +136,6 @@ This file serves as a consolidated reference for the architectural decisions, pa
 | **Workspace Restore** | Assuming unsaved tabs survive restart. | Restore tab paths and reload file contents from disk. | `localStorage` stores layout/selection only; dirty content is intentionally not serialized. |
 | **Export PDF Action** | Trusting SVG preview compilation to satisfy "Export PDF". | `compile_typst_document` now compiles `.stem.export.typ` to `file_stem.pdf` and returns that PDF path. | Preview SVG and export PDF are separate workflows; keep future preview changes out of the export command. |
 | **Function Highlighting Themes** | Relying on third-party CodeMirror themes where function tokens can match content color, or overriding broad syntax layers. | Set per-theme `--editor-function-color` and add only a narrow function-token highlighter after theme/font layers. | This preserves existing theme syntax while making Typst functions distinct from prose/content across all themes. |
+| **Markup Content Blocks** | Ignoring `]` in markup mode. | Detect `]` in markup mode and pop `[` from the bracket stack. | Without this, the parser remained permanently trapped in markup mode after inline content blocks (like `[*Hello*]`), preventing function calls on subsequent lines from being highlighted. |
+| **Function Bold Styling** | Bold function names (`fontWeight: "700"`). | Remove bold weight styling from all function highlights. | The user requested normal font weight for functions. |
+| **Contextual Typst Highlighting** | Giving every `#` or identifier one fixed tag and styling only markup delimiters. | Track markup ranges, exclude trailing labels, classify `#` from its following expression, and tag references separately from declarations. | `StreamLanguage` styles only emitted spans; `#emph`, `#values.at(0)`, strings, keywords, heading whitespace, and labels require explicit semantic boundaries. |
