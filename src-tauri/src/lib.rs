@@ -3,40 +3,11 @@ use serde_json::json;
 use std::os::windows::process::CommandExt;
 use tauri::{Emitter, Manager};
 
+mod toolchain;
+use toolchain::resolve_executable;
+
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-fn managed_executable_path(data_dir: &std::path::Path, name: &str) -> std::path::PathBuf {
-    #[cfg(windows)]
-    let file_name = format!("{}.exe", name);
-    #[cfg(not(windows))]
-    let file_name = name.to_string();
-
-    data_dir.join(file_name)
-}
-
-fn executable_available(executable: &std::path::Path) -> bool {
-    let mut command = std::process::Command::new(executable);
-    #[cfg(windows)]
-    command.creation_flags(CREATE_NO_WINDOW);
-
-    command
-        .arg("--version")
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
-fn resolve_executable(data_dir: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
-    let managed = managed_executable_path(data_dir, name);
-    if managed.is_file() {
-        return Some(managed);
-    }
-
-    let path_command = std::path::PathBuf::from(name);
-    executable_available(&path_command).then_some(path_command)
-}
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -421,6 +392,100 @@ async fn compile_typst_document(
     Ok(output_path.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+async fn compile_typst_preview(
+    app_handle: tauri::AppHandle,
+    source_code: String,
+    file_path: String,
+    preview_root_path: Option<String>,
+) -> Result<Vec<String>, String> {
+    use tauri::Manager;
+    let active_path = std::path::Path::new(&file_path);
+    let preview_path = preview_root_path
+        .as_deref()
+        .map(std::path::Path::new)
+        .unwrap_or(active_path);
+    let path = preview_path;
+    let preview_source = if preview_path == active_path {
+        source_code
+    } else {
+        std::fs::read_to_string(preview_path)
+            .map_err(|error| format!("Failed to read preview root: {}", error))?
+    };
+    let parent = path.parent().unwrap_or(std::path::Path::new(""));
+    let file_stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    let prefix = format!(".{}.typstry-preview-{}-", file_stem, nonce);
+    let input_path = parent.join(format!("{}.typ", prefix));
+    let output_pattern = parent.join(format!("{}{{0p}}.svg", prefix));
+    let data_dir = app_handle
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("Failed to get data dir: {}", error))?;
+    let typst_cmd = resolve_executable(&data_dir, "typst")
+        .ok_or_else(|| "Typst was not found in the app data directory or PATH.".to_string())?;
+
+    std::fs::write(&input_path, preview_source)
+        .map_err(|error| format!("Preview source write failed: {}", error))?;
+    let mut command = std::process::Command::new(&typst_cmd);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let output = command
+        .arg("compile")
+        .arg("--diagnostic-format")
+        .arg("short")
+        .arg("--format")
+        .arg("svg")
+        .arg(&input_path)
+        .arg(&output_pattern)
+        .output()
+        .map_err(|error| format!("Typst preview failed to start: {}", error));
+    let _ = std::fs::remove_file(&input_path);
+    let output = output?;
+
+    let mut page_paths: Vec<_> = std::fs::read_dir(parent)
+        .map_err(|error| format!("Failed to read compiled preview: {}", error))?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|candidate| {
+            candidate
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with(&prefix) && name.ends_with(".svg"))
+        })
+        .collect();
+    page_paths.sort();
+    if !output.status.success() {
+        for page in page_paths {
+            let _ = std::fs::remove_file(page);
+        }
+        return Err(String::from_utf8_lossy(&output.stderr).to_string());
+    }
+
+    let mut pages = Vec::with_capacity(page_paths.len());
+    let mut read_error = None;
+    for page in page_paths {
+        match std::fs::read_to_string(&page) {
+            Ok(contents) => pages.push(contents),
+            Err(error) if read_error.is_none() => {
+                read_error = Some(format!("Failed to read preview page: {}", error));
+            }
+            Err(_) => {}
+        }
+        let _ = std::fs::remove_file(page);
+    }
+    if let Some(error) = read_error {
+        return Err(error);
+    }
+    if pages.is_empty() {
+        return Err("Typst produced no SVG preview pages.".to_string());
+    }
+    Ok(pages)
+}
+
 #[cfg(test)]
 mod preview_main_tests {
     use super::resolve_preview_main;
@@ -481,76 +546,55 @@ mod preview_main_tests {
 }
 
 #[tauri::command]
-async fn ensure_toolchain(app_handle: tauri::AppHandle) -> Result<String, String> {
-    use tauri::Manager;
+async fn ensure_toolchain(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, LspState>,
+) -> Result<toolchain::ToolchainStatus, String> {
+    stop_lsp_process(&state).await;
     let data_dir = app_handle
         .path()
         .app_local_data_dir()
-        .map_err(|e| format!("Failed to get data dir: {}", e))?;
-    std::fs::create_dir_all(&data_dir).map_err(|e| format!("Failed to create data dir: {}", e))?;
+        .map_err(|error| format!("Failed to get data dir: {}", error))?;
+    toolchain::ensure(&data_dir).await
+}
 
-    if resolve_executable(&data_dir, "typst").is_some()
-        && resolve_executable(&data_dir, "tinymist").is_some()
-    {
-        return Ok("Toolchain is ready.".to_string());
+#[tauri::command]
+async fn get_toolchain_status(
+    app_handle: tauri::AppHandle,
+) -> Result<toolchain::ToolchainStatus, String> {
+    let data_dir = app_handle
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("Failed to get data dir: {}", error))?;
+    Ok(toolchain::status(&data_dir))
+}
+
+#[tauri::command]
+async fn list_typst_releases() -> Result<Vec<toolchain::TypstReleaseInfo>, String> {
+    toolchain::typst_releases().await
+}
+
+async fn stop_lsp_process(state: &tauri::State<'_, LspState>) {
+    state.generation.fetch_add(1, Ordering::SeqCst);
+    *state.tx.lock().unwrap() = None;
+    let existing_process = state.process.lock().unwrap().take();
+    if let Some(mut child) = existing_process {
+        let _ = child.kill().await;
     }
+}
 
-    #[cfg(not(windows))]
-    return Err(
-        "Typst and Tinymist must be installed and available in PATH on this platform.".to_string(),
-    );
-
-    #[cfg(windows)]
-    {
-        let script = format!(
-            r#"
-$ErrorActionPreference = 'Stop'
-$ProgressPreference = 'SilentlyContinue'
-
-$DataDir = "{}"
-
-if (!(Test-Path "$DataDir\tinymist.exe")) {{
-    Write-Host "Downloading Tinymist..."
-    curl.exe -L -o "$DataDir\tinymist.exe" "https://github.com/Myriad-Dreamin/tinymist/releases/download/v0.15.2/tinymist-win32-x64.exe"
-}}
-
-if (!(Test-Path "$DataDir\typst.exe")) {{
-    Write-Host "Downloading Typst..."
-    curl.exe -L -o "$DataDir\typst.zip" "https://github.com/typst/typst/releases/download/v0.15.0/typst-x86_64-pc-windows-msvc.zip"
-    Expand-Archive -Path "$DataDir\typst.zip" -DestinationPath "$DataDir\typst_extracted" -Force
-    Move-Item -Path "$DataDir\typst_extracted\typst-x86_64-pc-windows-msvc\typst.exe" -Destination "$DataDir\typst.exe" -Force
-    Remove-Item "$DataDir\typst.zip"
-    Remove-Item "$DataDir\typst_extracted" -Recurse -Force
-}}
-"#,
-            data_dir.to_string_lossy()
-        );
-
-        let script_path = data_dir.join("download_toolchain.ps1");
-        std::fs::write(&script_path, script)
-            .map_err(|e| format!("Failed to write script: {}", e))?;
-
-        let mut command = std::process::Command::new("powershell");
-        #[cfg(windows)]
-        command.creation_flags(CREATE_NO_WINDOW);
-
-        let output = command
-            .arg("-ExecutionPolicy")
-            .arg("Bypass")
-            .arg("-File")
-            .arg(&script_path)
-            .output()
-            .map_err(|e| format!("Failed to execute powershell: {}", e))?;
-
-        let _ = std::fs::remove_file(&script_path);
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Toolchain download failed: {}", stderr));
-        }
-
-        Ok("Toolchain downloaded successfully.".to_string())
-    }
+#[tauri::command]
+async fn install_typst_toolchain(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, LspState>,
+    version: String,
+) -> Result<toolchain::ToolchainStatus, String> {
+    stop_lsp_process(&state).await;
+    let data_dir = app_handle
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("Failed to get data dir: {}", error))?;
+    toolchain::install(&data_dir, &version).await
 }
 
 #[tauri::command]
@@ -571,6 +615,12 @@ async fn start_tinymist_lsp(
         .path()
         .app_local_data_dir()
         .map_err(|e| format!("Failed to get data dir: {}", e))?;
+    if !toolchain::compatible_versions(&data_dir) {
+        return Err(
+            "No stable Tinymist release matching the active Typst major/minor version is installed."
+                .to_string(),
+        );
+    }
     let tinymist_exe = resolve_executable(&data_dir, "tinymist")
         .ok_or_else(|| "Tinymist was not found in the app data directory or PATH.".to_string())?;
 
@@ -734,6 +784,7 @@ pub fn run() {
             load_app_settings,
             save_app_settings,
             compile_typst_document,
+            compile_typst_preview,
             check_typst_document,
             read_workspace_file,
             save_workspace_file,
@@ -745,6 +796,9 @@ pub fn run() {
             reveal_in_explorer,
             resolve_preview_main,
             ensure_toolchain,
+            get_toolchain_status,
+            list_typst_releases,
+            install_typst_toolchain,
             start_tinymist_lsp,
             send_lsp_message
         ])

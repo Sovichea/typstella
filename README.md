@@ -20,7 +20,8 @@ A lightweight, local-first Typst editor with seamless Code and WYSIWYM toggles, 
 * **Unicode-First Philosophy**: Traditional code editors treat complex non-Latin scripts as an afterthought. Typstry is engineered from the ground up to perfectly render and align Unicode text, ensuring seamless co-existence of code and complex scripts (like Khmer, Arabic, and Thai) without breaking cursor alignment or word-wrap.
 * **Rich IDE-Grade Autocompletion**: Smart, context-aware suggestions with LSP `sortText` prioritization (which correctly places specific parameters like `numbering` or `supplement` at the top of the list). Intelligently blocks autocomplete from triggering on brackets, punctuation, or spaces to ensure a distraction-free typing flow.
 * **True Local-First Experience**: No cloud dependencies. Everything compiles instantly on your local machine.
-* **Live PDF Preview**: Powered by the highly optimized Tinymist LSP running in a Rust background process with bidirectional scroll sync.
+* **Live PDF Preview**: Powered by Tinymist with bidirectional sync, with a Typst-compiled SVG fallback when no compatible Tinymist release exists.
+* **Managed Toolchain**: The settings panel lists stable Typst GitHub releases, installs the selected version in app-local data, and automatically selects the newest stable Tinymist from the same major/minor release line.
 * **Focus-Driven UI**: A custom, frameless window design, persistent multi-tab workspace state (preserving open tabs, split ratios, and cursor positions), and integrated native-feel search and replace.
 * **Native Settings System**: A compact settings panel with live editor reconfiguration and a versioned `settings.json` stored in the platform application-config directory.
 * **Context-Aware Editor & Bracket Colorizer**: Implements intelligent syntax recognition, skipping bracket coloring inside comments, strings, and equations. Integrates theme-aware monospace coloring for raw code/equations, nested function coloring without requiring `#` prefixes, and precise parsing of escaped symbols (like `\$` for literal dollars and ignoring URL comments).
@@ -61,11 +62,16 @@ Open Settings from **File → Settings**, the status bar, or `Ctrl + ,`. Changes
     "cursorSync": true,
     "syncDebounceMs": 120,
     "highlightDurationMs": 2200
+  },
+  "toolchain": {
+    "typstVersion": null
   }
 }
 ```
 
 Invalid or missing fields fall back to bounded defaults. Existing theme and word-wrap values from older releases are migrated from `localStorage` the first time the settings file is created.
+
+The Toolchain panel shows the active Typst and Tinymist versions. Only stable releases are offered; release candidates and other prereleases are excluded. Managed tools take precedence inside Typstry without replacing binaries installed through the system PATH or a package manager. If a matching stable Tinymist is unavailable, compilation, diagnostics, PDF export, and compiler-based preview remain available, while LSP and preview sync are disabled.
 
 MiSans Latin is bundled as the application UI font. Fira Mono Regular/Bold is bundled as the default code font; the code-font selector only lists monospace families registered by the font engine. Unicode fallback is configured separately as automatic detection, no fallback, or a detector-managed font.
 

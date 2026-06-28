@@ -344,6 +344,7 @@
           <button class="settings-nav-item active" type="button" data-settings-panel="appearance">Appearance</button>
           <button class="settings-nav-item" type="button" data-settings-panel="editor">Editor</button>
           <button class="settings-nav-item" type="button" data-settings-panel="preview">Preview</button>
+          <button class="settings-nav-item" type="button" data-settings-panel="toolchain">Toolchain</button>
         </nav>
         <div class="settings-panels">
           <div class="settings-panel active" data-settings-panel-content="appearance">
@@ -410,6 +411,23 @@
               <input id="settings-highlight-duration" type="number" min="500" max="10000" step="100">
               <small>Preview source highlight duration in milliseconds (500-10000).</small>
             </div>
+          </div>
+
+          <div class="settings-panel" data-settings-panel-content="toolchain">
+            <h3>Typst Toolchain</h3>
+            <div class="settings-notice" id="settings-toolchain-status" role="status" aria-live="polite"></div>
+            <div class="settings-field">
+              <label for="settings-typst-version">Typst version</label>
+              <select id="settings-typst-version"><option value="">Loading stable releases...</option></select>
+              <small id="settings-typst-current">Checking installed version...</small>
+            </div>
+            <div class="settings-field">
+              <label for="settings-tinymist-version">Tinymist version</label>
+              <input id="settings-tinymist-version" type="text" value="Checking..." readonly>
+              <small id="settings-tinymist-current">Selected automatically to match Typst.</small>
+            </div>
+            <p class="settings-help">Only stable releases are listed. Typstry installs selected tools in its application data directory and does not replace package-manager or PATH installations.</p>
+            <button id="settings-toolchain-refresh" class="settings-secondary-button" type="button">Refresh releases</button>
           </div>
         </div>
       </div>

@@ -1,5 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
-import { confirm, open, save } from "@tauri-apps/plugin-dialog";
+import { confirm, message, open, save } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -30,6 +30,7 @@ import { WorkspaceStateStore } from "./workspace/workspaceStateStore";
 import { RecentProjectsController } from "./workspace/recentProjectsController";
 import { EditorToolbarController } from "./editor/toolbarController";
 import { ContextMenuController } from "./components/contextMenuController";
+import { ToolchainController, type ToolchainStatus } from "./toolchain/toolchainController";
 
 type EditorMode = "CODE" | "WYSIWYM";
 type FallbackDiagnostic = {
@@ -68,9 +69,18 @@ export class TypstryWorkspaceController {
   private pendingLspSyncTimer: number | null = null;
   private pendingLspSyncPath: string | null = null;
   private pendingLspSyncText: string | null = null;
+  private fallbackPreviewTimer: number | null = null;
+  private fallbackPreviewGeneration = 0;
   private latestDocumentVersion = 1;
   private openTabs: EditorTab[] = [];
   private readonly settingsController = new SettingsController(settings => this.applySettingsToRuntime(settings));
+  private readonly toolchainController = new ToolchainController({
+    getSelectedVersion: () => this.settingsController.value.toolchain.typstVersion,
+    setSelectedVersion: version => this.settingsController.update(settings => {
+      settings.toolchain.typstVersion = version;
+    }),
+    onToolchainChanged: status => this.handleToolchainChanged(status)
+  });
 
   private editorInstance!: EditorView;
   private readonly editorFontManager = new EditorFontManager(() => this.editorInstance);
@@ -143,6 +153,7 @@ export class TypstryWorkspaceController {
     this.layoutController.initialize();
     this.initWordWrap();
     this.settingsController.initializePanel();
+    this.toolchainController.initialize();
     this.contextMenuController.initialize();
     this.logConsoleController.initialize();
     this.updateWorkspaceViewportVisibility();
@@ -150,8 +161,14 @@ export class TypstryWorkspaceController {
     await getCurrentWindow().show();
 
     this.setLspStatus({ kind: "starting", message: "Preparing toolchain" });
-    await this.ensureDependencies();
-    await this.initLsp();
+    const toolchain = await this.ensureDependencies();
+    await this.initLsp(Boolean(toolchain?.lspAvailable));
+    if (toolchain?.typstVersion && !toolchain.lspAvailable) {
+      await message(
+        `${toolchain.message}\n\nPreview will use the Typst compiler. LSP completion, hover, live preview, and preview sync are unavailable.`,
+        { title: "Tinymist unavailable", kind: "warning" }
+      );
+    }
   }
 
   private updateWorkspaceViewportVisibility() {
@@ -235,21 +252,22 @@ export class TypstryWorkspaceController {
     }
   }
 
-  private async ensureDependencies() {
+  private async ensureDependencies(): Promise<ToolchainStatus | null> {
     this.previewPane.innerHTML = `<div style="padding: 20px; color: #007acc; font-family: sans-serif; text-align: center;">
       <h3>Initializing Typstry Editor</h3>
       <p>Checking and downloading required compiler toolchains (Typst, Tinymist). This may take a minute...</p>
     </div>`;
 
     try {
-      await invoke("ensure_toolchain");
+      const status = await invoke<ToolchainStatus>("ensure_toolchain");
+      this.toolchainController.setStatus(status);
+      this.previewPane.innerHTML = `<div style="padding: 20px; color: #008000; font-family: sans-serif; text-align: center;">${status.message}</div>`;
+      return status;
     } catch (e) {
       console.error("Toolchain setup failed:", e);
       this.previewPane.innerHTML = `<div style="padding: 20px; color: red;">Failed to download toolchain: ${e}</div>`;
-      return;
+      return null;
     }
-
-    this.previewPane.innerHTML = `<div style="padding: 20px; color: #008000; font-family: sans-serif; text-align: center;">Toolchain Ready.</div>`;
   }
 
   private initCodeMirror() {
@@ -578,7 +596,8 @@ export class TypstryWorkspaceController {
         this.previewPane.innerHTML = `<div style="padding: 20px; color: #5f6368; font-family: sans-serif;">No preview root found for this library/template file. Diagnostics are still active.</div>`;
       }
     } else {
-      this.previewPane.innerHTML = `<div style="padding: 20px; color: red; font-family: sans-serif;">Tinymist LSP is offline. Live preview is unavailable.</div>`;
+      void this.runFallbackDiagnostics(path, tab.content, this.currentVersion);
+      await this.renderCompilerPreview(path, tab.content);
     }
 
     if (this.activeMode === "WYSIWYM") {
@@ -589,14 +608,22 @@ export class TypstryWorkspaceController {
     this.saveWorkspaceState();
   }
 
-  private async initLsp() {
-    this.lspClient = new TinymistLspClient(
-      () => {},
-      (status) => this.setLspStatus(status),
-      (uri, position) => this.handleInverseSync(uri, position),
-      (uri, diagnostics, version) => this.handleLspDiagnostics(uri, diagnostics, version),
-      (entry) => this.appendLspLog(entry)
-    );
+  private async initLsp(shouldConnect = true) {
+    if (!this.lspClient) {
+      this.lspClient = new TinymistLspClient(
+        () => {},
+        (status) => this.setLspStatus(status),
+        (uri, position) => this.handleInverseSync(uri, position),
+        (uri, diagnostics, version) => this.handleLspDiagnostics(uri, diagnostics, version),
+        (entry) => this.appendLspLog(entry)
+      );
+      this.lspClient.setEditorView(this.editorInstance);
+    }
+    if (!shouldConnect) {
+      this.lspReady = false;
+      this.setLspStatus({ kind: "stopped", message: "Compiler preview (LSP unavailable)" });
+      return;
+    }
     try {
       await this.lspClient.connect();
       this.lspReady = true;
@@ -604,7 +631,65 @@ export class TypstryWorkspaceController {
       this.lspReady = false;
       console.warn("Tinymist LSP instance offline.", e);
     }
-    this.lspClient.setEditorView(this.editorInstance);
+  }
+
+  private async handleToolchainChanged(status: ToolchainStatus) {
+    this.toolchainController.setStatus(status);
+    this.lspReady = false;
+    await this.initLsp(status.lspAvailable);
+    const activePath = this.activeFilePath;
+    if (activePath) {
+      this.activeFilePath = null;
+      await this.activateEditorTab(activePath, false);
+    }
+  }
+
+  private async renderCompilerPreview(path: string, text: string) {
+    const generation = ++this.fallbackPreviewGeneration;
+    this.setLspStatus({ kind: "syncing", message: "Compiling preview with Typst" });
+    this.previewPane.replaceChildren(Object.assign(document.createElement("div"), {
+      className: "compiler-preview-message",
+      textContent: "Compiling preview with Typst..."
+    }));
+    try {
+      const pages = await invoke<string[]>("compile_typst_preview", {
+        sourceCode: text,
+        filePath: path,
+        previewRootPath: this.previewRootPath
+      });
+      if (generation !== this.fallbackPreviewGeneration || path !== this.activeFilePath) return;
+      this.previewFrame.mountSvgPages(pages);
+      this.setLspStatus({ kind: "preview-ready", message: "Typst compiler preview (no LSP sync)" });
+    } catch (error) {
+      if (generation !== this.fallbackPreviewGeneration || path !== this.activeFilePath) return;
+      const container = document.createElement("div");
+      container.className = "compiler-preview-message error";
+      const title = document.createElement("strong");
+      title.textContent = "Typst preview failed";
+      const details = document.createElement("pre");
+      details.textContent = String(error);
+      container.append(title, details);
+      this.previewPane.replaceChildren(container);
+      this.setLspStatus({ kind: "error", message: "Typst compiler preview failed" });
+    }
+  }
+
+  private scheduleCompilerPreview(path: string, text: string) {
+    if (this.fallbackPreviewTimer) window.clearTimeout(this.fallbackPreviewTimer);
+    const version = ++this.currentVersion;
+    this.latestDocumentVersion = version;
+    const activeTab = this.getActiveTab();
+    if (activeTab?.path === path) {
+      activeTab.version = version;
+      activeTab.latestVersion = version;
+    }
+    this.fallbackPreviewTimer = window.setTimeout(() => {
+      this.fallbackPreviewTimer = null;
+      if (!this.lspReady && this.activeFilePath === path) {
+        void this.renderCompilerPreview(path, text);
+        void this.runFallbackDiagnostics(path, text, version);
+      }
+    }, this.lspSyncDebounceMs);
   }
 
   private async loadFile(path: string) {
@@ -718,6 +803,8 @@ export class TypstryWorkspaceController {
         () => this.flushPendingLspSync(),
         this.lspSyncDebounceMs
       );
+    } else if (!this.isLoadingFile && this.activeFilePath) {
+      this.scheduleCompilerPreview(this.activeFilePath, rawText);
     }
   }
 

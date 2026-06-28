@@ -10,13 +10,15 @@ describe("application settings", () => {
     expect(settings.editor.unicodeFont).toBe("auto");
     expect(settings.editor.wordWrap).toBe(defaultAppSettings.editor.wordWrap);
     expect(settings.preview.syncDebounceMs).toBe(defaultAppSettings.preview.syncDebounceMs);
+    expect(settings.toolchain.typstVersion).toBeNull();
   });
 
   test("rejects unsupported enums and clamps numeric values", () => {
     const settings = normalizeAppSettings({
       appearance: { theme: "unknown", editorFontSize: 80, editorLineHeight: 0.5 },
       editor: { tabSize: 3, codeFont: "MiSans Latin", unicodeFont: "unknown-font" },
-      preview: { syncDebounceMs: 1, highlightDurationMs: 50000 }
+      preview: { syncDebounceMs: 1, highlightDurationMs: 50000 },
+      toolchain: { typstVersion: "0.15.0-rc.1" }
     });
 
     expect(settings.appearance.theme).toBe("default");
@@ -27,6 +29,11 @@ describe("application settings", () => {
     expect(settings.editor.unicodeFont).toBe("auto");
     expect(settings.preview.syncDebounceMs).toBe(50);
     expect(settings.preview.highlightDurationMs).toBe(10000);
+    expect(settings.toolchain.typstVersion).toBeNull();
+  });
+
+  test("keeps a selected stable Typst version", () => {
+    expect(normalizeAppSettings({ toolchain: { typstVersion: "0.15.0" } }).toolchain.typstVersion).toBe("0.15.0");
   });
 
   test("returns independent default objects", () => {

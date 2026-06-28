@@ -72,6 +72,7 @@ export class SettingsController {
     const openSettings = () => {
       this.populatePanel();
       overlay.classList.remove("hidden");
+      document.dispatchEvent(new Event("typstry:settings-opened"));
       (document.querySelector(".settings-nav-item.active") as HTMLButtonElement | null)?.focus();
     };
     const closeSettings = () => overlay.classList.add("hidden");

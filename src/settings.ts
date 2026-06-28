@@ -33,6 +33,9 @@ export type AppSettings = {
     syncDebounceMs: number;
     highlightDurationMs: number;
   };
+  toolchain: {
+    typstVersion: string | null;
+  };
 };
 
 export const defaultAppSettings: AppSettings = {
@@ -56,6 +59,9 @@ export const defaultAppSettings: AppSettings = {
     cursorSync: true,
     syncDebounceMs: 120,
     highlightDurationMs: 2200
+  },
+  toolchain: {
+    typstVersion: null
   }
 };
 
@@ -80,6 +86,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   const appearance = objectValue(root.appearance);
   const editor = objectValue(root.editor);
   const preview = objectValue(root.preview);
+  const toolchain = objectValue(root.toolchain);
   const theme = themeNames.includes(appearance.theme as ThemeName)
     ? appearance.theme as ThemeName
     : defaultAppSettings.appearance.theme;
@@ -108,6 +115,11 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       cursorSync: booleanValue(preview.cursorSync, defaultAppSettings.preview.cursorSync),
       syncDebounceMs: Math.round(boundedNumber(preview.syncDebounceMs, defaultAppSettings.preview.syncDebounceMs, 50, 2000)),
       highlightDurationMs: Math.round(boundedNumber(preview.highlightDurationMs, defaultAppSettings.preview.highlightDurationMs, 500, 10000))
+    },
+    toolchain: {
+      typstVersion: typeof toolchain.typstVersion === "string" && /^\d+\.\d+\.\d+$/.test(toolchain.typstVersion)
+        ? toolchain.typstVersion
+        : null
     }
   };
 }

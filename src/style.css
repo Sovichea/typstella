@@ -662,6 +662,28 @@ html {
 .settings-panel { display: none; }
 .settings-panel.active { display: block; }
 .settings-panel h3 { margin: 0 0 18px; font-size: 14px; }
+.settings-notice {
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  border: 1px solid var(--ui-border);
+  border-radius: 5px;
+  background: var(--ui-hover);
+  line-height: 1.45;
+}
+.settings-notice.warning { border-color: #bf8700; color: #9a6700; }
+.settings-notice.error { border-color: #cf222e; color: #cf222e; }
+.settings-help { color: var(--ui-header-text); font-size: 11px; line-height: 1.5; }
+.settings-secondary-button {
+  padding: 6px 10px;
+  border: 1px solid var(--ui-border);
+  border-radius: 5px;
+  color: var(--ui-text);
+  background: var(--ui-bg);
+  font: inherit;
+  cursor: pointer;
+}
+.settings-secondary-button:hover { background: var(--ui-hover); }
+.settings-secondary-button:disabled { opacity: 0.55; cursor: default; }
 
 .settings-field,
 .settings-toggle {
@@ -1371,6 +1393,15 @@ html {
 .welcome-item:hover {
   background-color: var(--ui-hover);
 }
+
+.compiler-preview-message {
+  margin: 20px;
+  padding: 14px;
+  color: var(--ui-header-text);
+  font-family: var(--ui-font);
+}
+.compiler-preview-message.error { color: #cf222e; }
+.compiler-preview-message pre { white-space: pre-wrap; font: 12px/1.5 var(--editor-code-font); }
 
 button.welcome-item {
   width: 100%;

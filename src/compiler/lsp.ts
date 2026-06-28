@@ -1,6 +1,7 @@
 import { EditorView } from "@codemirror/view";
 import type { Text } from "@codemirror/state";
 import { TauriLspTransport } from "./lspTransport";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { asRecord, isRecord, type JsonRpcId, type JsonRpcMessage } from "./jsonRpc";
 
 type TinymistPreviewResult = {
@@ -67,6 +68,8 @@ export class TinymistLspClient {
   private latestPreviewDataPlaneUrl = "";
   private positionEncoding: LspPositionEncoding = "utf-16";
   private readonly transport = new TauriLspTransport();
+  private transportListeners: Promise<void> | null = null;
+  private unlistenTransport: UnlistenFn[] = [];
   private pendingRequests = new Map<number, { resolve: (result: unknown) => void; reject: (error: unknown) => void; timeout?: number }>();
 
   constructor(
@@ -84,18 +87,9 @@ export class TinymistLspClient {
   public async connect(): Promise<void> {
     try {
       this.setStatus("starting", "Starting Tinymist");
+      await this.ensureTransportListeners();
       await this.transport.start();
       this.setStatus("running", "Tinymist process running");
-
-      await this.transport.listenStatus(status => {
-        if (status === "stopped") {
-          this.setStatus("stopped", "Tinymist stopped");
-        } else if (status === "running") {
-          this.setStatus("running", "Tinymist process running");
-        }
-      });
-
-      await this.transport.listenMessages(message => this.handleMessage(message));
 
       this.setStatus("initializing", "Initializing LSP");
       await this.initializeLsp();
@@ -109,11 +103,31 @@ export class TinymistLspClient {
 
   public async restart(): Promise<void> {
     this.setStatus("starting", "Restarting Tinymist");
+    await this.ensureTransportListeners();
     await this.transport.start();
     this.setStatus("running", "Tinymist process running");
     this.setStatus("initializing", "Initializing LSP");
     await this.initializeLsp();
     this.setStatus("ready", "LSP ready");
+  }
+
+  public dispose(): void {
+    for (const unlisten of this.unlistenTransport.splice(0)) unlisten();
+    this.transportListeners = null;
+  }
+
+  private ensureTransportListeners(): Promise<void> {
+    if (this.transportListeners) return this.transportListeners;
+    this.transportListeners = Promise.all([
+      this.transport.listenStatus(status => {
+        if (status === "stopped") this.setStatus("stopped", "Tinymist stopped");
+        else if (status === "running") this.setStatus("running", "Tinymist process running");
+      }),
+      this.transport.listenMessages(message => this.handleMessage(message))
+    ]).then(unlisteners => {
+      this.unlistenTransport.push(...unlisteners);
+    });
+    return this.transportListeners;
   }
 
   private handleMessage(payload: JsonRpcMessage) {
