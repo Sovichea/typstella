@@ -192,12 +192,16 @@ export class ContextMenuController {
   private showForTarget(event: MouseEvent): void {
     event.preventDefault();
     const target = event.target as HTMLElement;
+    if (target.closest("#document-outline-section")) {
+      this.hide();
+      return;
+    }
     const explorerItem = target.closest<HTMLElement>(".explorer-item-target");
     this.targetPath = explorerItem?.dataset.path || "";
     this.targetIsDirectory = explorerItem?.dataset.isDir === "true";
     let items: string;
     if (explorerItem) items = this.explorerItems();
-    else if (target.closest("#explorer-sidebar")) {
+    else if (target.closest(".workspace-explorer-section")) {
       this.targetPath = this.dependencies.getWorkspaceRoot() || "";
       this.targetIsDirectory = !!this.targetPath;
       items = this.explorerBackgroundItems();

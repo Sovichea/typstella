@@ -138,11 +138,36 @@ function wordRangeAtCursor(doc: Text, cursor: number): SourceRange | null {
 function isPreviewHighlightableRange(doc: Text, range: SourceRange): boolean {
   const line = doc.lineAt(range.from);
   if (range.to > line.to) return false;
+  if (isInsideFencedRawBlock(doc, range.from)) return false;
 
   const start = range.from - line.from;
   const end = range.to - line.from;
   if (isInsideExcludedInlineRegion(line.text, start)) return false;
   return !isTypstCodeSyntaxRange(line.text, start, end);
+}
+
+function isInsideFencedRawBlock(doc: Text, position: number): boolean {
+  const targetLine = doc.lineAt(position).number;
+  let fenceLength = 0;
+  for (let lineNumber = 1; lineNumber <= targetLine; lineNumber++) {
+    const line = doc.line(lineNumber);
+    const trimmed = line.text.trimStart();
+    if (fenceLength > 0) {
+      const closing = trimmed.match(/^(`{3,})/);
+      if (lineNumber === targetLine) return !closing || closing[1].length !== fenceLength;
+      if (closing?.[1].length === fenceLength) fenceLength = 0;
+      continue;
+    }
+
+    const opening = trimmed.match(/^(`{3,})(.*)$/);
+    if (!opening) continue;
+    const rest = opening[2];
+    if (!rest.includes(opening[1])) {
+      fenceLength = opening[1].length;
+      if (lineNumber === targetLine) return position - line.from >= line.text.indexOf(opening[1]) + opening[1].length;
+    }
+  }
+  return false;
 }
 
 function isInsideExcludedInlineRegion(lineText: string, index: number): boolean {

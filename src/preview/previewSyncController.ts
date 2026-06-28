@@ -1,5 +1,5 @@
 import type { EditorView } from "@codemirror/view";
-import type { LspSourcePosition, TinymistLspClient } from "../compiler/lsp";
+import type { LspSourcePosition, PreviewDocumentPosition, TinymistLspClient } from "../compiler/lsp";
 import { filePathToUri } from "../platform/paths";
 import { PreviewFrame, type PreviewTextPoint } from "./previewFrame";
 import {
@@ -19,6 +19,7 @@ export type PreviewSyncDependencies = {
   isReady: () => boolean;
   isEnabled: () => boolean;
   getHighlightDuration: () => number;
+  getSectionPreviewPosition: (cursor: number) => PreviewDocumentPosition | undefined;
   nextPreviewVersion: () => number;
   restoreDocumentVersion: () => RestoredDocument | null;
 };
@@ -71,6 +72,9 @@ export class PreviewSyncController {
     if (!highlight) {
       this.clearPoll();
       if (this.mapping) this.revertDocument();
+      const sectionPosition = this.dependencies.getSectionPreviewPosition(cursor);
+      if (sectionPosition) await this.navigateToPosition(sectionPosition);
+      await this.navigateToCursor(cursor);
       return;
     }
 
@@ -84,19 +88,11 @@ export class PreviewSyncController {
     this.diagnosticsSuppressedUntil = Date.now() + this.dependencies.getHighlightDuration() + 2000;
     this.clearPoll();
     this.clearRevert();
+    await this.navigateToCursor(cursor);
     await client.notifyTextChange(filePathToUri(path), highlight.text, version);
-    window.setTimeout(() => {
-      if (this.dependencies.isReady() && this.dependencies.getActiveFilePath() === path) {
-        void client.scrollPreview("default_preview", {
-          event: "panelScrollTo",
-          filepath: path,
-          line: highlight.scrollLine,
-          character: highlight.scrollCharacter
-        });
-      }
-    }, 10);
 
     let attempts = 0;
+    let sectionFallbackSent = false;
     this.pollTimer = window.setInterval(() => {
       attempts++;
       try {
@@ -108,11 +104,42 @@ export class PreviewSyncController {
       } catch {
         // Cross-origin frames are retried until timeout.
       }
+      if (!sectionFallbackSent && attempts >= 2) {
+        sectionFallbackSent = true;
+        const sectionPosition = this.dependencies.getSectionPreviewPosition(cursor);
+        if (sectionPosition) void this.navigateToPosition(sectionPosition);
+      }
       if (attempts >= 15) {
         this.clearPoll();
         this.revertDocument();
       }
     }, 100);
+  }
+
+  public async navigateToCursor(cursor: number): Promise<void> {
+    const editor = this.dependencies.getEditor();
+    const client = this.dependencies.getClient();
+    const path = this.dependencies.getActiveFilePath();
+    if (!editor || !client || !path || !this.dependencies.getPreviewRootPath() || !this.dependencies.isReady()) return;
+
+    const position = Math.max(0, Math.min(cursor, editor.state.doc.length));
+    const line = editor.state.doc.lineAt(position);
+    const character = new TextEncoder().encode(line.text.slice(0, position - line.from)).length;
+    await client.scrollPreview("default_preview", {
+      event: "panelScrollTo",
+      filepath: path,
+      line: line.number - 1,
+      character
+    });
+  }
+
+  public async navigateToPosition(position: PreviewDocumentPosition): Promise<void> {
+    const client = this.dependencies.getClient();
+    if (!client || !this.dependencies.getPreviewRootPath() || !this.dependencies.isReady()) return;
+    await client.scrollPreview("default_preview", {
+      event: "panelScrollByPosition",
+      position
+    });
   }
 
   public suppressOnce(): void {

@@ -61,11 +61,6 @@ export class WorkspaceExplorer {
       const nodes = await this.readDirectory(rootPath);
       this.container.innerHTML = "";
       
-      const header = document.createElement("div");
-      header.className = "explorer-header";
-      header.textContent = "EXPLORER";
-      this.container.appendChild(header);
-
       this.container.appendChild(this.renderTree(nodes));
     } catch {
       this.container.innerHTML = `<div class="explorer-error">Access Refused.</div>`;

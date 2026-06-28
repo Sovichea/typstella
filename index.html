@@ -78,7 +78,20 @@
       </div>
     </div>
     <div id="app-container">
-      <div id="explorer-sidebar"></div>
+      <aside id="explorer-sidebar" aria-label="Workspace sidebar">
+        <section class="sidebar-section workspace-explorer-section">
+          <div class="sidebar-section-header"><span>EXPLORER</span></div>
+          <div id="workspace-explorer-tree" class="sidebar-section-content"></div>
+        </section>
+        <section id="document-outline-section" class="sidebar-section outline-section">
+          <button id="document-outline-toggle" class="sidebar-section-header sidebar-section-toggle" type="button" aria-expanded="true">
+            <span class="sidebar-section-chevron" aria-hidden="true">▾</span>
+            <span>OUTLINE</span>
+            <span id="document-outline-count" class="sidebar-section-count">0</span>
+          </button>
+          <div id="document-outline-tree" class="sidebar-section-content outline-tree"></div>
+        </section>
+      </aside>
       <div class="resizer" id="explorer-resizer"></div>
       <div id="workspace-viewport">
         <div id="welcome-screen">

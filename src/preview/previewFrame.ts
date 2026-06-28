@@ -51,45 +51,7 @@ export class PreviewFrame {
       return rect.width > 0 && rect.height > 0;
     });
     if (!target) return false;
-
-    const rect = target.getBoundingClientRect();
-    const iframeWindow = iframe.contentWindow;
-    let scrollContainer: Element | null = null;
-    let current = target.parentElement;
-    if (iframeWindow) {
-      while (current) {
-        const style = iframeWindow.getComputedStyle(current);
-        if (style.overflowY === "auto" || style.overflowY === "scroll") {
-          scrollContainer = current;
-          break;
-        }
-        current = current.parentElement;
-      }
-    }
-
-    if (scrollContainer) {
-      const containerRect = scrollContainer.getBoundingClientRect();
-      scrollContainer.scrollTo({
-        top: scrollContainer.scrollTop + rect.top - containerRect.top - containerRect.height / 2 + rect.height / 2,
-        left: scrollContainer.scrollLeft + rect.left - containerRect.left - containerRect.width / 2 + rect.width / 2,
-        behavior: "smooth"
-      });
-    } else if (this.pane.scrollHeight > this.pane.clientHeight) {
-      const iframeRect = iframe.getBoundingClientRect();
-      const paneRect = this.pane.getBoundingClientRect();
-      this.pane.scrollTo({
-        top: this.pane.scrollTop + iframeRect.top + rect.top - paneRect.top - paneRect.height / 2 + rect.height / 2,
-        left: this.pane.scrollLeft + iframeRect.left + rect.left - paneRect.left - paneRect.width / 2 + rect.width / 2,
-        behavior: "smooth"
-      });
-    } else if (iframeWindow) {
-      iframeWindow.scrollTo({
-        top: iframeWindow.scrollY + rect.top - iframeWindow.innerHeight / 2 + rect.height / 2,
-        left: iframeWindow.scrollX + rect.left - iframeWindow.innerWidth / 2 + rect.width / 2,
-        behavior: "smooth"
-      });
-    }
-
+    target.scrollIntoView({ block: "center", inline: "center", behavior: "auto" });
     return true;
   }
 
@@ -109,12 +71,8 @@ export class PreviewFrame {
   private configureDocument(): void {
     try {
       const doc = this.iframe?.contentDocument;
-      if (!doc || doc.getElementById("typstry-disable-preview-ripple")) return;
-
-      const style = doc.createElement("style");
-      style.id = "typstry-disable-preview-ripple";
-      style.textContent = ".typst-jump-ripple{display:none!important;animation:none!important;}";
-      doc.head.appendChild(style);
+      if (!doc || doc.documentElement.dataset.typstryInteractions === "true") return;
+      doc.documentElement.dataset.typstryInteractions = "true";
       doc.addEventListener("click", event => {
         const point = this.textPointFromMouseEvent(doc, event);
         if (point) this.onTextClick(point);

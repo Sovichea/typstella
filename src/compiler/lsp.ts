@@ -22,6 +22,22 @@ type ScrollPreviewRequest = {
   filepath: string;
   line: number;
   character: number;
+} | {
+  event: "panelScrollByPosition";
+  position: PreviewDocumentPosition;
+};
+
+export type PreviewDocumentPosition = {
+  page_no: number;
+  x: number;
+  y: number;
+};
+
+export type TinymistDocumentOutlineItem = {
+  title: string;
+  position: PreviewDocumentPosition;
+  span?: string;
+  children: TinymistDocumentOutlineItem[];
 };
 
 export type LspSourcePosition = {
@@ -61,6 +77,26 @@ function isLspDiagnostic(value: unknown): value is LspDiagnostic {
   return typeof start?.line === "number" && typeof end?.line === "number";
 }
 
+function tinymistOutlineItem(value: unknown): TinymistDocumentOutlineItem | null {
+  const item = asRecord(value);
+  const position = asRecord(item?.position);
+  if (
+    typeof item?.title !== "string" ||
+    typeof position?.page_no !== "number" ||
+    typeof position.x !== "number" ||
+    typeof position.y !== "number"
+  ) return null;
+  const children = Array.isArray(item.children)
+    ? item.children.map(tinymistOutlineItem).filter((child): child is TinymistDocumentOutlineItem => child !== null)
+    : [];
+  return {
+    title: item.title,
+    position: { page_no: position.page_no, x: position.x, y: position.y },
+    span: typeof item.span === "string" ? item.span : undefined,
+    children
+  };
+}
+
 export class TinymistLspClient {
   private requestId = 0;
   private editorView?: EditorView;
@@ -77,7 +113,8 @@ export class TinymistLspClient {
     private onStatus: (status: LspStatus) => void = () => {},
     private onInverseSync: (uri: string | undefined, position: LspSourcePosition) => number | LspEditorSelection | void | Promise<number | LspEditorSelection | void> = () => {},
     private onDiagnostics: (uri: string, diagnostics: LspDiagnostic[], version?: number) => void = () => {},
-    private onLog: (entry: LspLogEntry) => void = () => {}
+    private onLog: (entry: LspLogEntry) => void = () => {},
+    private onDocumentOutline: (items: TinymistDocumentOutlineItem[]) => void = () => {}
   ) {}
 
   public setEditorView(view: EditorView) {
@@ -173,6 +210,12 @@ export class TinymistLspClient {
           typeof params.version === "number" ? params.version : undefined
         );
       }
+    }
+
+    if (payload.method === "tinymist/documentOutline" && Array.isArray(params?.items)) {
+      this.onDocumentOutline(
+        params.items.map(tinymistOutlineItem).filter((item): item is TinymistDocumentOutlineItem => item !== null)
+      );
     }
 
     if (payload.error) {

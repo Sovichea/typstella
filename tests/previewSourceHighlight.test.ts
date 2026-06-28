@@ -24,6 +24,14 @@ describe("preview source highlighting", () => {
     }
   });
 
+  test("does not inject Typst markup into fenced raw block content", () => {
+    const source = "```typ\n#let value = 1\n```";
+    const doc = Text.of(source.split("\n"));
+    const cursor = source.indexOf("value") + 2;
+
+    expect(buildHighlightedPreviewSource(doc, cursor, (_text, offset) => offset)).toBeNull();
+  });
+
   test("maps preview text clicks back into a source line", () => {
     expect(findPreviewTextMatchInSourceLine("A source sentence", "source sentence", 4)).toEqual({ sourceOffset: 6 });
   });

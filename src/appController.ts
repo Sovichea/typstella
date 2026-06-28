@@ -31,6 +31,7 @@ import { RecentProjectsController } from "./workspace/recentProjectsController";
 import { EditorToolbarController } from "./editor/toolbarController";
 import { ContextMenuController } from "./components/contextMenuController";
 import { ToolchainController, type ToolchainStatus } from "./toolchain/toolchainController";
+import { DocumentOutlineController, type DocumentHeading } from "./outline/documentOutline";
 
 type EditorMode = "CODE" | "WYSIWYM";
 type FallbackDiagnostic = {
@@ -106,6 +107,7 @@ export class TypstryWorkspaceController {
     isReady: () => this.lspReady,
     isEnabled: () => this.settingsController.value.preview.cursorSync,
     getHighlightDuration: () => this.previewHighlightVisibleMs,
+    getSectionPreviewPosition: cursor => this.documentOutlineController.previewPositionAt(cursor),
     nextPreviewVersion: () => ++this.currentVersion,
     restoreDocumentVersion: () => this.restorePreviewDocumentVersion()
   });
@@ -138,6 +140,11 @@ export class TypstryWorkspaceController {
     activateTab: path => this.activateEditorTab(path, false),
     closeTab: path => this.closeEditorTab(path, true)
   });
+  private readonly documentOutlineController = new DocumentOutlineController(
+    document.getElementById("document-outline-tree")!,
+    document.getElementById("document-outline-section")!,
+    heading => this.navigateToOutlineHeading(heading)
+  );
   private lspStatus = document.getElementById("lsp-status")!;
   private lspStatusDot = this.lspStatus.querySelector(".status-dot") as HTMLElement;
   private lspStatusText = this.lspStatus.querySelector(".status-text") as HTMLElement;
@@ -146,6 +153,7 @@ export class TypstryWorkspaceController {
     await this.settingsController.load();
     this.recentProjectsController.initialize();
     this.initCodeMirror();
+    this.documentOutlineController.initialize();
     this.applySettingsToRuntime(this.settingsController.value);
     this.initExplorer();
     this.editorToolbarController.initialize();
@@ -284,7 +292,11 @@ export class TypstryWorkspaceController {
               this.previewSyncController.clearForward();
               this.editorFontManager.updateDocument(currentText);
               this.handleContentMutation(currentText);
-            } else if (this.shouldForwardSyncSelectionUpdate(update)) {
+            }
+            if (update.selectionSet) {
+              this.documentOutlineController.setCursorPosition(update.state.selection.main.head);
+            }
+            if (!update.docChanged && this.shouldForwardSyncSelectionUpdate(update)) {
               this.previewSyncController.schedule(this.forwardSyncDebounceMs);
             }
           })
@@ -307,7 +319,7 @@ export class TypstryWorkspaceController {
   }
 
   private initExplorer() {
-    this.explorer = new WorkspaceExplorer(document.getElementById("explorer-sidebar")!, (path) => this.loadFile(path));
+    this.explorer = new WorkspaceExplorer(document.getElementById("workspace-explorer-tree")!, (path) => this.loadFile(path));
   }
 
   private renderEditorTabs() {
@@ -512,6 +524,7 @@ export class TypstryWorkspaceController {
         }
         this.previewPane.innerHTML = "";
         this.editorFontManager.updateDocument("");
+        this.documentOutlineController.clear();
         if (this.activeMode === "WYSIWYM") {
           this.mapMarkupToWysiwym("");
         }
@@ -578,6 +591,8 @@ export class TypstryWorkspaceController {
     this.previewSyncController.clearForward();
     this.renderEditorTabs();
     this.editorFontManager.updateDocument(tab.content);
+    this.documentOutlineController.update(path, tab.content);
+    this.documentOutlineController.setCursorPosition(this.editorInstance.state.selection.main.head);
 
     if (this.lspReady && this.lspClient) {
       const uri = filePathToUri(path);
@@ -615,7 +630,8 @@ export class TypstryWorkspaceController {
         (status) => this.setLspStatus(status),
         (uri, position) => this.handleInverseSync(uri, position),
         (uri, diagnostics, version) => this.handleLspDiagnostics(uri, diagnostics, version),
-        (entry) => this.appendLspLog(entry)
+        (entry) => this.appendLspLog(entry),
+        (items) => this.documentOutlineController.updatePreviewPositions(items)
       );
       this.lspClient.setEditorView(this.editorInstance);
     }
@@ -786,6 +802,7 @@ export class TypstryWorkspaceController {
   }
 
   private handleContentMutation(rawText: string) {
+    this.documentOutlineController.update(this.activeFilePath, rawText);
     if (!this.isLoadingFile) {
       this.updateActiveTabContent(rawText);
     }
@@ -1071,6 +1088,24 @@ export class TypstryWorkspaceController {
     this.editorInstance.focus();
   }
 
+  private navigateToOutlineHeading(heading: DocumentHeading) {
+    if (this.activeMode === "WYSIWYM") this.switchViewLayoutMode();
+    const currentHeading = this.documentOutlineController.findHeading(heading.id) ?? heading;
+    const cursor = Math.max(0, Math.min(currentHeading.textFrom, this.editorInstance.state.doc.length));
+    this.previewSyncController.clearForward();
+    this.editorInstance.dispatch({
+      selection: { anchor: cursor },
+      effects: EditorView.scrollIntoView(cursor, { y: "start", yMargin: 28 })
+    });
+    this.documentOutlineController.setCursorPosition(cursor);
+    this.editorInstance.focus();
+    if (currentHeading.previewPosition) {
+      void this.previewSyncController.navigateToPosition(currentHeading.previewPosition);
+    } else {
+      void this.previewSyncController.navigateToCursor(cursor);
+    }
+  }
+
   private switchViewLayoutMode() {
     if (this.activeMode === "CODE") {
       this.activeMode = "WYSIWYM";
@@ -1196,8 +1231,9 @@ export class TypstryWorkspaceController {
       changes: { from: 0, to: this.editorInstance.state.doc.length, insert: "" }
     });
     
-    // Clear explorer
-    document.getElementById("explorer-sidebar")!.innerHTML = "";
+    // Clear workspace navigation
+    document.getElementById("workspace-explorer-tree")!.innerHTML = "";
+    this.documentOutlineController.clear();
     this.previewPane.innerHTML = "";
     
     this.setLspStatus({ kind: "ready", message: "Project closed" });
