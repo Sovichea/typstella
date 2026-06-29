@@ -27,6 +27,7 @@ import { allowsLiveImportPreview, previewRefreshStyle, previewSessionIdentity, t
 import { LogConsoleController, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
 import { EditorFontManager } from "./editor/fontManager";
 import { TabStripController } from "./editor/tabStripController";
+import { createAppIcon } from "./ui/icons";
 import { LayoutController } from "./layout/layoutController";
 import { WorkspaceStateStore } from "./workspace/workspaceStateStore";
 import { RecentProjectsController } from "./workspace/recentProjectsController";
@@ -464,7 +465,7 @@ export class TypstryWorkspaceController {
 
       const closeButton = document.createElement("span");
       closeButton.className = "editor-tab-close";
-      closeButton.textContent = "x";
+      closeButton.appendChild(createAppIcon("x", { size: 13 }));
       closeButton.title = "Close";
       closeButton.setAttribute("aria-label", `Close ${fileNameFromPath(tab.path)}`);
       tabButton.appendChild(closeButton);

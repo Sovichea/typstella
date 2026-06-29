@@ -1,3 +1,5 @@
+import { createAppIcon } from "../ui/icons";
+
 const storageKey = "typstry-recent-projects";
 
 export class RecentProjectsController {
@@ -46,7 +48,7 @@ export class RecentProjectsController {
       item.className = "welcome-item recent-project-item";
       const icon = document.createElement("span");
       icon.className = "welcome-item-icon";
-      icon.textContent = "📁";
+      icon.appendChild(createAppIcon("folder", { size: 18 }));
       const text = document.createElement("span");
       text.className = "welcome-item-text";
       text.textContent = path.split(/[/\\]/).pop() || path;

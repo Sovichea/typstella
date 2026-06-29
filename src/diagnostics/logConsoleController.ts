@@ -1,3 +1,5 @@
+import { createAppIcon } from "../ui/icons";
+
 export type LogEntryKind = "error" | "warning" | "info" | "log" | "hint";
 
 export type LogConsoleEntryInput = {
@@ -128,7 +130,10 @@ export class LogConsoleController {
     item.className = `log-entry log-entry-${entry.kind}`;
     const icon = document.createElement("span");
     icon.className = "log-entry-icon";
-    icon.textContent = entry.kind === "error" ? "⊗" : entry.kind === "warning" ? "⚠" : "ℹ";
+    icon.appendChild(createAppIcon(
+      entry.kind === "error" ? "circleX" : entry.kind === "warning" ? "triangleAlert" : "info",
+      { size: 14 }
+    ));
     const message = document.createElement("span");
     message.className = "log-entry-message";
     message.textContent = entry.message;

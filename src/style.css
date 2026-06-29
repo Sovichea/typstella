@@ -287,7 +287,7 @@ html {
 
 .sidebar-section-toggle { width: 100%; cursor: pointer; }
 .sidebar-section-toggle:hover { background: var(--ui-hover); }
-.sidebar-section-chevron { width: 12px; text-align: center; transition: transform 100ms ease; }
+.sidebar-section-chevron { width: 12px; display: inline-flex; align-items: center; justify-content: center; transition: transform 100ms ease; }
 .sidebar-section-count {
   min-width: 18px;
   margin-left: auto;
@@ -326,6 +326,9 @@ html {
 .outline-disclosure {
   width: 22px;
   flex: 0 0 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 12px;
   transition: transform 100ms ease;
 }

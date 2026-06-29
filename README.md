@@ -1,7 +1,7 @@
 # Typstry - A Unicode-Aligned Typst Editor
 
 <p align="center">
-  <img src="./assets/typstry-ico.svg" alt="Typstry Logo" width="150"/>
+  <img src="./assets/typstry-wordmark.png" alt="Typstry" width="400"/>
 </p>
 
 A lightweight, local-first Typst code editor with advanced Unicode font fallbacks and real-time Tinymist LSP previews. Built with Tauri, Bun, and CodeMirror 6.

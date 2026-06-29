@@ -1,4 +1,5 @@
 import type { PreviewDocumentPosition, TinymistDocumentOutlineItem } from "../compiler/lsp";
+import { createAppIcon } from "../ui/icons";
 
 export type DocumentHeading = {
   id: string;
@@ -234,7 +235,7 @@ export class DocumentOutlineController {
       disclosure.className = "outline-disclosure";
       if (heading.children.length) {
         const isCollapsed = this.collapsed.has(heading.id);
-        disclosure.textContent = "▾";
+        disclosure.appendChild(createAppIcon("chevronDown", { size: 14 }));
         disclosure.classList.toggle("collapsed", isCollapsed);
         disclosure.setAttribute("aria-label", `${isCollapsed ? "Expand" : "Collapse"} ${heading.title}`);
         disclosure.setAttribute("aria-expanded", String(!isCollapsed));
