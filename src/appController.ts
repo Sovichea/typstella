@@ -175,7 +175,19 @@ export class TypstryWorkspaceController {
     await getCurrentWindow().show();
 
     this.setLspStatus({ kind: "starting", message: "Preparing toolchain" });
-    const toolchain = await this.ensureDependencies();
+
+    let toolchain: ToolchainStatus | null = null;
+    try {
+      toolchain = await invoke<ToolchainStatus>("get_toolchain_status");
+    } catch (e) {
+      console.error("Failed to check toolchain status:", e);
+    }
+
+    if (!toolchain?.typstVersion) {
+      toolchain = await this.showToolchainSetupDialog();
+    }
+
+    this.toolchainController.setStatus(toolchain ?? { typstVersion: null, typstSource: null, tinymistVersion: null, tinymistSource: null, lspAvailable: false, message: "" });
     await this.initLsp(Boolean(toolchain?.lspAvailable));
     if (toolchain?.typstVersion && !toolchain.lspAvailable) {
       await message(
@@ -253,10 +265,8 @@ export class TypstryWorkspaceController {
   private initWordWrap() {
     const wrapToggleBtn = document.getElementById("word-wrap-toggle");
     const wrapLabel = document.getElementById("word-wrap-label");
-    
     if (wrapToggleBtn && wrapLabel) {
       wrapLabel.textContent = this.settingsController.value.editor.wordWrap ? "Wrap: On" : "Wrap: Off";
-
       wrapToggleBtn.addEventListener("click", () => {
         this.settingsController.update(settings => {
           settings.editor.wordWrap = !settings.editor.wordWrap;
@@ -265,23 +275,113 @@ export class TypstryWorkspaceController {
     }
   }
 
-  private async ensureDependencies(): Promise<ToolchainStatus | null> {
-    this.previewPane.innerHTML = `<div style="padding: 20px; color: #007acc; font-family: sans-serif; text-align: center;">
-      <h3>Initializing Typstry Editor</h3>
-      <p>Checking and downloading required compiler toolchains (Typst, Tinymist). This may take a minute...</p>
-    </div>`;
 
-    try {
-      const status = await invoke<ToolchainStatus>("ensure_toolchain");
-      this.toolchainController.setStatus(status);
-      this.previewPane.innerHTML = `<div style="padding: 20px; color: #008000; font-family: sans-serif; text-align: center;">${status.message}</div>`;
-      return status;
-    } catch (e) {
-      console.error("Toolchain setup failed:", e);
-      this.previewPane.innerHTML = `<div style="padding: 20px; color: red;">Failed to download toolchain: ${e}</div>`;
-      return null;
-    }
+  private async showToolchainSetupDialog(): Promise<ToolchainStatus | null> {
+    return new Promise<ToolchainStatus | null>((resolve) => {
+      const overlay = document.getElementById("toolchain-setup-overlay");
+      const versionSelect = document.getElementById("toolchain-version-select") as HTMLSelectElement | null;
+      const versionHint = document.getElementById("toolchain-version-hint");
+      const downloadBtn = document.getElementById("toolchain-download-btn") as HTMLButtonElement | null;
+      const exitBtn = document.getElementById("toolchain-exit-btn") as HTMLButtonElement | null;
+      const progressContainer = document.getElementById("toolchain-progress-container");
+      const progressLabel = document.getElementById("toolchain-progress-label");
+      const progressBar = document.getElementById("toolchain-progress-bar") as HTMLElement | null;
+      const actions = document.getElementById("toolchain-setup-actions");
+      const versionPicker = document.getElementById("toolchain-version-picker");
+
+      if (!overlay || !versionSelect || !downloadBtn || !exitBtn || !progressContainer || !progressBar || !actions || !progressLabel || !versionHint || !versionPicker) {
+        resolve(null);
+        return;
+      }
+
+      overlay.classList.remove("hidden");
+
+      // Fetch available releases and populate the select
+      void (async () => {
+        try {
+          type TypstRelease = { version: string; publishedAt: string | null };
+          const releases = await invoke<TypstRelease[]>("list_typst_releases");
+          versionSelect.innerHTML = "";
+          const placeholder = document.createElement("option");
+          placeholder.value = "";
+          placeholder.textContent = "Select a version...";
+          versionSelect.appendChild(placeholder);
+          for (const release of releases) {
+            const opt = document.createElement("option");
+            opt.value = release.version;
+            opt.textContent = release.version;
+            versionSelect.appendChild(opt);
+          }
+          versionHint.textContent = `${releases.length} stable releases available. The latest is ${releases[0]?.version ?? "unknown"}.`;
+        } catch {
+          versionSelect.innerHTML = "<option value=\"\">Failed to load releases</option>";
+          versionHint.textContent = "Could not reach GitHub. Check your internet connection and try again.";
+        }
+      })();
+
+      versionSelect.addEventListener("change", () => {
+        const hasVersion = Boolean(versionSelect.value);
+        downloadBtn.disabled = !hasVersion;
+        downloadBtn.style.opacity = hasVersion ? "1" : "0.55";
+        downloadBtn.style.cursor = hasVersion ? "pointer" : "default";
+      });
+
+      exitBtn.addEventListener("click", () => {
+        void getCurrentWindow().close();
+      });
+
+      downloadBtn.addEventListener("click", () => {
+        const selectedVersion = versionSelect.value;
+        if (!selectedVersion) return;
+
+        void (async () => {
+          versionPicker.classList.add("hidden");
+          actions.classList.add("hidden");
+          progressContainer.classList.remove("hidden");
+
+          let progress = 0;
+          progressBar.style.width = "0%";
+          progressLabel.textContent = `Installing Typst ${selectedVersion}...`;
+
+          const progressInterval = window.setInterval(() => {
+            if (progress < 15) {
+              progress += 2;
+              progressLabel.textContent = `Installing Typst ${selectedVersion}...`;
+            } else if (progress < 55) {
+              progress += 1.5;
+              progressLabel.textContent = "Downloading Typst...";
+            } else if (progress < 75) {
+              progress += 1;
+              progressLabel.textContent = "Extracting Typst...";
+            } else if (progress < 93) {
+              progress += 0.5;
+              progressLabel.textContent = "Downloading Tinymist LSP...";
+            }
+            progressBar.style.width = String(Math.min(93, progress)) + "%";
+          }, 300);
+
+          try {
+            const status = await invoke<ToolchainStatus>("install_typst_toolchain", { version: selectedVersion });
+            window.clearInterval(progressInterval);
+            progressBar.style.width = "100%";
+            progressLabel.textContent = "Installation complete!";
+            await new Promise(r => window.setTimeout(r, 700));
+            overlay.classList.add("hidden");
+            resolve(status);
+          } catch (error) {
+            window.clearInterval(progressInterval);
+            progressBar.style.width = "0%";
+            progressLabel.textContent = "Installation failed. Please try again.";
+            await message(String(error), { title: "Toolchain installation failed", kind: "error" });
+            progressContainer.classList.add("hidden");
+            versionPicker.classList.remove("hidden");
+            actions.classList.remove("hidden");
+          }
+        })();
+      });
+    });
   }
+
 
   private initCodeMirror() {
     const initialDocument = "";

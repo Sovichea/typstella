@@ -4,7 +4,7 @@ use std::os::windows::process::CommandExt;
 use tauri::{Emitter, Manager};
 
 mod toolchain;
-use toolchain::resolve_executable;
+use toolchain::{active_version, resolve_executable};
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -274,7 +274,9 @@ async fn check_typst_document(
         .path()
         .app_local_data_dir()
         .map_err(|e| format!("Failed to get data dir: {}", e))?;
-    let typst_cmd = resolve_executable(&data_dir, "typst")
+    let version = active_version(&data_dir)
+        .ok_or_else(|| "No managed Typst toolchain is installed.".to_string())?;
+    let typst_cmd = resolve_executable(&data_dir, &version, "typst")
         .ok_or_else(|| "Typst was not found in the app data directory or PATH.".to_string())?;
 
     std::fs::write(&input_path, source_code).map_err(|e| format!("Check write failed: {}", e))?;
@@ -369,7 +371,9 @@ async fn compile_typst_document(
         .path()
         .app_local_data_dir()
         .map_err(|e| format!("Failed to get data dir: {}", e))?;
-    let typst_cmd = resolve_executable(&data_dir, "typst")
+    let version = active_version(&data_dir)
+        .ok_or_else(|| "No managed Typst toolchain is installed.".to_string())?;
+    let typst_cmd = resolve_executable(&data_dir, &version, "typst")
         .ok_or_else(|| "Typst was not found in the app data directory or PATH.".to_string())?;
 
     let mut file = std::fs::File::create(&input_path).map_err(|e| format!("IO Failure: {}", e))?;
@@ -430,7 +434,9 @@ async fn compile_typst_preview(
         .path()
         .app_local_data_dir()
         .map_err(|error| format!("Failed to get data dir: {}", error))?;
-    let typst_cmd = resolve_executable(&data_dir, "typst")
+    let version = active_version(&data_dir)
+        .ok_or_else(|| "No managed Typst toolchain is installed.".to_string())?;
+    let typst_cmd = resolve_executable(&data_dir, &version, "typst")
         .ok_or_else(|| "Typst was not found in the app data directory or PATH.".to_string())?;
 
     std::fs::write(&input_path, preview_source)
@@ -626,7 +632,9 @@ async fn start_tinymist_lsp(
                 .to_string(),
         );
     }
-    let tinymist_exe = resolve_executable(&data_dir, "tinymist")
+    let version = active_version(&data_dir)
+        .ok_or_else(|| "No managed Typst toolchain is installed.".to_string())?;
+    let tinymist_exe = resolve_executable(&data_dir, &version, "tinymist")
         .ok_or_else(|| "Tinymist was not found in the app data directory or PATH.".to_string())?;
 
     let mut command = tokio::process::Command::new(&tinymist_exe);
