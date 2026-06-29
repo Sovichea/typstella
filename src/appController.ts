@@ -23,6 +23,7 @@ import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri } from ".
 import { WysiwymAdapter } from "./wysiwym/adapter";
 import { PreviewFrame } from "./preview/previewFrame";
 import { PreviewSyncController } from "./preview/previewSyncController";
+import { allowsLiveImportPreview, previewRefreshStyle, previewSessionIdentity, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
 import { LogConsoleController, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
 import { EditorFontManager } from "./editor/fontManager";
 import { LayoutController } from "./layout/layoutController";
@@ -48,6 +49,10 @@ type EditorTab = {
   savedContent: string;
   isDirty: boolean;
   previewRootPath: string | null;
+  previewTaskId: string | null;
+  previewSessionKey: string | null;
+  previewImported: boolean;
+  previewLiveUpdates: boolean;
   version: number;
   latestVersion: number;
   selectionAnchor: number;
@@ -61,6 +66,10 @@ export class TypstryWorkspaceController {
   private activeMode: EditorMode = "CODE";
   private activeFilePath: string | null = null;
   private previewRootPath: string | null = null;
+  private previewTaskId: string | null = null;
+  private previewSessionKey: string | null = null;
+  private previewImported = false;
+  private previewLiveUpdates = true;
   private workspaceRootPath: string | null = null;
   private currentVersion = 1;
   private isLoadingFile = false;
@@ -74,13 +83,14 @@ export class TypstryWorkspaceController {
   private fallbackPreviewGeneration = 0;
   private latestDocumentVersion = 1;
   private openTabs: EditorTab[] = [];
+  private readonly openedDocumentUris = new Set<string>();
   private workspaceChangeQueue: Promise<void> = Promise.resolve();
   private readonly externalConflictPaths = new Set<string>();
   private readonly settingsController = new SettingsController(settings => this.applySettingsToRuntime(settings));
   private readonly toolchainController = new ToolchainController({
-    getSelectedVersion: () => this.settingsController.value.toolchain.typstVersion,
+    getSelectedVersion: () => this.settingsController.value.toolchain.tinymistVersion,
     setSelectedVersion: version => this.settingsController.update(settings => {
-      settings.toolchain.typstVersion = version;
+      settings.toolchain.tinymistVersion = version;
     }),
     onToolchainChanged: status => this.handleToolchainChanged(status)
   });
@@ -106,6 +116,7 @@ export class TypstryWorkspaceController {
     getClient: () => this.lspClient,
     getActiveFilePath: () => this.activeFilePath,
     getPreviewRootPath: () => this.previewRootPath,
+    getPreviewTaskId: () => this.previewTaskId,
     isReady: () => this.lspReady,
     isEnabled: () => this.settingsController.value.preview.cursorSync
   });
@@ -183,18 +194,12 @@ export class TypstryWorkspaceController {
       console.error("Failed to check toolchain status:", e);
     }
 
-    if (!toolchain?.typstVersion) {
+    if (!toolchain?.tinymistVersion) {
       toolchain = await this.showToolchainSetupDialog();
     }
 
     this.toolchainController.setStatus(toolchain ?? { typstVersion: null, typstSource: null, tinymistVersion: null, tinymistSource: null, lspAvailable: false, message: "" });
     await this.initLsp(Boolean(toolchain?.lspAvailable));
-    if (toolchain?.typstVersion && !toolchain.lspAvailable) {
-      await message(
-        `${toolchain.message}\n\nPreview will use the Typst compiler. LSP completion, hover, live preview, and preview sync are unavailable.`,
-        { title: "Tinymist unavailable", kind: "warning" }
-      );
-    }
   }
 
   private updateWorkspaceViewportVisibility() {
@@ -299,8 +304,8 @@ export class TypstryWorkspaceController {
       // Fetch available releases and populate the select
       void (async () => {
         try {
-          type TypstRelease = { version: string; publishedAt: string | null };
-          const releases = await invoke<TypstRelease[]>("list_typst_releases");
+          type TinymistRelease = { version: string; publishedAt: string | null };
+          const releases = await invoke<TinymistRelease[]>("list_tinymist_releases");
           versionSelect.innerHTML = "";
           const placeholder = document.createElement("option");
           placeholder.value = "";
@@ -341,27 +346,27 @@ export class TypstryWorkspaceController {
 
           let progress = 0;
           progressBar.style.width = "0%";
-          progressLabel.textContent = `Installing Typst ${selectedVersion}...`;
+          progressLabel.textContent = `Installing Tinymist ${selectedVersion}...`;
 
           const progressInterval = window.setInterval(() => {
             if (progress < 15) {
               progress += 2;
-              progressLabel.textContent = `Installing Typst ${selectedVersion}...`;
+              progressLabel.textContent = `Installing Tinymist ${selectedVersion}...`;
             } else if (progress < 55) {
               progress += 1.5;
-              progressLabel.textContent = "Downloading Typst...";
+              progressLabel.textContent = "Downloading Tinymist...";
             } else if (progress < 75) {
               progress += 1;
-              progressLabel.textContent = "Extracting Typst...";
+              progressLabel.textContent = "Verifying embedded Typst compiler...";
             } else if (progress < 93) {
               progress += 0.5;
-              progressLabel.textContent = "Downloading Tinymist LSP...";
+              progressLabel.textContent = "Finalizing toolchain...";
             }
             progressBar.style.width = String(Math.min(93, progress)) + "%";
           }, 300);
 
           try {
-            const status = await invoke<ToolchainStatus>("install_typst_toolchain", { version: selectedVersion });
+            const status = await invoke<ToolchainStatus>("install_tinymist_toolchain", { version: selectedVersion });
             window.clearInterval(progressInterval);
             progressBar.style.width = "100%";
             progressLabel.textContent = "Installation complete!";
@@ -581,6 +586,10 @@ export class TypstryWorkspaceController {
     if (this.activeFilePath === oldPath) {
       this.activeFilePath = newPath;
       this.previewRootPath = tab.previewRootPath;
+      this.previewTaskId = tab.previewTaskId;
+      this.previewSessionKey = tab.previewSessionKey;
+      this.previewImported = tab.previewImported;
+      this.previewLiveUpdates = tab.previewLiveUpdates;
     }
     this.renderEditorTabs();
   }
@@ -611,6 +620,10 @@ export class TypstryWorkspaceController {
       const nextTab = this.openTabs[Math.min(tabIndex, this.openTabs.length - 1)] ?? null;
       this.activeFilePath = null;
       this.previewRootPath = null;
+      this.previewTaskId = null;
+      this.previewSessionKey = null;
+      this.previewImported = false;
+      this.previewLiveUpdates = true;
       this.clearDiagnostics();
       this.clearPendingLspSync();
       this.previewSyncController.clearForward();
@@ -686,12 +699,12 @@ export class TypstryWorkspaceController {
     }
 
     this.activeFilePath = path;
-    this.previewRootPath = await invoke<string | null>("resolve_preview_main", {
+    const previewTarget = await invoke<PreviewTarget>("resolve_preview_main", {
       filePath: path,
       workspaceRootPath: this.workspaceRootPath,
       fileContents: tab.content
     });
-    tab.previewRootPath = this.previewRootPath;
+    this.applyPreviewTargetToTab(tab, previewTarget);
     this.clearPendingLspSync();
     this.previewSyncController.clearForward();
     this.renderEditorTabs();
@@ -702,17 +715,11 @@ export class TypstryWorkspaceController {
 
     if (this.lspReady && this.lspClient) {
       const uri = filePathToUri(path);
-      await this.lspClient.openTextDocument(uri, tab.content, this.currentVersion);
-      void this.runFallbackDiagnostics(path, tab.content, this.currentVersion);
+      await this.openDocumentIfNeeded(uri, tab.content, this.currentVersion);
 
       if (this.previewRootPath) {
-        const previewUrl = await this.startPreviewWithRestart(this.previewRootPath, tab.content);
-        if (previewUrl) {
-          if (this.previewFrame.currentUrl !== previewUrl) {
-            this.previewPane.innerHTML = `<div style="padding: 20px; color: #007acc; font-family: sans-serif;">Starting live preview server...</div>`;
-          }
-          await this.previewFrame.mount(previewUrl, () => this.lspClient?.getPreviewHtml() ?? Promise.resolve(""));
-        } else {
+        const previewReady = await this.activatePreviewSession(tab.content);
+        if (!previewReady) {
           this.previewFrame.clear();
           this.previewPane.innerHTML = `<div style="padding: 20px; color: red; font-family: sans-serif;">Failed to start live preview server after restart. Check the log console for details.</div>`;
         }
@@ -762,6 +769,8 @@ export class TypstryWorkspaceController {
   private async handleToolchainChanged(status: ToolchainStatus) {
     this.toolchainController.setStatus(status);
     this.lspReady = false;
+    this.openedDocumentUris.clear();
+    this.previewFrame.clear();
     await this.initLsp(status.lspAvailable);
     const activePath = this.activeFilePath;
     if (activePath) {
@@ -833,6 +842,10 @@ export class TypstryWorkspaceController {
         savedContent: contents,
         isDirty: false,
         previewRootPath: null,
+        previewTaskId: null,
+        previewSessionKey: null,
+        previewImported: false,
+        previewLiveUpdates: true,
         version: 1,
         latestVersion: 1,
         selectionAnchor: 0,
@@ -862,6 +875,11 @@ export class TypstryWorkspaceController {
         contents: content
       });
 
+      if (this.lspReady && this.lspClient) {
+        await this.flushPendingLspSync();
+        await this.lspClient.notifyTextSave(filePathToUri(this.activeFilePath), content);
+      }
+
       const activeTab = this.getActiveTab();
       if (activeTab) {
         activeTab.content = content;
@@ -879,8 +897,49 @@ export class TypstryWorkspaceController {
     }
   }
 
-  private async startPreviewWithRestart(previewRootPath: string, activeContents: string): Promise<string> {
-    const firstAttemptUrl = await this.lspClient.startPreview(previewRootPath);
+  private applyPreviewTargetToTab(tab: EditorTab, target: PreviewTarget): void {
+    const style = previewRefreshStyle(target);
+    const identity = target.rootPath ? previewSessionIdentity(target.rootPath, style) : null;
+    tab.previewRootPath = target.rootPath;
+    tab.previewTaskId = identity?.taskId ?? null;
+    tab.previewSessionKey = identity?.key ?? null;
+    tab.previewImported = target.imported;
+    tab.previewLiveUpdates = target.liveUpdates;
+    this.previewRootPath = tab.previewRootPath;
+    this.previewTaskId = tab.previewTaskId;
+    this.previewSessionKey = tab.previewSessionKey;
+    this.previewImported = tab.previewImported;
+    this.previewLiveUpdates = tab.previewLiveUpdates;
+  }
+
+  private async openDocumentIfNeeded(uri: string, text: string, version: number): Promise<void> {
+    if (this.openedDocumentUris.has(uri)) return;
+    await this.lspClient.openTextDocument(uri, text, version);
+    this.openedDocumentUris.add(uri);
+  }
+
+  private async activatePreviewSession(activeContents: string): Promise<boolean> {
+    if (!this.previewRootPath || !this.previewTaskId || !this.previewSessionKey) return false;
+    if (this.previewFrame.activateSession(this.previewSessionKey)) return true;
+    const style: PreviewRefreshStyle = this.previewLiveUpdates ? "on-type" : "on-save";
+    const previewUrl = await this.startPreviewWithRestart(
+      this.previewRootPath,
+      activeContents,
+      this.previewTaskId,
+      style
+    );
+    if (!previewUrl || !this.previewSessionKey) return false;
+    await this.previewFrame.mountSession(this.previewSessionKey, previewUrl);
+    return true;
+  }
+
+  private async startPreviewWithRestart(
+    previewRootPath: string,
+    activeContents: string,
+    taskId: string,
+    refreshStyle: PreviewRefreshStyle
+  ): Promise<string> {
+    const firstAttemptUrl = await this.lspClient.startPreview(previewRootPath, taskId, refreshStyle);
     if (firstAttemptUrl) {
       return firstAttemptUrl;
     }
@@ -891,16 +950,18 @@ export class TypstryWorkspaceController {
     try {
       await this.lspClient.restart();
       this.lspReady = true;
+      this.openedDocumentUris.clear();
+      this.previewFrame.clear();
       if (!this.activeFilePath || this.previewRootPath !== previewRootPath) {
         return "";
       }
 
-      await this.lspClient.openTextDocument(
+      await this.openDocumentIfNeeded(
         filePathToUri(this.activeFilePath),
         activeContents,
         this.currentVersion
       );
-      return await this.lspClient.startPreview(previewRootPath);
+      return await this.lspClient.startPreview(previewRootPath, taskId, refreshStyle);
     } catch (error) {
       this.lspReady = false;
       this.appendLspLog({
@@ -919,6 +980,9 @@ export class TypstryWorkspaceController {
     }
 
     if (!this.isLoadingFile && this.activeFilePath && this.lspReady && this.lspClient) {
+      if (this.previewImported && allowsLiveImportPreview(rawText) !== this.previewLiveUpdates) {
+        void this.refreshActivePreviewRoot();
+      }
       this.pendingLspSyncPath = this.activeFilePath;
       this.pendingLspSyncText = rawText;
       this.setLspStatus({ kind: "sync-pending", message: "Preview update queued" });
@@ -928,7 +992,7 @@ export class TypstryWorkspaceController {
       }
 
       this.pendingLspSyncTimer = window.setTimeout(
-        () => this.flushPendingLspSync(),
+        () => void this.flushPendingLspSync(),
         this.lspSyncDebounceMs
       );
     } else if (!this.isLoadingFile && this.activeFilePath) {
@@ -936,7 +1000,7 @@ export class TypstryWorkspaceController {
     }
   }
 
-  private flushPendingLspSync() {
+  private async flushPendingLspSync(): Promise<void> {
     if (this.pendingLspSyncTimer) {
       window.clearTimeout(this.pendingLspSyncTimer);
       this.pendingLspSyncTimer = null;
@@ -960,8 +1024,7 @@ export class TypstryWorkspaceController {
       activeTab.version = version;
       activeTab.latestVersion = version;
     }
-    this.lspClient.notifyTextChange(filePathToUri(path), text, version);
-    void this.runFallbackDiagnostics(path, text, version);
+    await this.lspClient.notifyTextChange(filePathToUri(path), text, version);
     window.setTimeout(() => {
       if (this.lspReady && !this.pendingLspSyncTimer && this.pendingLspSyncText === null) {
         this.setLspStatus({ kind: "preview-ready", message: "Preview update sent" });
@@ -1274,6 +1337,10 @@ export class TypstryWorkspaceController {
                savedContent: contents,
                isDirty: false,
                previewRootPath: null,
+               previewTaskId: null,
+               previewSessionKey: null,
+               previewImported: false,
+               previewLiveUpdates: true,
                version: 1,
                latestVersion: 1,
                selectionAnchor: tabInfo.selectionAnchor || 0,
@@ -1408,7 +1475,7 @@ export class TypstryWorkspaceController {
     tab.latestVersion = version;
     if (this.lspReady && this.lspClient) {
       await this.lspClient.notifyTextChange(filePathToUri(tab.path), contents, version);
-      void this.runFallbackDiagnostics(tab.path, contents, version);
+      await this.lspClient.notifyTextSave(filePathToUri(tab.path), contents);
       this.setLspStatus({ kind: "preview-ready", message: "Reloaded external file change" });
     } else {
       this.scheduleCompilerPreview(tab.path, contents);
@@ -1418,37 +1485,31 @@ export class TypstryWorkspaceController {
   private async refreshActivePreviewRoot(): Promise<void> {
     if (!this.activeFilePath) return;
     const contents = this.editorInstance.state.doc.toString();
-    const nextPreviewRoot = await invoke<string | null>("resolve_preview_main", {
+    const target = await invoke<PreviewTarget>("resolve_preview_main", {
       filePath: this.activeFilePath,
       workspaceRootPath: this.workspaceRootPath,
       fileContents: contents
     });
-    const unchanged = nextPreviewRoot === this.previewRootPath || (
-      nextPreviewRoot !== null && this.previewRootPath !== null &&
-      filePathKey(nextPreviewRoot) === filePathKey(this.previewRootPath)
-    );
+    const identity = target.rootPath
+      ? previewSessionIdentity(target.rootPath, previewRefreshStyle(target))
+      : null;
+    const unchanged = identity?.key === this.previewSessionKey;
     if (unchanged) return;
 
-    this.previewRootPath = nextPreviewRoot;
     const activeTab = this.getActiveTab();
-    if (activeTab) activeTab.previewRootPath = nextPreviewRoot;
+    if (!activeTab) return;
+    this.applyPreviewTargetToTab(activeTab, target);
 
     if (!this.lspReady || !this.lspClient) {
       this.scheduleCompilerPreview(this.activeFilePath, contents);
       return;
     }
-    if (!nextPreviewRoot) {
+    if (!target.rootPath) {
       this.previewPane.innerHTML = `<div style="padding: 20px; color: #5f6368; font-family: sans-serif;">No preview root found for this library/template file. Diagnostics are still active.</div>`;
       return;
     }
 
-    const previewUrl = await this.startPreviewWithRestart(nextPreviewRoot, contents);
-    if (previewUrl && this.previewRootPath === nextPreviewRoot) {
-      if (this.previewFrame.currentUrl !== previewUrl) {
-        this.previewPane.innerHTML = `<div style="padding: 20px; color: #007acc; font-family: sans-serif;">Restarting live preview...</div>`;
-      }
-      await this.previewFrame.mount(previewUrl, () => this.lspClient?.getPreviewHtml() ?? Promise.resolve(""));
-    }
+    await this.activatePreviewSession(contents);
   }
 
   private reportExternalConflict(path: string, reason: string): void {
@@ -1488,6 +1549,11 @@ export class TypstryWorkspaceController {
     this.workspaceRootPath = null;
     this.activeFilePath = null;
     this.previewRootPath = null;
+    this.previewTaskId = null;
+    this.previewSessionKey = null;
+    this.previewImported = false;
+    this.previewLiveUpdates = true;
+    this.openedDocumentUris.clear();
     this.openTabs = [];
     this.renderEditorTabs();
     
@@ -1499,7 +1565,7 @@ export class TypstryWorkspaceController {
     // Clear workspace navigation
     document.getElementById("workspace-explorer-tree")!.innerHTML = "";
     this.documentOutlineController.clear();
-    this.previewPane.innerHTML = "";
+    this.previewFrame.clear();
     
     this.setLspStatus({ kind: "ready", message: "Project closed" });
     this.updateWorkspaceViewportVisibility();

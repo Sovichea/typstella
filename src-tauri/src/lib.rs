@@ -4,7 +4,7 @@ use std::os::windows::process::CommandExt;
 use tauri::{Emitter, Manager};
 
 mod toolchain;
-use toolchain::{active_version, resolve_executable};
+use toolchain::active_tinymist;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -179,80 +179,251 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct PreviewTarget {
+    root_path: Option<String>,
+    imported: bool,
+    live_updates: bool,
+}
+
+fn normalized_existing_path(path: &std::path::Path) -> std::path::PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn local_typst_dependencies(contents: &str, parent: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let bytes = contents.as_bytes();
+    let mut dependencies = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"//") {
+            index += 2;
+            while index < bytes.len() && bytes[index] != b'\n' {
+                index += 1;
+            }
+            continue;
+        }
+        if bytes[index..].starts_with(b"/*") {
+            index += 2;
+            let mut depth = 1usize;
+            while index < bytes.len() && depth > 0 {
+                if bytes[index..].starts_with(b"/*") {
+                    depth += 1;
+                    index += 2;
+                } else if bytes[index..].starts_with(b"*/") {
+                    depth -= 1;
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+            continue;
+        }
+        if bytes[index] == b'`' {
+            let fence_start = index;
+            while index < bytes.len() && bytes[index] == b'`' {
+                index += 1;
+            }
+            let fence_len = index - fence_start;
+            while index < bytes.len() {
+                if bytes[index] == b'`' {
+                    let close_start = index;
+                    while index < bytes.len() && bytes[index] == b'`' {
+                        index += 1;
+                    }
+                    if index - close_start >= fence_len {
+                        break;
+                    }
+                } else {
+                    index += 1;
+                }
+            }
+            continue;
+        }
+        if bytes[index] == b'"' {
+            index += 1;
+            let mut escaped = false;
+            while index < bytes.len() {
+                let byte = bytes[index];
+                index += 1;
+                if byte == b'"' && !escaped {
+                    break;
+                }
+                escaped = byte == b'\\' && !escaped;
+                if byte != b'\\' {
+                    escaped = false;
+                }
+            }
+            continue;
+        }
+        let command_len = if bytes[index..].starts_with(b"#import") {
+            7
+        } else if bytes[index..].starts_with(b"#include") {
+            8
+        } else {
+            index += 1;
+            continue;
+        };
+        index += command_len;
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if index >= bytes.len() || bytes[index] != b'"' {
+            continue;
+        }
+        index += 1;
+        let start = index;
+        let mut escaped = false;
+        while index < bytes.len() {
+            let byte = bytes[index];
+            if byte == b'"' && !escaped {
+                let raw = &contents[start..index];
+                if !raw.starts_with('@') && !raw.contains("://") {
+                    let candidate = normalized_existing_path(&parent.join(raw));
+                    if candidate.extension().and_then(|value| value.to_str()) == Some("typ") {
+                        dependencies.push(candidate);
+                    }
+                }
+                index += 1;
+                break;
+            }
+            escaped = byte == b'\\' && !escaped;
+            if byte != b'\\' {
+                escaped = false;
+            }
+            index += 1;
+        }
+    }
+    dependencies
+}
+
+fn collect_typst_files(root: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            let name = entry.file_name();
+            if name != ".git" && name != "target" && name != "node_modules" {
+                collect_typst_files(&path, files);
+            }
+        } else if path.extension().and_then(|value| value.to_str()) == Some("typ") {
+            files.push(normalized_existing_path(&path));
+        }
+    }
+}
+
+fn allows_live_import_preview(contents: &str) -> bool {
+    contents.trim_start_matches('\u{feff}').lines().next() == Some("//@allow-preview")
+}
+
+fn resolve_preview_target(
+    file_path: String,
+    workspace_root_path: Option<String>,
+    file_contents: Option<String>,
+) -> Result<PreviewTarget, String> {
+    use std::collections::{HashMap, VecDeque};
+
+    let path = normalized_existing_path(&std::path::PathBuf::from(&file_path));
+    if path.extension().and_then(|ext| ext.to_str()) != Some("typ") {
+        return Ok(PreviewTarget {
+            root_path: None,
+            imported: false,
+            live_updates: false,
+        });
+    }
+
+    let active_contents =
+        file_contents.unwrap_or_else(|| std::fs::read_to_string(&path).unwrap_or_default());
+    let workspace_root = workspace_root_path
+        .map(std::path::PathBuf::from)
+        .map(|root| normalized_existing_path(&root))
+        .or_else(|| path.parent().map(std::path::Path::to_path_buf));
+    let mut files = Vec::new();
+    if let Some(root) = workspace_root.as_deref() {
+        collect_typst_files(root, &mut files);
+    }
+    if !files.contains(&path) {
+        files.push(path.clone());
+    }
+
+    let mut reverse: HashMap<std::path::PathBuf, Vec<std::path::PathBuf>> = HashMap::new();
+    for source in files {
+        let contents = if source == path {
+            active_contents.as_str()
+        } else {
+            match std::fs::read_to_string(&source) {
+                Ok(contents) => {
+                    for dependency in local_typst_dependencies(
+                        &contents,
+                        source.parent().unwrap_or(std::path::Path::new("")),
+                    ) {
+                        reverse.entry(dependency).or_default().push(source.clone());
+                    }
+                    continue;
+                }
+                Err(_) => continue,
+            }
+        };
+        for dependency in local_typst_dependencies(
+            contents,
+            source.parent().unwrap_or(std::path::Path::new("")),
+        ) {
+            reverse.entry(dependency).or_default().push(source.clone());
+        }
+    }
+
+    let mut ancestors: HashMap<std::path::PathBuf, usize> = HashMap::new();
+    let mut queue = VecDeque::from([(path.clone(), 0usize)]);
+    while let Some((child, distance)) = queue.pop_front() {
+        for parent in reverse.get(&child).into_iter().flatten() {
+            if ancestors
+                .get(parent)
+                .is_none_or(|known| distance + 1 < *known)
+            {
+                ancestors.insert(parent.clone(), distance + 1);
+                queue.push_back((parent.clone(), distance + 1));
+            }
+        }
+    }
+    let preferred = |candidate: &std::path::Path| {
+        matches!(
+            candidate
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("main.typ" | "index.typ" | "document.typ")
+        )
+    };
+    let imported = !ancestors.is_empty();
+    let allow_preview = allows_live_import_preview(&active_contents);
+    let root = if imported && allow_preview {
+        path.clone()
+    } else {
+        ancestors
+            .iter()
+            .filter(|(candidate, _)| preferred(candidate))
+            .max_by_key(|(_, distance)| *distance)
+            .or_else(|| ancestors.iter().max_by_key(|(_, distance)| *distance))
+            .map(|(candidate, _)| candidate.clone())
+            .unwrap_or_else(|| path.clone())
+    };
+    Ok(PreviewTarget {
+        root_path: Some(root.to_string_lossy().to_string()),
+        imported,
+        live_updates: !imported || allow_preview,
+    })
+}
+
 #[tauri::command]
 fn resolve_preview_main(
     file_path: String,
     workspace_root_path: Option<String>,
     file_contents: Option<String>,
-) -> Result<Option<String>, String> {
-    let path = std::path::PathBuf::from(&file_path);
-    if path.extension().and_then(|ext| ext.to_str()) != Some("typ") {
-        return Ok(None);
-    }
-
-    if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
-        let lower_name = file_name.to_ascii_lowercase();
-        if lower_name == "main.typ" || lower_name == "index.typ" || lower_name == "document.typ" {
-            return Ok(Some(path.to_string_lossy().to_string()));
-        }
-    }
-
-    let contents = match file_contents {
-        Some(contents) => contents,
-        None => {
-            std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?
-        }
-    };
-    if typst_file_has_renderable_content(&contents) {
-        return Ok(Some(path.to_string_lossy().to_string()));
-    }
-
-    let workspace_root = workspace_root_path.map(std::path::PathBuf::from);
-    if let Some(parent) = path.parent() {
-        for ancestor in parent.ancestors() {
-            if let Some(root) = workspace_root.as_ref() {
-                if !ancestor.starts_with(root) {
-                    break;
-                }
-            }
-
-            for candidate_name in ["main.typ", "index.typ", "document.typ"] {
-                let candidate = ancestor.join(candidate_name);
-                if candidate.exists() {
-                    return Ok(Some(candidate.to_string_lossy().to_string()));
-                }
-            }
-
-            if workspace_root.as_ref().is_some_and(|root| ancestor == root) {
-                break;
-            }
-        }
-    }
-
-    Ok(None)
-}
-
-fn typst_file_has_renderable_content(contents: &str) -> bool {
-    contents.lines().any(|line| {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with("/*") {
-            return false;
-        }
-
-        if trimmed.starts_with('=') {
-            return true;
-        }
-
-        if !trimmed.starts_with('#') {
-            return true;
-        }
-
-        !(trimmed.starts_with("#let")
-            || trimmed.starts_with("#import")
-            || trimmed.starts_with("#include")
-            || trimmed.starts_with("#show")
-            || trimmed.starts_with("#set"))
-    })
+) -> Result<PreviewTarget, String> {
+    resolve_preview_target(file_path, workspace_root_path, file_contents)
 }
 
 #[derive(serde::Serialize)]
@@ -275,12 +446,12 @@ async fn check_typst_document(
     let path = std::path::Path::new(&file_path);
     let parent = path.parent().unwrap_or(std::path::Path::new(""));
     let file_stem = path.file_stem().unwrap_or_default().to_string_lossy();
-    
+
     let nonce = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or_default();
-        
+
     let input_path = parent.join(format!(".{}.typstry-check-{}.typ", file_stem, nonce));
     let temp_dir = std::env::temp_dir();
     let output_path = temp_dir.join(format!(".{}.typstry-check-{}.svg", file_stem, nonce));
@@ -289,27 +460,26 @@ async fn check_typst_document(
         .path()
         .app_local_data_dir()
         .map_err(|e| format!("Failed to get data dir: {}", e))?;
-    let version = active_version(&data_dir)
-        .ok_or_else(|| "No managed Typst toolchain is installed.".to_string())?;
-    let typst_cmd = resolve_executable(&data_dir, &version, "typst")
-        .ok_or_else(|| "Typst was not found in the app data directory or PATH.".to_string())?;
+    let tinymist_cmd = active_tinymist(&data_dir)
+        .ok_or_else(|| "No managed Tinymist toolchain is installed.".to_string())?;
 
     std::fs::write(&input_path, source_code).map_err(|e| format!("Check write failed: {}", e))?;
 
-    let mut command = std::process::Command::new(&typst_cmd);
+    let mut command = std::process::Command::new(&tinymist_cmd);
+    command.current_dir(parent);
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
     let output = command
         .arg("compile")
-        .arg("--diagnostic-format")
-        .arg("short")
+        .arg("--root")
+        .arg(parent)
         .arg("--format")
         .arg("svg")
         .arg(&input_path)
         .arg(&output_path)
         .output()
-        .map_err(|e| format!("Typst check failed to start: {}", e));
+        .map_err(|e| format!("Tinymist check failed to start: {}", e));
 
     let _ = std::fs::remove_file(&input_path);
     let _ = std::fs::remove_file(&output_path);
@@ -386,21 +556,22 @@ async fn compile_typst_document(
         .path()
         .app_local_data_dir()
         .map_err(|e| format!("Failed to get data dir: {}", e))?;
-    let version = active_version(&data_dir)
-        .ok_or_else(|| "No managed Typst toolchain is installed.".to_string())?;
-    let typst_cmd = resolve_executable(&data_dir, &version, "typst")
-        .ok_or_else(|| "Typst was not found in the app data directory or PATH.".to_string())?;
+    let tinymist_cmd = active_tinymist(&data_dir)
+        .ok_or_else(|| "No managed Tinymist toolchain is installed.".to_string())?;
 
     let mut file = std::fs::File::create(&input_path).map_err(|e| format!("IO Failure: {}", e))?;
     std::io::Write::write_all(&mut file, source_code.as_bytes())
         .map_err(|e| format!("Buffer Flush Failure: {}", e))?;
 
-    let mut command = std::process::Command::new(&typst_cmd);
+    let mut command = std::process::Command::new(&tinymist_cmd);
+    command.current_dir(parent);
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
     let output = command
         .arg("compile")
+        .arg("--root")
+        .arg(parent)
         .arg(&input_path)
         .arg(&output_path)
         .output()
@@ -444,34 +615,33 @@ async fn compile_typst_preview(
         .unwrap_or_default();
     let prefix = format!(".{}.typstry-preview-{}-", file_stem, nonce);
     let input_path = parent.join(format!("{}.typ", prefix));
-    
+
     let temp_dir = std::env::temp_dir();
     let output_pattern = temp_dir.join(format!("{}{{0p}}.svg", prefix));
-    
+
     let data_dir = app_handle
         .path()
         .app_local_data_dir()
         .map_err(|error| format!("Failed to get data dir: {}", error))?;
-    let version = active_version(&data_dir)
-        .ok_or_else(|| "No managed Typst toolchain is installed.".to_string())?;
-    let typst_cmd = resolve_executable(&data_dir, &version, "typst")
-        .ok_or_else(|| "Typst was not found in the app data directory or PATH.".to_string())?;
+    let tinymist_cmd = active_tinymist(&data_dir)
+        .ok_or_else(|| "No managed Tinymist toolchain is installed.".to_string())?;
 
     std::fs::write(&input_path, preview_source)
         .map_err(|error| format!("Preview source write failed: {}", error))?;
-    let mut command = std::process::Command::new(&typst_cmd);
+    let mut command = std::process::Command::new(&tinymist_cmd);
+    command.current_dir(parent);
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
     let output = command
         .arg("compile")
-        .arg("--diagnostic-format")
-        .arg("short")
+        .arg("--root")
+        .arg(parent)
         .arg("--format")
         .arg("svg")
         .arg(&input_path)
         .arg(&output_pattern)
         .output()
-        .map_err(|error| format!("Typst preview failed to start: {}", error));
+        .map_err(|error| format!("Tinymist preview failed to start: {}", error));
     let _ = std::fs::remove_file(&input_path);
     let output = output?;
 
@@ -510,67 +680,139 @@ async fn compile_typst_preview(
         return Err(error);
     }
     if pages.is_empty() {
-        return Err("Typst produced no SVG preview pages.".to_string());
+        return Err("Tinymist produced no SVG preview pages.".to_string());
     }
     Ok(pages)
 }
 
 #[cfg(test)]
 mod preview_main_tests {
-    use super::resolve_preview_main;
+    use super::resolve_preview_target;
 
     #[test]
-    fn renderable_active_file_takes_priority_over_workspace_main() {
+    fn imported_file_uses_workspace_main() {
         let workspace = tempfile::tempdir().expect("create workspace");
         let main_path = workspace.path().join("main.typ");
         let chapter_path = workspace.path().join("chapter.typ");
-        std::fs::write(&main_path, "Main document").expect("write main");
+        std::fs::write(&main_path, "#include \"chapter.typ\"").expect("write main");
         std::fs::write(&chapter_path, "Chapter document").expect("write chapter");
 
-        let resolved = resolve_preview_main(
+        let resolved = resolve_preview_target(
             chapter_path.to_string_lossy().to_string(),
             Some(workspace.path().to_string_lossy().to_string()),
             None,
         )
         .expect("resolve preview");
 
-        assert_eq!(resolved, Some(chapter_path.to_string_lossy().to_string()));
+        assert_eq!(
+            resolved.root_path.as_deref(),
+            Some(
+                super::normalized_existing_path(&main_path)
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+        assert!(resolved.imported);
+        assert!(!resolved.live_updates);
     }
 
     #[test]
-    fn workspace_main_remains_fallback_for_declaration_only_file() {
+    fn unrelated_file_previews_itself() {
         let workspace = tempfile::tempdir().expect("create workspace");
         let main_path = workspace.path().join("main.typ");
         let library_path = workspace.path().join("library.typ");
         std::fs::write(&main_path, "Main document").expect("write main");
         std::fs::write(&library_path, "#let helper = 1").expect("write library");
 
-        let resolved = resolve_preview_main(
+        let resolved = resolve_preview_target(
             library_path.to_string_lossy().to_string(),
             Some(workspace.path().to_string_lossy().to_string()),
             None,
         )
         .expect("resolve preview");
 
-        assert_eq!(resolved, Some(main_path.to_string_lossy().to_string()));
+        assert_eq!(
+            resolved.root_path.as_deref(),
+            Some(
+                super::normalized_existing_path(&library_path)
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+        assert!(!resolved.imported);
+        assert!(resolved.live_updates);
     }
 
     #[test]
-    fn in_memory_contents_determine_renderability() {
+    fn top_directive_enables_live_import_preview() {
         let workspace = tempfile::tempdir().expect("create workspace");
         let main_path = workspace.path().join("main.typ");
-        let draft_path = workspace.path().join("draft.typ");
-        std::fs::write(&main_path, "Main document").expect("write main");
-        std::fs::write(&draft_path, "#let draft = true").expect("write draft");
+        let draft_path = workspace.path().join("chapter.typ");
+        std::fs::write(&main_path, "#import \"chapter.typ\"").expect("write main");
+        std::fs::write(&draft_path, "Chapter").expect("write draft");
 
-        let resolved = resolve_preview_main(
+        let resolved = resolve_preview_target(
             draft_path.to_string_lossy().to_string(),
             Some(workspace.path().to_string_lossy().to_string()),
-            Some("Unsaved rendered draft".to_string()),
+            Some("//@allow-preview\nUnsaved chapter".to_string()),
         )
         .expect("resolve preview");
 
-        assert_eq!(resolved, Some(draft_path.to_string_lossy().to_string()));
+        assert!(resolved.imported);
+        assert!(resolved.live_updates);
+        assert_eq!(
+            resolved.root_path.as_deref(),
+            Some(
+                super::normalized_existing_path(&draft_path)
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+    }
+
+    #[test]
+    fn transitive_import_uses_top_level_main() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let main_path = workspace.path().join("main.typ");
+        let chapter_path = workspace.path().join("chapter.typ");
+        let helper_path = workspace.path().join("helper.typ");
+        std::fs::write(&main_path, "#include \"chapter.typ\"").expect("write main");
+        std::fs::write(&chapter_path, "#import \"helper.typ\"").expect("write chapter");
+        std::fs::write(&helper_path, "#let value = 1").expect("write helper");
+
+        let resolved = resolve_preview_target(
+            helper_path.to_string_lossy().to_string(),
+            Some(workspace.path().to_string_lossy().to_string()),
+            None,
+        )
+        .expect("resolve preview");
+
+        assert_eq!(
+            resolved.root_path.as_deref(),
+            Some(
+                super::normalized_existing_path(&main_path)
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+    }
+
+    #[test]
+    fn commented_import_does_not_create_a_preview_parent() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let main_path = workspace.path().join("main.typ");
+        let chapter_path = workspace.path().join("chapter.typ");
+        std::fs::write(&main_path, "// #include \"chapter.typ\"\nMain").expect("write main");
+        std::fs::write(&chapter_path, "Chapter").expect("write chapter");
+
+        let resolved = resolve_preview_target(
+            chapter_path.to_string_lossy().to_string(),
+            Some(workspace.path().to_string_lossy().to_string()),
+            None,
+        )
+        .expect("resolve preview");
+
+        assert!(!resolved.imported);
     }
 }
 
@@ -599,8 +841,8 @@ async fn get_toolchain_status(
 }
 
 #[tauri::command]
-async fn list_typst_releases() -> Result<Vec<toolchain::TypstReleaseInfo>, String> {
-    toolchain::typst_releases().await
+async fn list_tinymist_releases() -> Result<Vec<toolchain::TinymistReleaseInfo>, String> {
+    toolchain::tinymist_releases().await
 }
 
 async fn stop_lsp_process(state: &tauri::State<'_, LspState>) {
@@ -613,7 +855,7 @@ async fn stop_lsp_process(state: &tauri::State<'_, LspState>) {
 }
 
 #[tauri::command]
-async fn install_typst_toolchain(
+async fn install_tinymist_toolchain(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, LspState>,
     version: String,
@@ -644,16 +886,8 @@ async fn start_tinymist_lsp(
         .path()
         .app_local_data_dir()
         .map_err(|e| format!("Failed to get data dir: {}", e))?;
-    if !toolchain::compatible_versions(&data_dir) {
-        return Err(
-            "No stable Tinymist release matching the active Typst major/minor version is installed."
-                .to_string(),
-        );
-    }
-    let version = active_version(&data_dir)
-        .ok_or_else(|| "No managed Typst toolchain is installed.".to_string())?;
-    let tinymist_exe = resolve_executable(&data_dir, &version, "tinymist")
-        .ok_or_else(|| "Tinymist was not found in the app data directory or PATH.".to_string())?;
+    let tinymist_exe = active_tinymist(&data_dir)
+        .ok_or_else(|| "No managed Tinymist toolchain is installed.".to_string())?;
 
     let mut command = tokio::process::Command::new(&tinymist_exe);
     command
@@ -787,10 +1021,13 @@ async fn send_lsp_message(
     message: String,
     state: tauri::State<'_, LspState>,
 ) -> Result<(), String> {
-    if let Some(tx) = state.tx.lock().unwrap().as_ref() {
-        let _ = tx.try_send(message);
-    }
-    Ok(())
+    let tx = state.tx.lock().unwrap().clone();
+    let Some(tx) = tx else {
+        return Err("Tinymist LSP is not running.".to_string());
+    };
+    tx.send(message)
+        .await
+        .map_err(|_| "Tinymist LSP message channel is closed.".to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -828,8 +1065,8 @@ pub fn run() {
             resolve_preview_main,
             ensure_toolchain,
             get_toolchain_status,
-            list_typst_releases,
-            install_typst_toolchain,
+            list_tinymist_releases,
+            install_tinymist_toolchain,
             start_tinymist_lsp,
             send_lsp_message
         ])

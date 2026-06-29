@@ -34,7 +34,7 @@ export type AppSettings = {
     highlightDurationMs: number;
   };
   toolchain: {
-    typstVersion: string | null;
+    tinymistVersion: string | null;
   };
 };
 
@@ -61,7 +61,7 @@ export const defaultAppSettings: AppSettings = {
     highlightDurationMs: 2200
   },
   toolchain: {
-    typstVersion: null
+    tinymistVersion: null
   }
 };
 
@@ -117,8 +117,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       highlightDurationMs: Math.round(boundedNumber(preview.highlightDurationMs, defaultAppSettings.preview.highlightDurationMs, 500, 10000))
     },
     toolchain: {
-      typstVersion: typeof toolchain.typstVersion === "string" && /^\d+\.\d+\.\d+$/.test(toolchain.typstVersion)
-        ? toolchain.typstVersion
+      tinymistVersion: typeof toolchain.tinymistVersion === "string" && /^\d+\.\d+\.\d+$/.test(toolchain.tinymistVersion)
+        ? toolchain.tinymistVersion
+        : typeof toolchain.typstVersion === "string" && /^\d+\.\d+\.\d+$/.test(toolchain.typstVersion)
+          ? toolchain.typstVersion
         : null
     }
   };

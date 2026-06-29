@@ -9,7 +9,7 @@ This document serves as the core knowledge base and skill reference for the Typs
 - **Editor Engine:** CodeMirror 6
 - **Bundled Fonts:** MiSans Latin is the UI font. Fira Mono is the default code font; DejaVu Sans Mono remains an alternate bundled monospace choice.
 - **Language Server:** Tinymist LSP spawned by the Rust backend and bridged to the frontend over Tauri IPC (`lsp-rx`, `lsp-status`, `send_lsp_message`). Tinymist preview assets may still use local `127.0.0.1` ports.
-- **Toolchain:** `src-tauri/src/toolchain.rs` discovers stable GitHub releases and installs platform binaries in Tauri app-local data on Windows, macOS, and Linux. Managed executables take precedence, then all platforms fall back to `PATH`.
+- **Toolchain:** Tinymist is the single managed toolchain. `src-tauri/src/toolchain.rs` installs stable platform binaries in Tauri app-local data; compilation and export use Tinymist's embedded Typst compiler. Do not download or require a separate `typst` executable.
 
 ## 2. Architecture & Process Boundaries
 The application operates across distinct processes and contexts:
@@ -17,8 +17,8 @@ The application operates across distinct processes and contexts:
 ### 2.1 Rust Native Layer (`src-tauri/`)
 - **Entry Point:** `src/main.rs` hands off to `lib::run()`.
 - **Tauri Plugins:** Relies heavily on `@tauri-apps/plugin-fs` (file system), `@tauri-apps/plugin-shell` (CLI invocation), and `@tauri-apps/plugin-dialog` (OS file pickers).
-- **Compilation Engine:** The native backend exposes `check_typst_document` for SVG-based diagnostics and `compile_typst_document` for exporting the active document to a sibling PDF path via the local `typst` CLI.
-- **Security:** `tauri.conf.json` enforces a strict CSP that explicitly allows `ws://127.0.0.1:8589` for Tinymist LSP SVG streaming.
+- **Compilation Engine:** The native backend exposes `check_typst_document`, `compile_typst_preview`, and `compile_typst_document` through `tinymist compile`, which is CLI-compatible with `typst compile`.
+- **Security:** `tauri.conf.json` allows loopback HTTP, WebSocket, and frame ports because each Tinymist preview task owns a random local data-plane port.
 
 ### 2.2 Webview Frontend Layer (`src/`)
 - **Entry Point (`main.ts`):** A minimal composition entry that starts `TypstryWorkspaceController` after `DOMContentLoaded`.
@@ -27,8 +27,8 @@ The application operates across distinct processes and contexts:
 - **File Explorer (`components/explorer.ts`):** A custom DOM tree renderer that loads only the workspace root initially and reads child directories on first expansion. Do not restore eager recursive scanning.
 - **CodeMirror Integration (`editor/`):** Contains `extensions.ts` and `themes.ts`. Implements a highly customized, dark-themed Unicode-compliant editor layout with basic Typst token matching.
 - **LSP Interface (`compiler/`):** `lspTransport.ts` exclusively owns Tauri IPC transport, `jsonRpc.ts` validates the JSON-RPC boundary, and `lsp.ts` maps typed Tinymist operations such as changes, diagnostics, hover/completion, preview startup, and inverse sync.
-- **Preview (`preview/`):** Pure source highlighting is separated from iframe DOM ownership and the preview synchronization state machine. Temporary highlight versions must never become saved editor content.
-- **Toolchain UI (`toolchain/`):** Owns stable Typst release selection, installation state, and read-only Tinymist version reporting. Tinymist compatibility is the newest stable release sharing Typst's major/minor line; incompatible or unavailable Tinymist must fall back to compiler-rendered SVG preview.
+- **Preview (`preview/`):** Preview tasks use deterministic unique IDs per root and refresh policy. Their iframes remain mounted in a small LRU cache so tab switches retain scroll and WebSocket state. Imported files preview their top-level importer with `on-save` refresh; a first-line `//@allow-preview` makes the imported file its own live `on-type` preview root.
+- **Toolchain UI (`toolchain/`):** Owns stable Tinymist release selection and displays the embedded Typst version read-only.
 
 ## 3. Implementation Rules & Best Practices
 1. **Never use React/Vue/Svelte:** This project strictly uses `document.createElement`, `DocumentFragment`, and Vanilla TS/HTML/CSS for maximum performance and minimum footprint.
@@ -38,10 +38,10 @@ The application operates across distinct processes and contexts:
 5. **WYSIWYM Parsing:** Use `WysiwymAdapter.render()` and `.serialize()` when mapping DOM blocks to Typst. Preserve structural prefixes such as `= ` and table metadata.
 6. **Validation:** Run `bun test`, `bun run build`, `cargo fmt --check`, `cargo check --lib`, and `cargo test --lib` after cross-boundary changes.
 7. **Font Catalogs:** `editor/fontCatalog.ts` is the source of truth for editor font selectors. Code-font entries must be monospace. MiSans Latin is UI-only and must never be added as a code or detector recommendation. New Unicode downloads must be registered with the detector engine and remain separate from the base code font.
-8. **Stable Toolchains Only:** Filter GitHub drafts, releases marked prerelease, and semantic versions with prerelease identifiers. Never start Tinymist unless its major/minor version matches the active Typst version.
+8. **Stable Toolchains Only:** Filter GitHub drafts, prereleases, semantic prerelease identifiers, and Tinymist's odd-patch nightly releases.
 
 ## 4. Common Troubleshooting
-- **LSP Offline Warnings:** Check the Toolchain settings panel. A mismatched or unavailable Tinymist intentionally disables LSP and sync while retaining Typst compiler preview. Port `8589` is used for preview assets, not frontend JSON-RPC.
+- **LSP Offline Warnings:** Check the Toolchain settings panel and the managed Tinymist binary. Frontend JSON-RPC uses Tauri IPC; only preview assets use random loopback ports.
 - **LNK1104 msvcrt.lib / Rust Compile Errors on Windows:** Tauri requires the MSVC toolchain. Ensure that **Desktop development with C++** and the **Windows 10/11 SDK** are installed via the Visual Studio Installer.
 
 ## 5. Development Cycle & AI Session Handover

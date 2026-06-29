@@ -427,19 +427,18 @@
           </div>
 
           <div class="settings-panel" data-settings-panel-content="toolchain">
-            <h3>Typst Toolchain</h3>
+            <h3>Tinymist Toolchain</h3>
             <div class="settings-notice" id="settings-toolchain-status" role="status" aria-live="polite"></div>
             <div class="settings-field">
-              <label for="settings-typst-version">Typst version</label>
-              <select id="settings-typst-version"><option value="">Loading stable releases...</option></select>
-              <small id="settings-typst-current">Checking installed version...</small>
+              <label for="settings-tinymist-version">Tinymist version</label>
+              <select id="settings-tinymist-version"><option value="">Loading stable releases...</option></select>
+              <small id="settings-tinymist-current">Checking installed version...</small>
             </div>
             <div class="settings-field">
-              <label for="settings-tinymist-version">Tinymist version</label>
-              <input id="settings-tinymist-version" type="text" value="Checking..." readonly>
-              <small id="settings-tinymist-current">Selected automatically to match Typst.</small>
+              <label for="settings-typst-current">Embedded Typst version</label>
+              <input id="settings-typst-current" type="text" value="Checking..." readonly>
             </div>
-            <p class="settings-help">Only stable releases are listed. Typstry installs selected tools in its application data directory and does not replace package-manager or PATH installations.</p>
+            <p class="settings-help">Only stable Tinymist releases are listed. Each release includes its compatible Typst compiler.</p>
             <button id="settings-toolchain-refresh" class="settings-secondary-button" type="button">Refresh releases</button>
           </div>
         </div>
@@ -461,11 +460,11 @@
   <div id="toolchain-setup-overlay" class="settings-overlay hidden" role="presentation">
     <section class="settings-dialog" role="dialog" aria-modal="true" style="width: min(460px, 100%); height: auto; padding: 28px; text-align: center; gap: 0; border-radius: 12px; display: flex; flex-direction: column;">
       <header style="margin-bottom: 12px;">
-        <h2 style="font-size: 18px; font-weight: 600; color: var(--ui-header-text); margin: 0;">Typst Toolchain Required</h2>
-        <p style="font-size: 12px; color: var(--ui-text-muted); margin: 6px 0 0;">Select a Typst version to install. Tinymist LSP will be paired automatically.</p>
+        <h2 style="font-size: 18px; font-weight: 600; color: var(--ui-header-text); margin: 0;">Tinymist Toolchain Required</h2>
+        <p style="font-size: 12px; color: var(--ui-text-muted); margin: 6px 0 0;">Select a stable Tinymist version. Its embedded Typst compiler is used for exports and fallback compilation.</p>
       </header>
       <div id="toolchain-version-picker" style="margin-bottom: 18px; text-align: left;">
-        <label for="toolchain-version-select" style="display: block; font-size: 12px; font-weight: 500; color: var(--ui-text); margin-bottom: 6px;">Typst version</label>
+        <label for="toolchain-version-select" style="display: block; font-size: 12px; font-weight: 500; color: var(--ui-text); margin-bottom: 6px;">Tinymist version</label>
         <select id="toolchain-version-select" style="width: 100%; padding: 7px 10px; border: 1px solid var(--ui-border); border-radius: 5px; color: var(--ui-text); background: var(--ui-bg); font: inherit; font-size: 13px; cursor: pointer;">
           <option value="">Loading available releases...</option>
         </select>

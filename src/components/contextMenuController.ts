@@ -190,7 +190,6 @@ export class ContextMenuController {
   }
 
   private showForTarget(event: MouseEvent): void {
-    event.preventDefault();
     const target = event.target as HTMLElement;
     if (target.closest("#document-outline-section")) {
       this.hide();
@@ -207,7 +206,11 @@ export class ContextMenuController {
       items = this.explorerBackgroundItems();
     } else if (target.closest(".cm-editor") || target.closest("#code-render-pane")) items = this.editorItems();
     else if (target.closest("#preview-container-wrapper")) items = previewItems;
-    else items = '<div class="dropdown-item" id="ctx-open-project">Open Workspace <span class="hotkey">Ctrl+K Ctrl+O</span></div>';
+    else {
+      this.hide();
+      return;
+    }
+    event.preventDefault();
     this.show(items, event.clientX, event.clientY);
   }
 

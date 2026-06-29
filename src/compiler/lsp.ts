@@ -355,23 +355,13 @@ export class TinymistLspClient {
           exportSvg: "never",
           exportPng: "never",
           formatterMode: "typstyle",
-          preview: {
-            background: {
-              enabled: true,
-              args: ["--host", "127.0.0.1:8589"]
-            }
-          },
+          preview: { background: { enabled: false } },
           tinymist: {
             exportPdf: "never",
             exportSvg: "never",
             exportPng: "never",
             formatterMode: "typstyle",
-            preview: {
-              background: {
-                enabled: true,
-                args: ["--host", "127.0.0.1:8589"]
-              }
-            }
+            preview: { background: { enabled: false } }
           }
         },
         workspaceFolders: null
@@ -391,24 +381,18 @@ export class TinymistLspClient {
     });
   }
 
-  public async startPreview(path: string): Promise<string> {
-    // Force tinymist to render this specific file instead of auto-detecting an entry point.
-    // NOTE: These commands specifically require the raw OS path, not a URI!
-    void this.sendRequest("workspace/executeCommand", {
-      command: "tinymist.pinMain",
-      arguments: [path]
-    }, this.requestId++);
-
-    void this.sendRequest("workspace/executeCommand", {
-      command: "tinymist.focusMain",
-      arguments: [path]
-    }, this.requestId++);
-
+  public async startPreview(path: string, taskId: string, refreshStyle: "on-type" | "on-save"): Promise<string> {
     this.setStatus("preview-starting", "Starting preview");
     try {
       const result = await this.request<string | TinymistPreviewResult | null>("workspace/executeCommand", {
         command: "tinymist.doStartPreview",
-        arguments: [[path]]
+        arguments: [[
+          "--task-id", taskId,
+          "--not-primary",
+          "--data-plane-host=127.0.0.1:0",
+          "--refresh-style", refreshStyle,
+          path
+        ]]
       }, 5000);
       const previewUrl = this.normalizePreviewUrl(result);
       this.setStatus(previewUrl ? "preview-ready" : "error", previewUrl ? "Preview ready" : "Preview URL unavailable");
@@ -424,6 +408,13 @@ export class TinymistLspClient {
     return this.sendNotification("textDocument/didChange", {
       textDocument: { uri, version },
       contentChanges: [{ text }]
+    });
+  }
+
+  public notifyTextSave(uri: string, text: string): Promise<void> {
+    return this.sendNotification("textDocument/didSave", {
+      textDocument: { uri },
+      text
     });
   }
 

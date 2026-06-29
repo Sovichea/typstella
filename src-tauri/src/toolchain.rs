@@ -8,7 +8,6 @@ use std::os::windows::process::CommandExt;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
-const TYPST_RELEASES_URL: &str = "https://api.github.com/repos/typst/typst/releases";
 const TINYMIST_RELEASES_URL: &str = "https://api.github.com/repos/Myriad-Dreamin/tinymist/releases";
 
 #[derive(Clone, Deserialize)]
@@ -33,9 +32,16 @@ struct StableRelease {
     assets: Vec<GithubAsset>,
 }
 
+#[derive(Clone)]
+struct InstalledToolchain {
+    directory: String,
+    tinymist_version: Version,
+    typst_version: Version,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TypstReleaseInfo {
+pub struct TinymistReleaseInfo {
     version: String,
     published_at: Option<String>,
 }
@@ -51,20 +57,15 @@ pub struct ToolchainStatus {
     pub message: String,
 }
 
-/// Returns the directory for a specific toolchain version.
-/// Structure: `data_dir/toolchain/{version}/`
 fn version_dir(data_dir: &Path, version: &str) -> PathBuf {
     data_dir.join("toolchain").join(version)
 }
 
-/// Returns the path for a managed executable of a specific version.
-/// Structure: `data_dir/toolchain/{version}/{name}[.exe]`
 pub fn managed_executable_path(data_dir: &Path, version: &str, name: &str) -> PathBuf {
     #[cfg(windows)]
     let file_name = format!("{}.exe", name);
     #[cfg(not(windows))]
     let file_name = name.to_string();
-
     version_dir(data_dir, version).join(file_name)
 }
 
@@ -75,112 +76,121 @@ fn command_for(executable: &Path) -> Command {
     command
 }
 
-fn executable_version(executable: &Path) -> Option<Version> {
+fn version_output(executable: &Path) -> Option<String> {
     let output = command_for(executable).arg("--version").output().ok()?;
     if !output.status.success() {
         return None;
     }
-    let text = format!(
-        "{} {}",
+    Some(format!(
+        "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
-    );
-    text.split_whitespace()
-        .find_map(|token| Version::parse(token.trim_start_matches('v')).ok())
+    ))
 }
 
-/// Resolves a managed executable for a specific version.
-/// Only looks in the version-specific managed directory — never falls back to system PATH.
-pub fn resolve_executable(data_dir: &Path, version: &str, name: &str) -> Option<PathBuf> {
-    let path = managed_executable_path(data_dir, version, name);
-    if path.is_file() && executable_version(&path).is_some() {
-        Some(path)
-    } else {
-        None
-    }
+fn labeled_version(text: &str, label: &str) -> Option<Version> {
+    text.lines().find_map(|line| {
+        let value = line
+            .trim()
+            .strip_prefix(label)?
+            .trim()
+            .trim_start_matches('v');
+        Version::parse(value).ok()
+    })
 }
 
-/// Scans installed version directories and returns the best (latest semver) installed Typst version
-/// that has a valid executable.
-pub fn active_version(data_dir: &Path) -> Option<String> {
-    let toolchain_dir = data_dir.join("toolchain");
-    let entries = std::fs::read_dir(&toolchain_dir).ok()?;
-    let mut versions: Vec<Version> = entries
+fn tinymist_metadata(executable: &Path) -> Option<(Version, Version)> {
+    let text = version_output(executable)?;
+    let tinymist = labeled_version(&text, "Build Git Describe:")
+        .or_else(|| labeled_version(&text, "Tinymist Version:"))
+        .or_else(|| {
+            text.lines().find_map(|line| {
+                let value = line
+                    .trim()
+                    .strip_prefix("tinymist")?
+                    .trim()
+                    .trim_start_matches('v');
+                Version::parse(value).ok()
+            })
+        })?;
+    let typst = labeled_version(&text, "Typst Version:")?;
+    Some((tinymist, typst))
+}
+
+fn installed_toolchains(data_dir: &Path) -> Vec<InstalledToolchain> {
+    let Ok(entries) = std::fs::read_dir(data_dir.join("toolchain")) else {
+        return Vec::new();
+    };
+    let mut installed: Vec<_> = entries
         .flatten()
-        .filter(|e| e.path().is_dir())
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            let version = Version::parse(&name).ok()?;
-            let typst_path = managed_executable_path(data_dir, &name, "typst");
-            if typst_path.is_file() {
-                Some(version)
-            } else {
-                None
-            }
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| {
+            let directory = entry.file_name().to_string_lossy().to_string();
+            let executable = managed_executable_path(data_dir, &directory, "tinymist");
+            let (tinymist_version, typst_version) = tinymist_metadata(&executable)?;
+            Some(InstalledToolchain {
+                directory,
+                tinymist_version,
+                typst_version,
+            })
         })
         .collect();
-    versions.sort_by(|a, b| b.cmp(a));
-    versions.into_iter().next().map(|v| v.to_string())
+    installed.sort_by(|left, right| right.tinymist_version.cmp(&left.tinymist_version));
+    installed
+}
+
+pub fn active_version(data_dir: &Path) -> Option<String> {
+    active_toolchain(data_dir).map(|toolchain| toolchain.directory)
+}
+
+fn active_toolchain(data_dir: &Path) -> Option<InstalledToolchain> {
+    let installed = installed_toolchains(data_dir);
+    let selected = std::fs::read_to_string(data_dir.join("toolchain").join("active-version"))
+        .ok()
+        .map(|value| value.trim().to_string());
+    selected
+        .and_then(|directory| {
+            installed
+                .iter()
+                .find(|toolchain| toolchain.directory == directory)
+                .cloned()
+        })
+        .or_else(|| installed.into_iter().next())
+}
+
+pub fn resolve_executable(data_dir: &Path, version: &str, name: &str) -> Option<PathBuf> {
+    let path = managed_executable_path(data_dir, version, name);
+    path.is_file().then_some(path)
+}
+
+pub fn active_tinymist(data_dir: &Path) -> Option<PathBuf> {
+    let directory = active_version(data_dir)?;
+    resolve_executable(data_dir, &directory, "tinymist")
 }
 
 pub fn status(data_dir: &Path) -> ToolchainStatus {
-    let version = match active_version(data_dir) {
-        Some(v) => v,
-        None => {
-            return ToolchainStatus {
-                typst_version: None,
-                typst_source: None,
-                tinymist_version: None,
-                tinymist_source: None,
-                lsp_available: false,
-                message: "Typst is not installed.".to_string(),
-            };
-        }
+    let Some(toolchain) = active_toolchain(data_dir) else {
+        return ToolchainStatus {
+            typst_version: None,
+            typst_source: None,
+            tinymist_version: None,
+            tinymist_source: None,
+            lsp_available: false,
+            message: "Tinymist is not installed.".to_string(),
+        };
     };
-
-    let typst_path = resolve_executable(data_dir, &version, "typst");
-    let tinymist_path = resolve_executable(data_dir, &version, "tinymist");
-
-    let typst_version = typst_path
-        .as_deref()
-        .and_then(executable_version)
-        .map(|v| v.to_string());
-    let tinymist_version = tinymist_path
-        .as_deref()
-        .and_then(executable_version)
-        .map(|v| v.to_string());
-
-    let lsp_available = match (&typst_version, &tinymist_version) {
-        (Some(t), Some(tm)) => {
-            let tv = Version::parse(t).ok();
-            let tmv = Version::parse(tm).ok();
-            matches!((tv, tmv), (Some(t), Some(tm)) if t.major == tm.major && t.minor == tm.minor)
-        }
-        _ => false,
-    };
-
-    let message = match (&typst_version, &tinymist_version, lsp_available) {
-        (None, _, _) => "Typst is not installed.".to_string(),
-        (Some(typst), None, _) => format!(
-            "Typst {} is ready. No matching Tinymist release is installed; compiler preview remains available.",
-            typst
-        ),
-        (Some(typst), Some(tinymist), false) => format!(
-            "Typst {} and Tinymist {} are incompatible. Compiler preview remains available without LSP or preview sync.",
-            typst, tinymist
-        ),
-        (Some(typst), Some(tinymist), true) => {
-            format!("Typst {} and Tinymist {} are ready.", typst, tinymist)
-        }
-    };
-
+    let tinymist = toolchain.tinymist_version.to_string();
+    let typst = toolchain.typst_version.to_string();
     ToolchainStatus {
-        typst_version: typst_version.map(|_| version.clone()),
-        typst_source: typst_path.map(|_| "Managed by Typstry".to_string()),
-        tinymist_version: tinymist_version.map(|_| version.clone()),
-        tinymist_source: tinymist_path.map(|_| "Managed by Typstry".to_string()),
-        lsp_available,
-        message,
+        typst_version: Some(typst.clone()),
+        typst_source: Some(format!("Embedded in Tinymist {}", tinymist)),
+        tinymist_version: Some(tinymist.clone()),
+        tinymist_source: Some("Managed by Typstry".to_string()),
+        lsp_available: true,
+        message: format!(
+            "Tinymist {} with embedded Typst {} is ready.",
+            tinymist, typst
+        ),
     }
 }
 
@@ -191,22 +201,22 @@ fn github_client() -> Result<reqwest::Client, String> {
         .map_err(|error| format!("Failed to initialize GitHub client: {}", error))
 }
 
-async fn fetch_stable_releases(url: &str) -> Result<Vec<StableRelease>, String> {
+async fn fetch_stable_releases() -> Result<Vec<StableRelease>, String> {
     let client = github_client()?;
     let mut releases = Vec::new();
     for page in 1.. {
         let response = client
-            .get(url)
+            .get(TINYMIST_RELEASES_URL)
             .query(&[("per_page", 100), ("page", page)])
             .send()
             .await
-            .map_err(|error| format!("Failed to fetch GitHub releases: {}", error))?
+            .map_err(|error| format!("Failed to fetch Tinymist releases: {}", error))?
             .error_for_status()
-            .map_err(|error| format!("GitHub release request failed: {}", error))?;
+            .map_err(|error| format!("Tinymist release request failed: {}", error))?;
         let mut page_releases = response
             .json::<Vec<GithubRelease>>()
             .await
-            .map_err(|error| format!("Failed to read GitHub releases: {}", error))?;
+            .map_err(|error| format!("Failed to read Tinymist releases: {}", error))?;
         let is_last_page = page_releases.len() < 100;
         releases.append(&mut page_releases);
         if is_last_page {
@@ -223,7 +233,7 @@ fn stable_release(release: GithubRelease) -> Option<StableRelease> {
         return None;
     }
     let version = Version::parse(release.tag_name.trim_start_matches('v')).ok()?;
-    if !version.pre.is_empty() {
+    if !version.pre.is_empty() || version.patch % 2 == 1 {
         return None;
     }
     Some(StableRelease {
@@ -233,36 +243,28 @@ fn stable_release(release: GithubRelease) -> Option<StableRelease> {
     })
 }
 
-pub async fn typst_releases() -> Result<Vec<TypstReleaseInfo>, String> {
-    Ok(fetch_stable_releases(TYPST_RELEASES_URL)
+pub async fn tinymist_releases() -> Result<Vec<TinymistReleaseInfo>, String> {
+    Ok(fetch_stable_releases()
         .await?
         .into_iter()
-        .map(|release| TypstReleaseInfo {
+        .map(|release| TinymistReleaseInfo {
             version: release.version.to_string(),
             published_at: release.published_at,
         })
         .collect())
 }
 
-fn platform_asset_name(tool: &str) -> Result<String, String> {
-    let arch = std::env::consts::ARCH;
-    let os = std::env::consts::OS;
-    match (tool, os, arch) {
-        ("typst", "windows", "x86_64") => Ok("typst-x86_64-pc-windows-msvc.zip".into()),
-        ("typst", "windows", "aarch64") => Ok("typst-aarch64-pc-windows-msvc.zip".into()),
-        ("typst", "macos", "x86_64") => Ok("typst-x86_64-apple-darwin.tar.xz".into()),
-        ("typst", "macos", "aarch64") => Ok("typst-aarch64-apple-darwin.tar.xz".into()),
-        ("typst", "linux", "x86_64") => Ok("typst-x86_64-unknown-linux-musl.tar.xz".into()),
-        ("typst", "linux", "aarch64") => Ok("typst-aarch64-unknown-linux-musl.tar.xz".into()),
-        ("tinymist", "windows", "x86_64") => Ok("tinymist-win32-x64.exe".into()),
-        ("tinymist", "windows", "aarch64") => Ok("tinymist-win32-arm64.exe".into()),
-        ("tinymist", "macos", "x86_64") => Ok("tinymist-darwin-x64".into()),
-        ("tinymist", "macos", "aarch64") => Ok("tinymist-darwin-arm64".into()),
-        ("tinymist", "linux", "x86_64") => Ok("tinymist-linux-x64".into()),
-        ("tinymist", "linux", "aarch64") => Ok("tinymist-linux-arm64".into()),
-        _ => Err(format!(
-            "No {} binary is published for {} {}.",
-            tool, os, arch
+fn platform_asset_name() -> Result<String, String> {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("windows", "x86_64") => Ok("tinymist-win32-x64.exe".into()),
+        ("windows", "aarch64") => Ok("tinymist-win32-arm64.exe".into()),
+        ("macos", "x86_64") => Ok("tinymist-darwin-x64".into()),
+        ("macos", "aarch64") => Ok("tinymist-darwin-arm64".into()),
+        ("linux", "x86_64") => Ok("tinymist-linux-x64".into()),
+        ("linux", "aarch64") => Ok("tinymist-linux-arm64".into()),
+        (os, arch) => Err(format!(
+            "No Tinymist binary is published for {} {}.",
+            os, arch
         )),
     }
 }
@@ -281,26 +283,6 @@ async fn download(asset: &GithubAsset) -> Result<Vec<u8>, String> {
         .map_err(|error| format!("Failed to read {}: {}", asset.name, error))
 }
 
-fn find_executable(root: &Path, name: &str) -> Option<PathBuf> {
-    let expected = if cfg!(windows) {
-        format!("{}.exe", name)
-    } else {
-        name.to_string()
-    };
-    let entries = std::fs::read_dir(root).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            if let Some(found) = find_executable(&path, name) {
-                return Some(found);
-            }
-        } else if path.file_name().and_then(|value| value.to_str()) == Some(&expected) {
-            return Some(path);
-        }
-    }
-    None
-}
-
 fn make_executable(path: &Path) -> Result<(), String> {
     #[cfg(not(unix))]
     let _ = path;
@@ -317,136 +299,76 @@ fn make_executable(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Writes an executable into the version-specific directory with atomic rename.
-fn install_managed_executable(data_dir: &Path, version: &str, name: &str, source: &Path) -> Result<(), String> {
-    let destination = managed_executable_path(data_dir, version, name);
-    let dir = destination.parent().ok_or("Invalid toolchain directory")?;
-    std::fs::create_dir_all(dir)
+fn install_managed_executable(data_dir: &Path, version: &str, source: &Path) -> Result<(), String> {
+    let destination = managed_executable_path(data_dir, version, "tinymist");
+    let directory = destination.parent().ok_or("Invalid toolchain directory")?;
+    std::fs::create_dir_all(directory)
         .map_err(|error| format!("Failed to create toolchain directory: {}", error))?;
-    let staged = dir.join(format!(
-        ".{}.new",
-        destination.file_name().unwrap().to_string_lossy()
-    ));
-    let backup = dir.join(format!(
-        ".{}.old",
-        destination.file_name().unwrap().to_string_lossy()
-    ));
+    let staged = directory.join(".tinymist.new");
+    let backup = directory.join(".tinymist.old");
     let _ = std::fs::remove_file(&staged);
     let _ = std::fs::remove_file(&backup);
     std::fs::copy(source, &staged)
-        .map_err(|error| format!("Failed to stage {}: {}", name, error))?;
+        .map_err(|error| format!("Failed to stage Tinymist: {}", error))?;
     make_executable(&staged)?;
     if destination.exists() {
         std::fs::rename(&destination, &backup)
-            .map_err(|error| format!("Failed to replace existing {}: {}", name, error))?;
+            .map_err(|error| format!("Failed to replace existing Tinymist: {}", error))?;
     }
     if let Err(error) = std::fs::rename(&staged, &destination) {
         if backup.exists() {
             let _ = std::fs::rename(&backup, &destination);
         }
-        return Err(format!("Failed to activate {}: {}", name, error));
+        return Err(format!("Failed to activate Tinymist: {}", error));
     }
     let _ = std::fs::remove_file(backup);
     Ok(())
 }
 
-fn install_typst_archive(data_dir: &Path, version: &str, asset: &GithubAsset, bytes: &[u8]) -> Result<(), String> {
-    let extraction = tempfile::tempdir_in(data_dir)
-        .map_err(|error| format!("Failed to create extraction directory: {}", error))?;
-    if asset.name.ends_with(".zip") {
-        let reader = std::io::Cursor::new(bytes);
-        let mut archive = zip::ZipArchive::new(reader)
-            .map_err(|error| format!("Invalid Typst archive: {}", error))?;
-        archive
-            .extract(extraction.path())
-            .map_err(|error| format!("Failed to extract Typst: {}", error))?;
-    } else if asset.name.ends_with(".tar.xz") {
-        let decoder = xz2::read::XzDecoder::new(std::io::Cursor::new(bytes));
-        let mut archive = tar::Archive::new(decoder);
-        archive
-            .unpack(extraction.path())
-            .map_err(|error| format!("Failed to extract Typst: {}", error))?;
-    } else {
-        return Err(format!("Unsupported Typst archive: {}", asset.name));
+pub async fn install(data_dir: &Path, requested_version: &str) -> Result<ToolchainStatus, String> {
+    let requested = Version::parse(requested_version.trim_start_matches('v'))
+        .map_err(|_| format!("Invalid stable Tinymist version: {}", requested_version))?;
+    if !requested.pre.is_empty() || requested.patch % 2 == 1 {
+        return Err(
+            "Release candidates, prereleases, and Tinymist nightly builds are not supported."
+                .to_string(),
+        );
     }
-    let executable = find_executable(extraction.path(), "typst")
-        .ok_or_else(|| "Downloaded Typst archive did not contain the executable.".to_string())?;
-    install_managed_executable(data_dir, version, "typst", &executable)
-}
-
-async fn install_tinymist_for_version(data_dir: &Path, typst_version: &Version) -> Result<(), String> {
-    let release = fetch_stable_releases(TINYMIST_RELEASES_URL)
+    let release = fetch_stable_releases()
         .await?
         .into_iter()
-        .find(|r| r.version.major == typst_version.major && r.version.minor == typst_version.minor)
-        .ok_or_else(|| format!("No Tinymist release matching Typst {}.{} was found.", typst_version.major, typst_version.minor))?;
-
-    let version_str = typst_version.to_string();
-    let asset_name = platform_asset_name("tinymist")?;
+        .find(|release| release.version == requested)
+        .ok_or_else(|| format!("Tinymist {} is not a stable release.", requested))?;
+    let asset_name = platform_asset_name()?;
     let asset = release
         .assets
         .iter()
         .find(|asset| asset.name == asset_name)
         .ok_or_else(|| format!("Tinymist {} has no {} asset.", release.version, asset_name))?;
-    let bytes = download(asset).await?;
-    let temporary = tempfile::NamedTempFile::new_in(data_dir)
-        .map_err(|error| format!("Failed to stage Tinymist: {}", error))?;
-    std::fs::write(temporary.path(), bytes)
-        .map_err(|error| format!("Failed to stage Tinymist: {}", error))?;
-    install_managed_executable(data_dir, &version_str, "tinymist", temporary.path())?;
-    let installed = executable_version(&managed_executable_path(data_dir, &version_str, "tinymist"))
-        .ok_or_else(|| "Downloaded Tinymist executable could not be started.".to_string())?;
-    if installed != release.version {
-        return Err(format!(
-            "Downloaded Tinymist reported version {}, expected {}.",
-            installed, release.version
-        ));
-    }
-    Ok(())
-}
-
-pub async fn install(data_dir: &Path, requested_version: &str) -> Result<ToolchainStatus, String> {
-    let requested = Version::parse(requested_version.trim_start_matches('v'))
-        .map_err(|_| format!("Invalid stable Typst version: {}", requested_version))?;
-    if !requested.pre.is_empty() {
-        return Err("Release candidates and prerelease versions are not supported.".to_string());
-    }
-    let version_str = requested.to_string();
-
-    // If typst for this version is already installed, skip downloading it.
-    let typst_ok = resolve_executable(data_dir, &version_str, "typst").is_some();
-    if !typst_ok {
+    let version = requested.to_string();
+    let destination = managed_executable_path(data_dir, &version, "tinymist");
+    let already_installed =
+        tinymist_metadata(&destination).is_some_and(|(tinymist, _)| tinymist == requested);
+    if !already_installed {
         std::fs::create_dir_all(data_dir)
             .map_err(|error| format!("Failed to create app data directory: {}", error))?;
-        let releases = fetch_stable_releases(TYPST_RELEASES_URL).await?;
-        let release = releases
-            .iter()
-            .find(|release| release.version == requested)
-            .ok_or_else(|| format!("Typst {} is not a stable GitHub release.", requested))?;
-        let asset_name = platform_asset_name("typst")?;
-        let asset = release
-            .assets
-            .iter()
-            .find(|asset| asset.name == asset_name)
-            .ok_or_else(|| format!("Typst {} has no {} asset.", requested, asset_name))?;
         let bytes = download(asset).await?;
-        install_typst_archive(data_dir, &version_str, asset, &bytes)?;
-        let installed = executable_version(&managed_executable_path(data_dir, &version_str, "typst"))
-            .ok_or_else(|| "Downloaded Typst executable could not be started.".to_string())?;
-        if installed != requested {
-            return Err(format!(
-                "Downloaded Typst reported version {}, expected {}.",
-                installed, requested
-            ));
-        }
+        let temporary = tempfile::NamedTempFile::new_in(data_dir)
+            .map_err(|error| format!("Failed to stage Tinymist: {}", error))?;
+        std::fs::write(temporary.path(), bytes)
+            .map_err(|error| format!("Failed to stage Tinymist: {}", error))?;
+        install_managed_executable(data_dir, &version, temporary.path())?;
     }
-
-    // If tinymist for this version is already installed, skip downloading it.
-    let tinymist_ok = resolve_executable(data_dir, &version_str, "tinymist").is_some();
-    if !tinymist_ok {
-        install_tinymist_for_version(data_dir, &requested).await?;
+    let (installed, _) = tinymist_metadata(&destination)
+        .ok_or_else(|| "Downloaded Tinymist executable could not be started or did not report its embedded Typst version.".to_string())?;
+    if installed != requested {
+        return Err(format!(
+            "Downloaded Tinymist reported version {}, expected {}.",
+            installed, requested
+        ));
     }
-
+    std::fs::write(data_dir.join("toolchain").join("active-version"), &version)
+        .map_err(|error| format!("Failed to select Tinymist {}: {}", version, error))?;
     Ok(status(data_dir))
 }
 
@@ -455,26 +377,12 @@ pub async fn ensure(data_dir: &Path) -> Result<ToolchainStatus, String> {
     if current.lsp_available {
         return Ok(current);
     }
-
-    // If we have typst but no compatible tinymist, try to fetch tinymist only.
-    if let Some(typst_text) = current.typst_version.as_deref() {
-        if let Ok(typst) = Version::parse(typst_text) {
-            install_tinymist_for_version(data_dir, &typst).await?;
-            return Ok(status(data_dir));
-        }
-    }
-
-    // No toolchain at all — install the latest stable.
-    let latest = fetch_stable_releases(TYPST_RELEASES_URL)
+    let latest = fetch_stable_releases()
         .await?
         .into_iter()
         .next()
-        .ok_or_else(|| "GitHub returned no stable Typst releases.".to_string())?;
+        .ok_or_else(|| "GitHub returned no stable Tinymist releases.".to_string())?;
     install(data_dir, &latest.version.to_string()).await
-}
-
-pub fn compatible_versions(data_dir: &Path) -> bool {
-    status(data_dir).lsp_available
 }
 
 #[cfg(test)]
@@ -482,7 +390,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prerelease_versions_are_not_stable() {
+    fn prerelease_and_nightly_versions_are_not_stable() {
         let release = |tag: &str, prerelease| GithubRelease {
             tag_name: tag.to_string(),
             draft: false,
@@ -490,14 +398,27 @@ mod tests {
             published_at: None,
             assets: vec![],
         };
-        assert!(stable_release(release("v0.15.0", false)).is_some());
-        assert!(stable_release(release("v0.15.0-rc.1", false)).is_none());
-        assert!(stable_release(release("v0.15.0", true)).is_none());
+        assert!(stable_release(release("v0.15.2", false)).is_some());
+        assert!(stable_release(release("v0.15.1", false)).is_none());
+        assert!(stable_release(release("v0.15.2-rc.1", false)).is_none());
+        assert!(stable_release(release("v0.15.2", true)).is_none());
+    }
+
+    #[test]
+    fn parses_tinymist_and_embedded_typst_versions() {
+        let output = "tinymist\nBuild Git Describe: v0.14.20\nTypst Version: 0.14.2\n";
+        assert_eq!(
+            labeled_version(output, "Build Git Describe:").unwrap(),
+            Version::new(0, 14, 20)
+        );
+        assert_eq!(
+            labeled_version(output, "Typst Version:").unwrap(),
+            Version::new(0, 14, 2)
+        );
     }
 
     #[test]
     fn platform_asset_is_supported_for_current_host() {
-        assert!(platform_asset_name("typst").is_ok());
-        assert!(platform_asset_name("tinymist").is_ok());
+        assert!(platform_asset_name().is_ok());
     }
 }

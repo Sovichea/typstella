@@ -64,14 +64,16 @@ Open Settings from **File → Settings**, the status bar, or `Ctrl + ,`. Changes
     "highlightDurationMs": 2200
   },
   "toolchain": {
-    "typstVersion": null
+    "tinymistVersion": null
   }
 }
 ```
 
 Invalid or missing fields fall back to bounded defaults. Existing theme and word-wrap values from older releases are migrated from `localStorage` the first time the settings file is created.
 
-The Toolchain panel shows the active Typst and Tinymist versions. Only stable releases are offered; release candidates and other prereleases are excluded. Managed tools take precedence inside Typstry without replacing binaries installed through the system PATH or a package manager. If a matching stable Tinymist is unavailable, compilation, diagnostics, PDF export, and compiler-based preview remain available, while LSP and preview sync are disabled.
+The Toolchain panel installs stable Tinymist releases and shows each release's embedded Typst version. Tinymist is the only toolchain download: its embedded compiler handles diagnostics, fallback SVG compilation, and PDF export, so a separate Typst installation is not required.
+
+Each preview root has a uniquely identified Tinymist task whose iframe is cached across tab switches. When an open file is imported by another Typst file, Typstry previews the top-level importing document and updates that preview on save. Put `//@allow-preview` on the imported file's first line to preview that file itself and update it live while editing.
 
 MiSans Latin is bundled as the application UI font. Fira Mono Regular/Bold is bundled as the default code font; the code-font selector only lists monospace families registered by the font engine. Unicode fallback is configured separately as automatic detection, no fallback, or a detector-managed font.
 

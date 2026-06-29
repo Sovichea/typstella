@@ -10,7 +10,7 @@ export type ToolchainStatus = {
   message: string;
 };
 
-type TypstRelease = {
+type TinymistRelease = {
   version: string;
   publishedAt: string | null;
 };
@@ -23,15 +23,15 @@ type ToolchainControllerOptions = {
 
 export class ToolchainController {
   private status: ToolchainStatus | null = null;
-  private releases: TypstRelease[] = [];
+  private releases: TinymistRelease[] = [];
   private loading = false;
 
   constructor(private readonly options: ToolchainControllerOptions) {}
 
   public initialize() {
-    document.getElementById("settings-typst-version")?.addEventListener("change", event => {
+    document.getElementById("settings-tinymist-version")?.addEventListener("change", event => {
       const version = (event.currentTarget as HTMLSelectElement).value;
-      if (version && version !== this.status?.typstVersion) void this.install(version);
+      if (version && version !== this.status?.tinymistVersion) void this.install(version);
     });
     document.getElementById("settings-toolchain-refresh")?.addEventListener("click", () => {
       void this.refresh(true);
@@ -57,7 +57,7 @@ export class ToolchainController {
       const [status, releases] = await Promise.all([
         invoke<ToolchainStatus>("get_toolchain_status"),
         forceReleases || this.releases.length === 0
-          ? invoke<TypstRelease[]>("list_typst_releases")
+          ? invoke<TinymistRelease[]>("list_tinymist_releases")
           : Promise.resolve(this.releases)
       ]);
       this.status = status;
@@ -74,23 +74,17 @@ export class ToolchainController {
   private async install(version: string) {
     if (this.loading) return;
     this.loading = true;
-    this.render(`Downloading Typst ${version} and its matching stable Tinymist...`);
+    this.render(`Downloading Tinymist ${version}...`);
     try {
-      const status = await invoke<ToolchainStatus>("install_typst_toolchain", { version });
+      const status = await invoke<ToolchainStatus>("install_tinymist_toolchain", { version });
       this.status = status;
       this.options.setSelectedVersion(version);
       await this.options.onToolchainChanged(status);
-      if (!status.lspAvailable) {
-        await message(
-          `${status.message}\n\nTypstry will use the Typst compiler for preview. LSP completion, hover, live preview, and preview sync are unavailable for this version.`,
-          { title: "Tinymist unavailable", kind: "warning" }
-        );
-      }
     } catch (error) {
       try {
         const status = await invoke<ToolchainStatus>("get_toolchain_status");
         this.status = status;
-        if (status.typstVersion === version) this.options.setSelectedVersion(version);
+        if (status.tinymistVersion === version) this.options.setSelectedVersion(version);
         await this.options.onToolchainChanged(status);
       } catch (statusError) {
         console.error("Failed to recover toolchain status after installation error", statusError);
@@ -103,9 +97,9 @@ export class ToolchainController {
   }
 
   private render(overrideMessage?: string, isError = false) {
-    const select = document.getElementById("settings-typst-version") as HTMLSelectElement | null;
+    const select = document.getElementById("settings-tinymist-version") as HTMLSelectElement | null;
     if (select) {
-      const current = this.status?.typstVersion;
+      const current = this.status?.tinymistVersion;
       const versions = [...this.releases];
       if (current && /^\d+\.\d+\.\d+$/.test(current) && !versions.some(release => release.version === current)) {
         versions.unshift({ version: current, publishedAt: null });
@@ -125,16 +119,12 @@ export class ToolchainController {
       select.disabled = this.loading;
     }
 
-    const typstMeta = document.getElementById("settings-typst-current");
-    if (typstMeta) {
-      typstMeta.textContent = this.status?.typstVersion
-        ? `Current: ${this.status.typstVersion} · ${this.status.typstSource ?? "Unknown source"}`
-        : "Typst is not installed";
-    }
-    const tinymist = document.getElementById("settings-tinymist-version") as HTMLInputElement | null;
-    if (tinymist) tinymist.value = this.status?.tinymistVersion ?? "Not available";
+    const typstMeta = document.getElementById("settings-typst-current") as HTMLInputElement | null;
+    if (typstMeta) typstMeta.value = this.status?.typstVersion ?? "Not available";
     const tinymistMeta = document.getElementById("settings-tinymist-current");
-    if (tinymistMeta) tinymistMeta.textContent = this.status?.tinymistSource ?? "No compatible stable release installed";
+    if (tinymistMeta) tinymistMeta.textContent = this.status?.tinymistVersion
+      ? `Current: ${this.status.tinymistVersion} · ${this.status.tinymistSource ?? "Unknown source"}`
+      : "Tinymist is not installed";
     const status = document.getElementById("settings-toolchain-status");
     if (status) {
       status.textContent = overrideMessage ?? this.status?.message ?? "Open this panel to check tool versions.";

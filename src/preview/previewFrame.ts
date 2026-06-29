@@ -3,6 +3,9 @@ export type PreviewTextPoint = { text: string; offset: number };
 export class PreviewFrame {
   private iframe: HTMLIFrameElement | null = null;
   private mountedUrl = "";
+  private activeSessionKey = "";
+  private readonly sessions = new Map<string, { iframe: HTMLIFrameElement; url: string; usedAt: number }>();
+  private readonly maxSessions = 5;
 
   constructor(
     private readonly pane: HTMLElement,
@@ -26,20 +29,42 @@ export class PreviewFrame {
    * Returns true if a fresh mount was performed, false if reused.
    */
   public async mount(previewUrl: string, _getPreviewHtml?: () => Promise<string>): Promise<boolean> {
-    // Reuse existing iframe if the preview URL hasn't changed
-    if (this.iframe && this.mountedUrl === previewUrl && this.iframe.parentElement === this.pane) {
+    return this.mountSession("default", previewUrl);
+  }
+
+  public hasSession(sessionKey: string): boolean {
+    return this.sessions.has(sessionKey);
+  }
+
+  public activateSession(sessionKey: string): boolean {
+    const session = this.sessions.get(sessionKey);
+    if (!session) return false;
+    for (const [key, item] of this.sessions) item.iframe.classList.toggle("hidden", key !== sessionKey);
+    session.usedAt = Date.now();
+    this.activeSessionKey = sessionKey;
+    this.iframe = session.iframe;
+    this.mountedUrl = session.url;
+    return true;
+  }
+
+  public async mountSession(sessionKey: string, previewUrl: string): Promise<boolean> {
+    const existing = this.sessions.get(sessionKey);
+    if (existing?.url === previewUrl && existing.iframe.parentElement === this.pane) {
+      this.activateSession(sessionKey);
       return false;
     }
-
-    this.pane.innerHTML = "";
+    if (existing) existing.iframe.remove();
     const iframe = document.createElement("iframe");
     iframe.className = "preview-frame";
-    iframe.addEventListener("load", () => this.configureDocument());
+    iframe.addEventListener("load", () => this.configureDocument(iframe));
     this.pane.appendChild(iframe);
+    this.sessions.set(sessionKey, { iframe, url: previewUrl, usedAt: Date.now() });
+    this.activeSessionKey = sessionKey;
     this.iframe = iframe;
     this.mountedUrl = previewUrl;
-
+    this.activateSession(sessionKey);
     iframe.src = previewUrl;
+    this.evictInactiveSessions();
     return true;
   }
 
@@ -57,12 +82,14 @@ export class PreviewFrame {
    */
   public clear(): void {
     this.pane.innerHTML = "";
+    this.sessions.clear();
     this.iframe = null;
     this.mountedUrl = "";
+    this.activeSessionKey = "";
   }
 
   public mountSvgPages(pages: readonly string[]): void {
-    this.pane.innerHTML = "";
+    this.clear();
     const iframe = document.createElement("iframe");
     iframe.className = "preview-frame";
     iframe.sandbox.add("allow-same-origin");
@@ -76,9 +103,20 @@ export class PreviewFrame {
   }
 
 
-  private configureDocument(): void {
+  private evictInactiveSessions(): void {
+    while (this.sessions.size > this.maxSessions) {
+      const candidate = [...this.sessions.entries()]
+        .filter(([key]) => key !== this.activeSessionKey)
+        .sort((left, right) => left[1].usedAt - right[1].usedAt)[0];
+      if (!candidate) return;
+      candidate[1].iframe.remove();
+      this.sessions.delete(candidate[0]);
+    }
+  }
+
+  private configureDocument(iframe: HTMLIFrameElement): void {
     try {
-      const doc = this.iframe?.contentDocument;
+      const doc = iframe.contentDocument;
       if (!doc || doc.documentElement.dataset.typstryInteractions === "true") return;
       doc.documentElement.dataset.typstryInteractions = "true";
       doc.addEventListener("click", event => {

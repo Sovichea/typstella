@@ -8,6 +8,7 @@ export type PreviewSyncDependencies = {
   getClient: () => TinymistLspClient | undefined;
   getActiveFilePath: () => string | null;
   getPreviewRootPath: () => string | null;
+  getPreviewTaskId: () => string | null;
   isReady: () => boolean;
   isEnabled: () => boolean;
 };
@@ -38,7 +39,7 @@ export class PreviewSyncController {
     const editor = this.dependencies.getEditor();
     const client = this.dependencies.getClient();
     const path = this.dependencies.getActiveFilePath();
-    if (!editor || !client || !path || path !== this.dependencies.getPreviewRootPath() || !this.dependencies.isReady()) return;
+    if (!editor || !client || !path || !this.dependencies.getPreviewTaskId() || !this.dependencies.isReady()) return;
 
     this.clearForward();
     await this.navigateToCursor(cursor);
@@ -48,12 +49,13 @@ export class PreviewSyncController {
     const editor = this.dependencies.getEditor();
     const client = this.dependencies.getClient();
     const path = this.dependencies.getActiveFilePath();
-    if (!editor || !client || !path || !this.dependencies.getPreviewRootPath() || !this.dependencies.isReady()) return;
+    const taskId = this.dependencies.getPreviewTaskId();
+    if (!editor || !client || !path || !this.dependencies.getPreviewRootPath() || !taskId || !this.dependencies.isReady()) return;
 
     const position = Math.max(0, Math.min(cursor, editor.state.doc.length));
     const line = editor.state.doc.lineAt(position);
     const character = client.lspCharacterFromStringOffset(line.text, position - line.from);
-    await client.scrollPreview("default_preview", {
+    await client.scrollPreview(taskId, {
       event: "panelScrollTo",
       filepath: path,
       line: line.number - 1,
@@ -63,8 +65,9 @@ export class PreviewSyncController {
 
   public async navigateToPosition(position: PreviewDocumentPosition): Promise<void> {
     const client = this.dependencies.getClient();
-    if (!client || !this.dependencies.getPreviewRootPath() || !this.dependencies.isReady()) return;
-    await client.scrollPreview("default_preview", {
+    const taskId = this.dependencies.getPreviewTaskId();
+    if (!client || !taskId || !this.dependencies.getPreviewRootPath() || !this.dependencies.isReady()) return;
+    await client.scrollPreview(taskId, {
       event: "panelScrollByPosition",
       position
     });
@@ -92,6 +95,7 @@ export class PreviewSyncController {
     return this.dependencies.isEnabled()
       && !!this.dependencies.getActiveFilePath()
       && !!this.dependencies.getPreviewRootPath()
+      && !!this.dependencies.getPreviewTaskId()
       && this.dependencies.isReady()
       && !!this.dependencies.getClient();
   }
