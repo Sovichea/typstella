@@ -4,7 +4,7 @@
   <img src="./assets/typstry-ico.svg" alt="Typstry Logo" width="150"/>
 </p>
 
-A lightweight, local-first Typst editor with seamless Code and WYSIWYM toggles, advanced Unicode font fallbacks, and real-time Tinymist LSP previews. Built with Tauri, Bun, and CodeMirror 6.
+A lightweight, local-first Typst code editor with advanced Unicode font fallbacks and real-time Tinymist LSP previews. Built with Tauri, Bun, and CodeMirror 6.
 
 ## Screenshots
 
@@ -29,7 +29,6 @@ A lightweight, local-first Typst editor with seamless Code and WYSIWYM toggles, 
 * `Ctrl + N`: New File
 * `Ctrl + K`, `Ctrl + O`: Open Workspace
 * `Ctrl + B`: Toggle Explorer Sidebar
-* `Ctrl + M`: Switch Layout (Code vs WYSIWYM)
 * `Ctrl + ,`: Open Settings
 * `Alt + Z`: Toggle Word Wrap
 * `Ctrl + ` `: Toggle Log Console

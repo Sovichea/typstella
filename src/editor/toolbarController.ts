@@ -13,7 +13,8 @@ export type EditorToolbarDependencies = {
   renderWysiwym: (markup: string) => void;
   save: () => Promise<void>;
   syncPreview: (cursor: number) => Promise<void>;
-  toggleMode: () => void;
+  // TODO: Re-enable when the WYSIWYM layout is ready for use.
+  // toggleMode: () => void;
 };
 
 const snippets: Record<string, string> = {
@@ -83,7 +84,7 @@ export class EditorToolbarController {
   }
 
   private async run(tool: string): Promise<void> {
-    if (this.dependencies.getMode() === "WYSIWYM" && tool !== "toggle-mode") {
+    if (this.dependencies.getMode() === "WYSIWYM") {
       this.applyWysiwymTool(tool);
       const markup = this.dependencies.serializeWysiwym();
       const editor = this.dependencies.getEditor();
@@ -120,7 +121,8 @@ export class EditorToolbarController {
         break;
       case "export-pdf": document.getElementById("action-export-pdf")?.click(); break;
       case "toggle-wrap": document.getElementById("word-wrap-toggle")?.click(); break;
-      case "toggle-mode": this.dependencies.toggleMode(); break;
+      // TODO: Re-enable when the WYSIWYM layout is ready for use.
+      // case "toggle-mode": this.dependencies.toggleMode(); break;
     }
   }
 

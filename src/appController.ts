@@ -142,8 +142,9 @@ export class TypstryWorkspaceController {
     serializeWysiwym: () => this.mapWysiwymToMarkup(),
     renderWysiwym: markup => this.mapMarkupToWysiwym(markup),
     save: () => this.saveActiveFile(),
-    syncPreview: cursor => this.previewSyncController.renderAtCursor(cursor),
-    toggleMode: () => this.switchViewLayoutMode()
+    syncPreview: cursor => this.previewSyncController.renderAtCursor(cursor)
+    // TODO: Re-enable when the WYSIWYM layout is ready for use.
+    // toggleMode: () => this.switchViewLayoutMode()
   });
   private readonly contextMenuController = new ContextMenuController({
     getWorkspaceRoot: () => this.workspaceRootPath,
@@ -1646,7 +1647,8 @@ export class TypstryWorkspaceController {
       }
     });
 
-    listen("menu-toggle-layout", () => this.switchViewLayoutMode());
+    // TODO: Re-enable native WYSIWYM layout events when the implementation is ready.
+    // listen("menu-toggle-layout", () => this.switchViewLayoutMode());
     listen("menu-toggle-log-console", () => this.logConsoleController.toggle());
     listen("menu-open-folder", async () => {
       const selected = await open({ directory: true, multiple: false });
@@ -1739,7 +1741,8 @@ export class TypstryWorkspaceController {
       openUrl("https://typst.app/docs");
     });
 
-    document.getElementById("action-toggle-layout")?.addEventListener("click", () => this.switchViewLayoutMode());
+    // TODO: Re-enable the WYSIWYM layout menu action when the implementation is ready.
+    // document.getElementById("action-toggle-layout")?.addEventListener("click", () => this.switchViewLayoutMode());
     document.getElementById("action-toggle-logs")?.addEventListener("click", () => this.logConsoleController.toggle());
 
     // Welcome Screen Actions
