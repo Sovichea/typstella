@@ -45,6 +45,11 @@ type FallbackDiagnostic = {
   column?: number;
 };
 
+type ExamplesWorkspace = {
+  workspacePath: string;
+  entryPath: string;
+};
+
 type EditorTab = {
   path: string;
   content: string;
@@ -1550,6 +1555,25 @@ export class TypstryWorkspaceController {
     await this.restoreWorkspaceState(selected);
   }
 
+  private async openExamplesWorkspace(): Promise<void> {
+    const button = document.getElementById("welcome-open-examples") as HTMLButtonElement | null;
+    if (button) button.disabled = true;
+    try {
+      const examples = await invoke<ExamplesWorkspace>("prepare_examples_workspace");
+      await this.openWorkspace(examples.workspacePath);
+      await this.loadFile(examples.entryPath);
+    } catch (error) {
+      this.appendLspLog({
+        kind: "error",
+        source: "examples",
+        message: `Failed to open examples: ${String(error)}`
+      });
+      await message(String(error), { title: "Unable to open examples", kind: "error" });
+    } finally {
+      if (button) button.disabled = false;
+    }
+  }
+
   private closeProject() {
     this.saveWorkspaceState();
     this.workspaceWatcher.stop();
@@ -1765,6 +1789,9 @@ export class TypstryWorkspaceController {
     // Welcome Screen Actions
     document.getElementById("welcome-open-project")?.addEventListener("click", () => {
       document.getElementById("action-open-folder")?.click();
+    });
+    document.getElementById("welcome-open-examples")?.addEventListener("click", () => {
+      void this.openExamplesWorkspace();
     });
 
     // Menu Bar Dropdown logic

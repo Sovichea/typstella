@@ -1602,6 +1602,11 @@ button.welcome-item {
   text-align: left;
 }
 
+button.welcome-item:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .welcome-item-icon {
   width: 20px;
   font-size: 14px;

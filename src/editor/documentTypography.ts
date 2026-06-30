@@ -7,9 +7,9 @@ export type DocumentScript = {
 };
 
 export type DocumentTypography = {
-  latinFont: string;
+  latinFont: string | null;
   latinSizePt: number;
-  complexFont: string;
+  complexFont: string | null;
   complexScript: string;
   complexSizeAdjustmentPt: number;
 };
@@ -80,13 +80,15 @@ export function renderTypographyBlock(config: DocumentTypography): string {
   const script = documentScripts.find(candidate => candidate.id === config.complexScript) ?? documentScripts[0];
   const adjustment = Math.max(-12, Math.min(12, config.complexSizeAdjustmentPt));
   const operator = adjustment < 0 ? "-" : "+";
-  return [
-    blockStart,
-    `#set text(font: "${escapeTypstString(config.latinFont)}", size: ${decimal(config.latinSizePt)}pt)`,
-    `#show regex("\\p{${script.unicodeProperty}}+"): set text(font: "${escapeTypstString(config.complexFont)}", size: 1em ${operator} ${decimal(Math.abs(adjustment))}pt)`,
-    blockEnd,
-    ""
-  ].join("\n");
+  const lines = [blockStart];
+  if (config.latinFont) {
+    lines.push(`#set text(font: "${escapeTypstString(config.latinFont)}", size: ${decimal(config.latinSizePt)}pt)`);
+  }
+  if (config.complexFont) {
+    lines.push(`#show regex("\\p{${script.unicodeProperty}}+"): set text(font: "${escapeTypstString(config.complexFont)}", size: 1em ${operator} ${decimal(Math.abs(adjustment))}pt)`);
+  }
+  lines.push(blockEnd, "");
+  return lines.join("\n");
 }
 
 export function parseTypographyBlock(text: string): DocumentTypography | null {
@@ -96,15 +98,19 @@ export function parseTypographyBlock(text: string): DocumentTypography | null {
   const block = text.slice(start, end);
   const latin = block.match(/#set text\(font: "((?:\\.|[^"])*)", size: (-?\d+(?:\.\d+)?)pt\)/);
   const complex = block.match(/#show regex\("\\p\{([^}]+)\}\+"\): set text\(font: "((?:\\.|[^"])*)", size: 1em ([+-]) (\d+(?:\.\d+)?)pt\)/);
-  if (!latin || !complex) return null;
-  const script = documentScripts.find(candidate => candidate.unicodeProperty === complex[1]);
-  if (!script) return null;
+  if (!latin && !complex) return null;
+  const script = complex
+    ? documentScripts.find(candidate => candidate.unicodeProperty === complex[1])
+    : documentScripts[0];
+  if (complex && !script) return null;
   return {
-    latinFont: unescapeTypstString(latin[1]),
-    latinSizePt: Number(latin[2]),
-    complexFont: unescapeTypstString(complex[2]),
-    complexScript: script.id,
-    complexSizeAdjustmentPt: Number(complex[4]) * (complex[3] === "-" ? -1 : 1)
+    latinFont: latin ? unescapeTypstString(latin[1]) : null,
+    latinSizePt: latin ? Number(latin[2]) : 11,
+    complexFont: complex ? unescapeTypstString(complex[2]) : null,
+    complexScript: script?.id ?? documentScripts[0].id,
+    complexSizeAdjustmentPt: complex
+      ? Number(complex[4]) * (complex[3] === "-" ? -1 : 1)
+      : 0
   };
 }
 
@@ -124,7 +130,7 @@ export function typographyEdit(text: string, config: DocumentTypography): Typogr
   const bomOffset = text.startsWith("\uFEFF") ? 1 : 0;
   const firstLineEnd = text.indexOf("\n", bomOffset);
   const firstLine = text.slice(bomOffset, firstLineEnd < 0 ? text.length : firstLineEnd).replace(/\r$/, "");
-  const from = firstLine === "//@allow-preview"
+  const from = firstLine === "// @allow-preview" || firstLine === "//@allow-preview"
     ? (firstLineEnd < 0 ? text.length : firstLineEnd + 1)
     : bomOffset;
   return { from, to: from, insert };

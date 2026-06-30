@@ -80,7 +80,10 @@ export class EditorToolbarController {
       const scriptId = (event.currentTarget as HTMLSelectElement).value;
       this.populateComplexFontOptions(scriptId);
       this.updateScriptHint(scriptId, null);
+      this.updateTypographyAvailability();
     });
+    document.getElementById("toolbar-latin-font")?.addEventListener("change", () => this.updateTypographyAvailability());
+    document.getElementById("toolbar-complex-font")?.addEventListener("change", () => this.updateTypographyAvailability());
     this.toolbar.addEventListener("pointerdown", event => {
       const target = event.target as HTMLElement;
       if (target.closest("[data-tool]") || target.closest(".toolbar-dropdown-btn")) event.preventDefault();
@@ -138,9 +141,19 @@ export class EditorToolbarController {
 
   private populateDocumentFontOptions(): void {
     const latin = document.getElementById("toolbar-latin-font") as HTMLSelectElement | null;
-    if (latin) latin.replaceChildren(...this.fontOptions(this.systemFontFamilies));
+    if (latin) latin.replaceChildren(
+      this.emptyFontOption("Do not set Latin font"),
+      ...this.fontOptions(this.systemFontFamilies)
+    );
     const script = (document.getElementById("toolbar-complex-script") as HTMLSelectElement | null)?.value ?? documentScripts[0].id;
-    this.populateComplexFontOptions(script);
+    this.populateComplexFontOptions(script, this.typographyDefaults.complexFont);
+  }
+
+  private emptyFontOption(label: string): HTMLOptionElement {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = label;
+    return option;
   }
 
   private fontOptions(families: readonly string[]): HTMLOptionElement[] {
@@ -152,29 +165,29 @@ export class EditorToolbarController {
     });
   }
 
-  private populateComplexFontOptions(scriptId: string, preferredFont?: string): string[] {
+  private populateComplexFontOptions(scriptId: string, preferredFont?: string | null): string[] {
     const select = document.getElementById("toolbar-complex-font") as HTMLSelectElement | null;
     const supported = [...new Set(this.scriptFontFamilies[scriptId] ?? [])]
       .sort((left, right) => left.localeCompare(right));
     if (!select) return supported;
-    const previous = preferredFont ?? select.value;
-    select.replaceChildren(...this.fontOptions(supported));
-    const next = supported.find(family => family === previous)
-      ?? preferredInstalledFamily(documentScripts.find(script => script.id === scriptId) ?? documentScripts[0], supported)
-      ?? supported[0]
-      ?? "";
+    const previous = preferredFont === null ? "" : preferredFont ?? select.value;
+    select.replaceChildren(
+      this.emptyFontOption(supported.length > 0 ? "Do not set complex-script font" : "No compatible installed font"),
+      ...this.fontOptions(supported)
+    );
+    const next = previous === ""
+      ? ""
+      : supported.find(family => family === previous)
+        ?? preferredInstalledFamily(documentScripts.find(script => script.id === scriptId) ?? documentScripts[0], supported)
+        ?? supported[0]
+        ?? "";
     if (next) {
       select.value = next;
-      select.disabled = false;
     } else {
-      const option = document.createElement("option");
-      option.value = "";
-      option.textContent = "No compatible installed font";
-      select.replaceChildren(option);
-      select.disabled = true;
+      select.value = "";
     }
-    const apply = document.getElementById("toolbar-typography-apply") as HTMLButtonElement | null;
-    if (apply) apply.disabled = supported.length === 0;
+    select.disabled = false;
+    this.updateTypographyAvailability();
     return supported;
   }
 
@@ -182,18 +195,24 @@ export class EditorToolbarController {
     const text = this.dependencies.getEditor().state.doc.toString();
     const existing = parseTypographyBlock(text);
     const detected = detectDocumentScript(text);
-    const script = existing
+    const script = existing?.complexFont
       ? documentScripts.find(candidate => candidate.id === existing.complexScript) ?? detected ?? documentScripts[0]
       : detected ?? documentScripts[0];
-    const latinFont = existing?.latinFont
-      ?? this.systemFontFamilies.find(family => family === "Calibri")
+    const defaultLatinFont = this.systemFontFamilies.find(family => family === "Calibri")
       ?? this.systemFontFamilies.find(family => family === "MiSans Latin")
-      ?? this.systemFontFamilies[0];
-    const supportedFonts = this.populateComplexFontOptions(script.id, existing?.complexFont);
-    const complexFont = supportedFonts.find(family => family === existing?.complexFont)
-      ?? preferredInstalledFamily(script, supportedFonts)
-      ?? supportedFonts[0]
-      ?? "";
+      ?? this.systemFontFamilies[0]
+      ?? null;
+    const latinFont = existing ? existing.latinFont : defaultLatinFont;
+    const preferredComplexFont = existing
+      ? existing.complexFont
+      : preferredInstalledFamily(script, this.scriptFontFamilies[script.id] ?? []);
+    const supportedFonts = this.populateComplexFontOptions(script.id, preferredComplexFont);
+    const complexFont = preferredComplexFont === null
+      ? null
+      : supportedFonts.find(family => family === preferredComplexFont)
+        ?? preferredInstalledFamily(script, supportedFonts)
+        ?? supportedFonts[0]
+        ?? null;
     this.typographyDefaults = {
       latinFont,
       latinSizePt: existing?.latinSizePt ?? 11,
@@ -201,12 +220,24 @@ export class EditorToolbarController {
       complexScript: script.id,
       complexSizeAdjustmentPt: existing?.complexSizeAdjustmentPt ?? 0
     };
-    this.setTypographyControl("toolbar-latin-font", latinFont);
+    this.setTypographyControl("toolbar-latin-font", latinFont ?? "");
     this.setTypographyControl("toolbar-latin-size", String(this.typographyDefaults.latinSizePt));
     this.setTypographyControl("toolbar-complex-script", script.id);
-    this.setTypographyControl("toolbar-complex-font", complexFont);
+    this.setTypographyControl("toolbar-complex-font", complexFont ?? "");
     this.setTypographyControl("toolbar-complex-adjustment", String(this.typographyDefaults.complexSizeAdjustmentPt));
     this.updateScriptHint(script.id, detected?.id === script.id ? detected.label : null);
+    this.updateTypographyAvailability();
+  }
+
+  private updateTypographyAvailability(): void {
+    const latin = document.getElementById("toolbar-latin-font") as HTMLSelectElement | null;
+    const complex = document.getElementById("toolbar-complex-font") as HTMLSelectElement | null;
+    const latinSize = document.getElementById("toolbar-latin-size") as HTMLInputElement | null;
+    const complexAdjustment = document.getElementById("toolbar-complex-adjustment") as HTMLInputElement | null;
+    const apply = document.getElementById("toolbar-typography-apply") as HTMLButtonElement | null;
+    if (latinSize) latinSize.disabled = !latin?.value;
+    if (complexAdjustment) complexAdjustment.disabled = !complex?.value;
+    if (apply) apply.disabled = !latin?.value && !complex?.value;
   }
 
   private updateScriptHint(scriptId: string, detectedLabel: string | null): void {
@@ -233,13 +264,11 @@ export class EditorToolbarController {
 
   private applyDocumentTypography(): void {
     const value = (id: string) => (document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null)?.value ?? "";
-    const complexFont = value("toolbar-complex-font");
-    if (!complexFont) {
-      this.updateScriptHint(value("toolbar-complex-script") || this.typographyDefaults.complexScript, null);
-      return;
-    }
+    const latinFont = value("toolbar-latin-font") || null;
+    const complexFont = value("toolbar-complex-font") || null;
+    if (!latinFont && !complexFont) return;
     const config: DocumentTypography = {
-      latinFont: value("toolbar-latin-font") || this.typographyDefaults.latinFont,
+      latinFont,
       latinSizePt: this.boundedTypographyNumber(value("toolbar-latin-size"), 6, 96, this.typographyDefaults.latinSizePt),
       complexFont,
       complexScript: value("toolbar-complex-script") || this.typographyDefaults.complexScript,

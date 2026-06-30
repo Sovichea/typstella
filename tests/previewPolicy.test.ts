@@ -3,9 +3,10 @@ import { allowsLiveImportPreview, previewRefreshStyle, previewSessionIdentity } 
 
 describe("preview policy", () => {
   test("only accepts the directive on the first line", () => {
-    expect(allowsLiveImportPreview("//@allow-preview\n= Chapter")).toBe(true);
-    expect(allowsLiveImportPreview("\uFEFF//@allow-preview\n= Chapter")).toBe(true);
-    expect(allowsLiveImportPreview("\n//@allow-preview\n= Chapter")).toBe(false);
+    expect(allowsLiveImportPreview("// @allow-preview\n= Chapter")).toBe(true);
+    expect(allowsLiveImportPreview("\uFEFF// @allow-preview\n= Chapter")).toBe(true);
+    expect(allowsLiveImportPreview("//@allow-preview\n= Legacy chapter")).toBe(true);
+    expect(allowsLiveImportPreview("\n// @allow-preview\n= Chapter")).toBe(false);
   });
 
   test("uses save refresh for ordinary imported files", () => {

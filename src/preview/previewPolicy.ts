@@ -9,7 +9,8 @@ export type PreviewTarget = {
 export type PreviewRefreshStyle = "on-type" | "on-save";
 
 export function allowsLiveImportPreview(contents: string): boolean {
-  return contents.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0] === "//@allow-preview";
+  const firstLine = contents.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0];
+  return firstLine === "// @allow-preview" || firstLine === "//@allow-preview";
 }
 
 export function previewRefreshStyle(target: PreviewTarget): PreviewRefreshStyle {

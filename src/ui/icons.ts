@@ -186,5 +186,6 @@ export function initializeLucideIcons(): void {
   replaceContents("#editor-tabs-previous", "chevronLeft", 16);
   replaceContents("#editor-tabs-next", "chevronRight", 16);
   replaceContents("#welcome-open-project .welcome-item-icon", "folder", 18);
+  replaceContents("#welcome-open-examples .welcome-item-icon", "bookOpen", 18);
   replaceContents("#document-outline-toggle .sidebar-section-chevron", "chevronDown", 14);
 }

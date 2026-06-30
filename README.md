@@ -70,7 +70,7 @@ Invalid or missing fields fall back to bounded defaults. Existing theme and word
 
 The Toolchain panel installs stable Tinymist releases and shows each release's embedded Typst version. Tinymist is the only toolchain download: its embedded compiler handles diagnostics, fallback SVG compilation, and PDF export, so a separate Typst installation is not required.
 
-Each preview root has a uniquely identified Tinymist task whose iframe is cached across tab switches. When an open file is imported by another Typst file, Typstry previews the top-level importing document and updates that preview on save. Put `//@allow-preview` on the imported file's first line to preview that file itself and update it live while editing.
+Each preview root has a uniquely identified Tinymist task whose iframe is cached across tab switches. When an open file is imported by another Typst file, Typstry previews the top-level importing document and updates that preview on save. Put `// @allow-preview` on the imported file's first line to preview that file itself and update it live while editing.
 
 Only MiSans Latin and Fira Mono are bundled. Typstry installs them in the current user's font directory on first launch, avoiding administrator access on Windows, Linux, and macOS. Settings enumerates the operating system's fonts: the code-font selector contains monospace families, while Unicode fallback accepts any installed family. Automatic detection recommends the matching MiSans family when one exists and a script-specific Noto Sans family otherwise. It never downloads without confirmation and does not repeat a recommendation the user declines. Recommendations are optional; users can select any installed fallback or disable fallback entirely. MiSans downloads and use are subject to Xiaomi's [MiSans license agreement](https://hyperos.mi.com/font/en/download/); Noto fonts use the [SIL Open Font License](https://openfontlicense.org/).
 
@@ -250,7 +250,7 @@ The current development release is `v0.1.1`.
 - [x] Dynamic file explorer with Material icons
   - [x] Material icon integration
   - [x] Custom Rust backend commands for secure file operations (create, rename, copy)
-- [-] Implement robust WYSIWYM (What You See Is What You Mean) layout parsing
+- [ ] Implement robust WYSIWYM (What You See Is What You Mean) layout parsing
   - [x] Intelligent toggle-formatting logic for inline editing
   - [x] DOM-to-markup serialization pipeline
   - [x] Hide technical syntax markers during active editing

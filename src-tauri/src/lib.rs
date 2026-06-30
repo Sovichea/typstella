@@ -3,8 +3,10 @@ use serde_json::json;
 use std::os::windows::process::CommandExt;
 use tauri::{Emitter, Manager};
 
+mod examples;
 mod font_store;
 mod toolchain;
+use examples::prepare_examples_workspace;
 use toolchain::active_tinymist;
 
 #[tauri::command]
@@ -329,7 +331,10 @@ fn collect_typst_files(root: &std::path::Path, files: &mut Vec<std::path::PathBu
 }
 
 fn allows_live_import_preview(contents: &str) -> bool {
-    contents.trim_start_matches('\u{feff}').lines().next() == Some("//@allow-preview")
+    matches!(
+        contents.trim_start_matches('\u{feff}').lines().next(),
+        Some("// @allow-preview" | "//@allow-preview")
+    )
 }
 
 fn resolve_preview_target(
@@ -796,7 +801,7 @@ mod preview_main_tests {
         let resolved = resolve_preview_target(
             draft_path.to_string_lossy().to_string(),
             Some(workspace.path().to_string_lossy().to_string()),
-            Some("//@allow-preview\nUnsaved chapter".to_string()),
+            Some("// @allow-preview\nUnsaved chapter".to_string()),
         )
         .expect("resolve preview");
 
@@ -1085,6 +1090,9 @@ pub fn run() {
             process: Mutex::new(None),
         })
         .setup(|app| {
+            if let Err(error) = examples::install_examples_workspace(app.handle()) {
+                eprintln!("Failed to install bundled examples: {error}");
+            }
             if let Ok(data_dir) = app.path().app_local_data_dir() {
                 font_store::remove_legacy_font_cache(&data_dir);
             }
@@ -1116,6 +1124,7 @@ pub fn run() {
             get_toolchain_status,
             list_system_fonts,
             install_unicode_font,
+            prepare_examples_workspace,
             list_tinymist_releases,
             install_tinymist_toolchain,
             start_tinymist_lsp,
