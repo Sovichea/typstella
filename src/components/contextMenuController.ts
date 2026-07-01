@@ -18,6 +18,9 @@ export type ContextMenuDependencies = {
   updateTabPath: (oldPath: string, newPath: string) => void;
   activateTab: (path: string) => void | Promise<void>;
   closeTab: (path: string) => void | Promise<void>;
+  closeTabInteractive: (path: string) => void | Promise<void>;
+  closeOtherTabs: (path: string) => void | Promise<void>;
+  restartWorkspace: () => void | Promise<void>;
 };
 
 const previewItems = `
@@ -81,6 +84,9 @@ export class ContextMenuController {
       case "ctx-fs-copy-rel-path": return this.copyRelativePath();
       case "ctx-fs-copy-abs-path": if (this.targetPath) await writeText(this.targetPath); return;
       case "ctx-preview-open-external": return this.openPreviewPdf();
+      case "ctx-tab-close": if (this.targetPath) await this.dependencies.closeTabInteractive(this.targetPath); return;
+      case "ctx-tab-close-others": if (this.targetPath) await this.dependencies.closeOtherTabs(this.targetPath); return;
+      case "ctx-restart-workspace": await this.dependencies.restartWorkspace(); return;
     }
   }
 
@@ -298,7 +304,11 @@ export class ContextMenuController {
       items = this.explorerBackgroundItems();
     } else if (target.closest(".cm-editor") || target.closest("#code-render-pane")) items = this.editorItems();
     else if (target.closest("#preview-container-wrapper")) items = previewItems;
-    else {
+    else if (target.closest(".editor-tab")) {
+      this.targetPath = target.closest<HTMLElement>(".editor-tab")?.dataset.path || "";
+      this.targetIsDirectory = false;
+      items = this.tabItems();
+    } else {
       this.hide();
       return;
     }
@@ -335,11 +345,15 @@ export class ContextMenuController {
   }
 
   private explorerItems(): string {
-    return `<div class="dropdown-item" id="ctx-new-file">New File</div><div class="dropdown-item" id="ctx-fs-new-folder">New Folder</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-rename">Rename</div><div class="dropdown-item" id="ctx-fs-delete">Delete</div>${this.targetIsDirectory ? "" : '<div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-copy">Copy File</div>'}${this.copiedFilePath ? '<div class="dropdown-item" id="ctx-fs-paste">Paste File</div>' : ""}<div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-reveal">Reveal in System Explorer</div><div class="dropdown-item" id="ctx-fs-copy-rel-path">Copy Relative Path</div><div class="dropdown-item" id="ctx-fs-copy-abs-path">Copy Absolute Path</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-open-project">Open Workspace</div>`;
+    return `<div class="dropdown-item" id="ctx-new-file">New File</div><div class="dropdown-item" id="ctx-fs-new-folder">New Folder</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-rename">Rename</div><div class="dropdown-item" id="ctx-fs-delete">Delete</div>${this.targetIsDirectory ? "" : '<div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-copy">Copy File</div>'}${this.copiedFilePath ? '<div class="dropdown-item" id="ctx-fs-paste">Paste File</div>' : ""}<div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-reveal">Reveal in System Explorer</div><div class="dropdown-item" id="ctx-fs-copy-rel-path">Copy Relative Path</div><div class="dropdown-item" id="ctx-fs-copy-abs-path">Copy Absolute Path</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-open-project">Open Workspace</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-restart-workspace">Restart Workspace</div>`;
   }
 
   private explorerBackgroundItems(): string {
-    return `<div class="dropdown-item" id="ctx-new-file">New File</div><div class="dropdown-item" id="ctx-fs-new-folder">New Folder</div>${this.copiedFilePath ? '<div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-paste">Paste File</div>' : ""}<div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-reveal">Reveal Workspace in Explorer</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-open-project">Open Workspace</div>`;
+    return `<div class="dropdown-item" id="ctx-new-file">New File</div><div class="dropdown-item" id="ctx-fs-new-folder">New Folder</div>${this.copiedFilePath ? '<div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-paste">Paste File</div>' : ""}<div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-reveal">Reveal Workspace in Explorer</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-open-project">Open Workspace</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-restart-workspace">Restart Workspace</div>`;
+  }
+
+  private tabItems(): string {
+    return `<div class="dropdown-item" id="ctx-tab-close">Close</div><div class="dropdown-item" id="ctx-tab-close-others">Close Others</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-copy-rel-path">Copy Relative Path</div><div class="dropdown-item" id="ctx-fs-copy-abs-path">Copy Absolute Path</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-fs-reveal">Reveal in System Explorer</div>`;
   }
 
   private editorItems(): string {

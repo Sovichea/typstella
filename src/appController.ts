@@ -182,7 +182,10 @@ export class TypstryWorkspaceController {
     save: () => this.saveActiveFile(),
     updateTabPath: (oldPath, newPath) => this.updateEditorTabPath(oldPath, newPath),
     activateTab: path => this.activateEditorTab(path, false),
-    closeTab: path => this.closeEditorTab(path, true)
+    closeTab: path => this.closeEditorTab(path, true),
+    closeTabInteractive: path => this.closeEditorTab(path, false),
+    closeOtherTabs: path => this.closeOtherTabs(path),
+    restartWorkspace: () => this.restartWorkspace()
   });
   private readonly documentOutlineController = new DocumentOutlineController(
     document.getElementById("document-outline-tree")!,
@@ -1805,6 +1808,21 @@ export class TypstryWorkspaceController {
     this.updateWorkspaceViewportVisibility();
     this.recentProjectsController.add(selected);
     await this.restoreWorkspaceState(selected);
+  }
+
+  private async closeOtherTabs(pathToKeep: string) {
+    const tabsToClose = this.openTabs.filter(tab => tab.path !== pathToKeep);
+    for (const tab of tabsToClose) {
+      await this.closeEditorTab(tab.path, false);
+    }
+  }
+
+  private async restartWorkspace() {
+    if (this.workspaceRootPath) {
+      const currentWorkspace = this.workspaceRootPath;
+      this.closeProject();
+      await this.openWorkspace(currentWorkspace);
+    }
   }
 
   private async openExamplesWorkspace(): Promise<void> {
