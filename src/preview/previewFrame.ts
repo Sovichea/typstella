@@ -2,6 +2,7 @@ export type PreviewTextPoint = { text: string; offset: number };
 
 export class PreviewFrame {
   private iframe: HTMLIFrameElement | null = null;
+  private svgIframe: HTMLIFrameElement | null = null;
   private mountedUrl = "";
   private activeSessionKey = "";
   private readonly sessions = new Map<string, { iframe: HTMLIFrameElement; url: string; usedAt: number }>();
@@ -42,6 +43,10 @@ export class PreviewFrame {
     if (session.iframe.parentElement !== this.pane) {
       this.sessions.delete(sessionKey);
       return false;
+    }
+    if (this.svgIframe) {
+      this.svgIframe.remove();
+      this.svgIframe = null;
     }
     for (const [key, item] of this.sessions) item.iframe.classList.toggle("hidden", key !== sessionKey);
     session.usedAt = Date.now();
@@ -88,12 +93,18 @@ export class PreviewFrame {
     this.pane.innerHTML = "";
     this.sessions.clear();
     this.iframe = null;
+    this.svgIframe = null;
     this.mountedUrl = "";
     this.activeSessionKey = "";
   }
 
   public mountSvgPages(pages: readonly string[]): void {
-    this.clear();
+    this.clearSvg();
+    for (const item of this.sessions.values()) {
+      item.iframe.classList.add("hidden");
+    }
+    this.activeSessionKey = "";
+    
     const iframe = document.createElement("iframe");
     iframe.className = "preview-frame";
     iframe.sandbox.add("allow-same-origin");
@@ -102,8 +113,57 @@ export class PreviewFrame {
       .page{display:block;margin:0 auto 24px;max-width:100%;height:auto;box-shadow:0 2px 10px rgba(0,0,0,.2)}
     </style></head><body>${pages.map(page => page.replace("<svg", '<svg class="page"')).join("")}</body></html>`;
     this.pane.appendChild(iframe);
+    this.svgIframe = iframe;
     this.iframe = iframe;
     this.mountedUrl = "";
+  }
+
+  public setLoading(message: string): void {
+    this.clearSvg();
+    for (const item of this.sessions.values()) item.iframe.classList.add("hidden");
+    this.activeSessionKey = "";
+    
+    const div = document.createElement("div");
+    div.className = "compiler-preview-message";
+    div.textContent = message;
+    this.pane.appendChild(div);
+    // Cast div to HTMLIFrameElement since we're using svgIframe to track it (it just needs a .remove() method)
+    this.svgIframe = div as unknown as HTMLIFrameElement;
+  }
+
+  public setError(title: string, message: string): void {
+    this.clearSvg();
+    for (const item of this.sessions.values()) item.iframe.classList.add("hidden");
+    this.activeSessionKey = "";
+    
+    const container = document.createElement("div");
+    container.className = "compiler-preview-message error";
+    const titleEl = document.createElement("strong");
+    titleEl.textContent = title;
+    const pre = document.createElement("pre");
+    pre.textContent = message;
+    container.append(titleEl, pre);
+    
+    this.pane.appendChild(container);
+    this.svgIframe = container as unknown as HTMLIFrameElement;
+  }
+
+  public setMessage(html: string): void {
+    this.clearSvg();
+    for (const item of this.sessions.values()) item.iframe.classList.add("hidden");
+    this.activeSessionKey = "";
+    
+    const div = document.createElement("div");
+    div.innerHTML = html;
+    this.pane.appendChild(div);
+    this.svgIframe = div as unknown as HTMLIFrameElement;
+  }
+
+  private clearSvg(): void {
+    if (this.svgIframe) {
+      this.svgIframe.remove();
+      this.svgIframe = null;
+    }
   }
 
 

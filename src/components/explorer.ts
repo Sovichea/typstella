@@ -30,7 +30,7 @@ function getFileIconSvg(filename: string): string {
 export class WorkspaceExplorer {
   private loadGeneration = 0;
 
-  constructor(private container: HTMLElement, private onFileSelected: (filePath: string) => void) {}
+  constructor(private container: HTMLElement, private onFileSelected: (filePath: string, options?: { temporary?: boolean }) => void) {}
 
   public async loadWorkspace(rootPath: string) {
     const generation = ++this.loadGeneration;
@@ -132,7 +132,10 @@ export class WorkspaceExplorer {
         label.addEventListener("click", () => {
           document.querySelectorAll('.tree-item.selected').forEach(el => el.classList.remove('selected'));
           label.classList.add('selected');
-          this.onFileSelected(node.path);
+          this.onFileSelected(node.path, { temporary: true });
+        });
+        label.addEventListener("dblclick", () => {
+          this.onFileSelected(node.path, { temporary: false });
         });
       } else {
         const childrenContainer = document.createElement("div");

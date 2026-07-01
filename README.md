@@ -12,6 +12,8 @@ A lightweight, local-first Typst code editor with advanced Unicode font fallback
   <img src="./assets/screenshot-welcome.png" alt="Typstry application view" width="800"/>
   <br/><br/>
   <img src="./assets/screenshot-editor.png" alt="Typstry Welcome Screen" width="800"/>
+  <br/><br/>
+  <img src="./assets/screenshot-editor-2.png" alt="Typstry Welcome Screen" width="800"/>
 </p>
 
 ## Key Features

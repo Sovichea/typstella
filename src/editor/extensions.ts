@@ -1,6 +1,6 @@
-import { Extension, Compartment, EditorState } from "@codemirror/state";
+import { Extension, Compartment, EditorState, StateEffect } from "@codemirror/state";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { lineNumbers, highlightActiveLineGutter, highlightActiveLine, drawSelection, dropCursor, keymap, EditorView } from "@codemirror/view";
+import { lineNumbers, highlightActiveLineGutter, highlightActiveLine, drawSelection, dropCursor, keymap, EditorView, ViewPlugin, Decoration, DecorationSet, ViewUpdate } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { search, searchKeymap } from "@codemirror/search";
 import { baseEditorLayoutTheme, editorFontTheme, typstColorHighlighting, typstFontHighlighting, typstFunctionHighlighting, typstSemanticHighlighting, typstVariableHighlighting } from "./themes";
@@ -58,9 +58,123 @@ const preventEscapedBracketAutoClose = EditorView.inputHandler.of((view, from, t
   return false;
 });
 
-export function getEditorExtensions(getClient: () => TinymistLspClient | undefined, getUri: () => string, flushLspSync: () => void): Extension[] {
+const ctrlClickForceUpdateEffect = StateEffect.define<null>();
+const linkDecoration = Decoration.mark({ class: "cm-ctrl-link", attributes: { style: "text-decoration: underline; cursor: pointer;" } });
+
+export const ctrlClickLinkPlugin = ViewPlugin.fromClass(class {
+  decorations: DecorationSet;
+  hoveredPos: number | null = null;
+  isCtrlDown = false;
+  view: EditorView;
+
+  constructor(view: EditorView) {
+    this.view = view;
+    this.decorations = Decoration.none;
+  }
+
+  update(update: ViewUpdate) {
+    if (update.docChanged || update.transactions.some(tr => tr.effects.some(e => e.is(ctrlClickForceUpdateEffect)))) {
+      this.decorations = this.computeDecorations();
+    }
+  }
+
+  computeDecorations(): DecorationSet {
+    if (!this.isCtrlDown || this.hoveredPos === null) return Decoration.none;
+    const word = this.view.state.wordAt(this.hoveredPos);
+    if (word) {
+      return Decoration.set([linkDecoration.range(word.from, word.to)]);
+    }
+    return Decoration.none;
+  }
+
+  updateDecorations(pos: number | null, isCtrlDown: boolean) {
+    let changed = false;
+    if (this.hoveredPos !== pos) {
+      this.hoveredPos = pos;
+      changed = true;
+    }
+    if (this.isCtrlDown !== isCtrlDown) {
+      this.isCtrlDown = isCtrlDown;
+      changed = true;
+    }
+    if (changed) {
+      this.view.dispatch({ effects: ctrlClickForceUpdateEffect.of(null) });
+    }
+  }
+}, {
+  decorations: v => v.decorations,
+  eventHandlers: {
+    mousemove(e) {
+      const pos = this.view.posAtCoords({ x: e.clientX, y: e.clientY });
+      if (pos !== null) {
+        (this as any).updateDecorations(pos, e.ctrlKey || e.metaKey);
+      }
+    },
+    keydown(e) {
+      const isCtrl = e.ctrlKey || e.metaKey || e.key === "Control" || e.key === "Meta";
+      (this as any).updateDecorations(this.hoveredPos, isCtrl);
+    },
+    keyup(e) {
+      const isCtrl = e.ctrlKey || e.metaKey;
+      (this as any).updateDecorations(this.hoveredPos, isCtrl);
+    },
+    mouseleave(e) {
+      (this as any).updateDecorations(null, e.ctrlKey || e.metaKey);
+    }
+  }
+});
+
+
+export function getEditorExtensions(
+  getClient: () => TinymistLspClient | undefined,
+  getUri: () => string,
+  flushLspSync: () => void,
+  onNavigateToDefinition?: (uri: string, line: number, character: number) => void
+): Extension[] {
   return [
+    ctrlClickLinkPlugin,
     preventEscapedBracketAutoClose,
+    EditorView.domEventHandlers({
+      mousedown: (event, view) => {
+        if ((event.ctrlKey || event.metaKey) && event.button === 0) {
+          console.log("[Ctrl+Click] Detected! Pos:", view.posAtCoords({ x: event.clientX, y: event.clientY }));
+          const client = getClient();
+          const uri = getUri();
+          const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+          if (client && pos !== null && onNavigateToDefinition) {
+            const lspPos = client.lspPositionFromEditorPosition(view.state.doc, pos);
+            console.log("[Ctrl+Click] Requesting definition for", uri, lspPos);
+            void client.getDefinition(uri, lspPos).then((locations) => {
+              console.log("[Ctrl+Click] Definition result:", locations);
+              if (locations && locations.length > 0) {
+                const loc = locations[0];
+                const targetUri = loc.targetUri ?? loc.uri;
+                const targetRange = loc.targetRange ?? loc.range;
+                if (targetUri && targetRange) {
+                  onNavigateToDefinition(targetUri, targetRange.start.line, targetRange.start.character ?? 0);
+                }
+              } else {
+                console.log("[Ctrl+Click] Requesting references for", uri, lspPos);
+                void client.getReferences(uri, lspPos).then((refs) => {
+                  console.log("[Ctrl+Click] References result:", refs);
+                  if (refs && refs.length > 0) {
+                    const loc = refs[0];
+                    const targetUri = loc.targetUri ?? loc.uri;
+                    const targetRange = loc.targetRange ?? loc.range;
+                    if (targetUri && targetRange) {
+                      onNavigateToDefinition(targetUri, targetRange.start.line, targetRange.start.character ?? 0);
+                    }
+                  }
+                });
+              }
+            });
+            event.preventDefault();
+            return true;
+          }
+        }
+        return false;
+      }
+    }),
     foldService.of(typstFunctionFoldService),
     lineNumbersCompartment.of(lineNumbers()),
     foldGutter({

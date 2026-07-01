@@ -1877,3 +1877,6 @@ button.welcome-item:disabled {
 }
 
 
+
+.editor-tab.temporary .editor-tab-title { font-style: italic; }
+

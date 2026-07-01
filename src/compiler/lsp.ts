@@ -56,6 +56,19 @@ export type LspDiagnostic = {
   message: string;
 };
 
+export interface LspLocation {
+  uri?: string;
+  targetUri?: string;
+  range?: {
+    start: LspSourcePosition;
+    end: LspSourcePosition;
+  };
+  targetRange?: {
+    start: LspSourcePosition;
+    end: LspSourcePosition;
+  };
+}
+
 export type LspLogEntry = {
   kind: "error" | "warning" | "info" | "log";
   message: string;
@@ -433,6 +446,32 @@ export class TinymistLspClient {
 
   public notifyWorkspaceFilesChanged(changes: { uri: string; type: 1 | 2 | 3 }[]): Promise<void> {
     return this.sendNotification("workspace/didChangeWatchedFiles", { changes });
+  }
+
+  public async getDefinition(uri: string, position: LspSourcePosition): Promise<LspLocation[]> {
+    try {
+      const result = await this.request<LspLocation | LspLocation[] | null>("textDocument/definition", {
+        textDocument: { uri },
+        position
+      }, 5000);
+      if (!result) return [];
+      return Array.isArray(result) ? result : [result];
+    } catch {
+      return [];
+    }
+  }
+
+  public async getReferences(uri: string, position: LspSourcePosition): Promise<LspLocation[]> {
+    try {
+      const result = await this.request<LspLocation[] | null>("textDocument/references", {
+        textDocument: { uri },
+        position,
+        context: { includeDeclaration: true }
+      }, 5000);
+      return result || [];
+    } catch {
+      return [];
+    }
   }
 
   public async scrollPreview(taskId: string, request: ScrollPreviewRequest): Promise<void> {

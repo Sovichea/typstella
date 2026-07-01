@@ -78,6 +78,7 @@ type EditorTab = {
   scrollTop?: number;
   scrollLeft?: number;
   foldRanges: EditorFoldRange[] | null;
+  temporary?: boolean;
 };
 
 export class TypstryWorkspaceController {
@@ -190,7 +191,7 @@ export class TypstryWorkspaceController {
   private readonly documentOutlineController = new DocumentOutlineController(
     document.getElementById("document-outline-tree")!,
     document.getElementById("document-outline-section")!,
-    heading => this.navigateToOutlineHeading(heading)
+    heading => void this.navigateToOutlineHeading(heading)
   );
   private lspStatus = document.getElementById("lsp-status")!;
   private lspStatusDot = this.lspStatus.querySelector(".status-dot") as HTMLElement;
@@ -426,7 +427,12 @@ export class TypstryWorkspaceController {
       state: EditorState.create({
         doc: initialDocument,
         extensions: [
-          getEditorExtensions(() => this.lspClient, () => this.activeFilePath ? filePathToUri(this.activeFilePath) : "", () => this.flushPendingLspSync()),
+          getEditorExtensions(
+            () => this.lspClient,
+            () => this.activeFilePath ? filePathToUri(this.activeFilePath) : "",
+            () => this.flushPendingLspSync(),
+            (uri, line, character) => void this.navigateToLspLocation(uri, line, character)
+          ),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) {
               const currentText = update.state.doc.toString();
@@ -435,7 +441,7 @@ export class TypstryWorkspaceController {
               this.handleContentMutation(currentText);
             }
             if (update.selectionSet) {
-              this.documentOutlineController.setCursorPosition(update.state.selection.main.head);
+              this.documentOutlineController.setCursorPosition(update.state.selection.main.head, this.activeFilePath);
             }
             if (!update.docChanged && this.shouldForwardSyncSelectionUpdate(update)) {
               this.previewSyncController.schedule(this.forwardSyncDebounceMs);
@@ -460,7 +466,9 @@ export class TypstryWorkspaceController {
   }
 
   private initExplorer() {
-    this.explorer = new WorkspaceExplorer(document.getElementById("workspace-explorer-tree")!, (path) => this.loadFile(path));
+    this.explorer = new WorkspaceExplorer(document.getElementById("workspace-explorer-tree")!, (path: string, options?: { temporary?: boolean }) => {
+      void this.loadFile(path, options);
+    });
   }
 
   private renderEditorTabs() {
@@ -468,7 +476,7 @@ export class TypstryWorkspaceController {
 
     for (const tab of this.openTabs) {
       const tabButton = document.createElement("button");
-      tabButton.className = `editor-tab${tab.path === this.activeFilePath ? " active" : ""}${tab.isDirty ? " dirty" : ""}`;
+      tabButton.className = `editor-tab${tab.path === this.activeFilePath ? " active" : ""}${tab.isDirty ? " dirty" : ""}${tab.temporary ? " temporary" : ""}`;
       tabButton.type = "button";
       tabButton.role = "tab";
       tabButton.title = tab.path;
@@ -501,7 +509,26 @@ export class TypstryWorkspaceController {
         void this.closeEditorTab(tab.path);
       });
 
+      tabButton.addEventListener("dblclick", () => {
+        void this.promoteToPermanent(tab);
+      });
+
       this.editorTabBar.appendChild(tabButton);
+    }
+  }
+
+  private async promoteToPermanent(tab: EditorTab) {
+    if (!tab.temporary) return;
+    tab.temporary = false;
+    this.renderEditorTabs();
+    if (this.activeFilePath === tab.path) {
+      if (this.lspReady && this.lspClient && this.previewRootPath) {
+        const previewReady = await this.activatePreviewSession(tab.content);
+        if (!previewReady) {
+          this.previewFrame.clear();
+          void this.renderCompilerPreview(tab.path, tab.content);
+        }
+      }
     }
   }
 
@@ -604,7 +631,10 @@ export class TypstryWorkspaceController {
     const wasDirty = tab.isDirty;
     tab.content = content;
     tab.isDirty = tab.content !== tab.savedContent;
-    if (wasDirty !== tab.isDirty) {
+    
+    if (tab.isDirty && tab.temporary) {
+      void this.promoteToPermanent(tab);
+    } else if (wasDirty !== tab.isDirty) {
       this.renderEditorTabs();
     }
   }
@@ -744,8 +774,19 @@ export class TypstryWorkspaceController {
     this.previewSyncController.clearForward();
     this.renderEditorTabs();
     this.editorFontManager.updateDocument(tab.content);
-    this.documentOutlineController.update(path, tab.content);
-    this.documentOutlineController.setCursorPosition(this.editorInstance.state.selection.main.head);
+    void this.documentOutlineController.update(
+      path, 
+      tab.content, 
+      this.workspaceRootPath || "", 
+      async (p) => {
+        try {
+          return await invoke<string>("read_workspace_file", { path: p });
+        } catch {
+          return null;
+        }
+      }
+    );
+    this.documentOutlineController.setCursorPosition(this.editorInstance.state.selection.main.head, this.activeFilePath);
 
 
     if (this.lspReady && this.lspClient) {
@@ -757,14 +798,16 @@ export class TypstryWorkspaceController {
       }
 
       if (this.previewRootPath) {
-        const previewReady = await this.activatePreviewSession(tab.content);
-        if (!previewReady) {
-          this.previewFrame.clear();
-          this.previewPane.innerHTML = `<div style="padding: 20px; color: red; font-family: sans-serif;">Failed to start live preview server after restart. Check the log console for details.</div>`;
+        if (!tab.temporary) {
+          const previewReady = await this.activatePreviewSession(tab.content);
+          if (!previewReady) {
+            this.previewFrame.setMessage(`<div style="padding: 20px; color: red; font-family: sans-serif;">Failed to start live preview server after restart. Check the log console for details.</div>`);
+          }
+        } else {
+          void this.renderCompilerPreview(path, tab.content);
         }
       } else {
-        this.previewFrame.clear();
-        this.previewPane.innerHTML = `<div style="padding: 20px; color: #5f6368; font-family: sans-serif;">No preview root found for this library/template file. Diagnostics are still active.</div>`;
+        this.previewFrame.setMessage(`<div style="padding: 20px; color: #5f6368; font-family: sans-serif;">No preview root found for this library/template file. Diagnostics are still active.</div>`);
       }
     } else {
       void this.runFallbackDiagnostics(path, tab.content, this.currentVersion);
@@ -822,10 +865,7 @@ export class TypstryWorkspaceController {
   private async renderCompilerPreview(path: string, text: string) {
     const generation = ++this.fallbackPreviewGeneration;
     this.setLspStatus({ kind: "syncing", message: "Compiling preview with Typst" });
-    this.previewPane.replaceChildren(Object.assign(document.createElement("div"), {
-      className: "compiler-preview-message",
-      textContent: "Compiling preview with Typst..."
-    }));
+    this.previewFrame.setLoading("Compiling preview with Typst...");
     try {
       const pages = await invoke<string[]>("compile_typst_preview", {
         sourceCode: text,
@@ -837,15 +877,8 @@ export class TypstryWorkspaceController {
       this.setLspStatus({ kind: "preview-ready", message: "Typst compiler preview (no LSP sync)" });
     } catch (error) {
       if (generation !== this.fallbackPreviewGeneration || path !== this.activeFilePath) return;
-      const container = document.createElement("div");
-      container.className = "compiler-preview-message error";
-      const title = document.createElement("strong");
-      title.textContent = "Typst preview failed";
-      const details = document.createElement("pre");
-      details.textContent = String(error);
-      container.append(title, details);
-      this.previewPane.replaceChildren(container);
-      this.setLspStatus({ kind: "error", message: "Typst compiler preview failed" });
+      this.previewFrame.setError("Typst Compilation Failed", String(error));
+      this.setLspStatus({ kind: "error", message: "Fallback preview failed" });
     }
   }
 
@@ -867,16 +900,19 @@ export class TypstryWorkspaceController {
     }, this.lspSyncDebounceMs);
   }
 
-  private async loadFile(path: string) {
+  private async loadFile(path: string, options: { temporary?: boolean } = {}) {
     const existingTab = this.openTabs.find((tab) => filePathKey(tab.path) === filePathKey(path));
     if (existingTab) {
+      if (!options.temporary) {
+        void this.promoteToPermanent(existingTab);
+      }
       await this.activateEditorTab(existingTab.path);
       return;
     }
 
     try {
       const contents: string = await invoke("read_workspace_file", { path });
-      this.openTabs.push({
+      const newTab: EditorTab = {
         path,
         content: contents,
         savedContent: contents,
@@ -891,8 +927,18 @@ export class TypstryWorkspaceController {
         latestVersion: 1,
         selectionAnchor: 0,
         selectionHead: 0,
-        foldRanges: null
-      });
+        foldRanges: null,
+        temporary: options.temporary
+      };
+
+      if (options.temporary) {
+        const existingTempIndex = this.openTabs.findIndex(t => t.temporary && !t.isDirty);
+        if (existingTempIndex >= 0) {
+          this.openTabs.splice(existingTempIndex, 1);
+        }
+      }
+
+      this.openTabs.push(newTab);
       this.renderEditorTabs();
       await this.activateEditorTab(path);
     } catch (e) {
@@ -1216,7 +1262,18 @@ export class TypstryWorkspaceController {
   }
 
   private handleContentMutation(rawText: string) {
-    this.documentOutlineController.update(this.activeFilePath, rawText);
+    void this.documentOutlineController.update(
+      this.activeFilePath, 
+      rawText, 
+      this.workspaceRootPath || "", 
+      async (p) => {
+        try {
+          return await invoke<string>("read_workspace_file", { path: p });
+        } catch {
+          return null;
+        }
+      }
+    );
     if (!this.isLoadingFile) {
       this.updateActiveTabContent(rawText);
     }
@@ -1511,7 +1568,37 @@ export class TypstryWorkspaceController {
     this.editorInstance.focus();
   }
 
-  private navigateToOutlineHeading(heading: DocumentHeading) {
+  private async navigateToLspLocation(uri: string, line: number, character: number) {
+    const filePath = filePathFromUri(uri);
+    if (filePath !== this.activeFilePath) {
+      await this.loadFile(filePath);
+    }
+    
+    let cursor = 0;
+    if (this.lspClient) {
+      cursor = this.lspClient.editorPositionFromLspPosition({ line, character });
+    } else {
+      const doc = this.editorInstance.state.doc;
+      const lineInfo = doc.line(Math.max(1, Math.min(line + 1, doc.lines)));
+      cursor = Math.max(lineInfo.from, Math.min(lineInfo.from + character, lineInfo.to));
+    }
+    
+    this.editorInstance.dispatch({
+      selection: { anchor: cursor },
+      effects: EditorView.scrollIntoView(cursor, { y: "center" })
+    });
+    this.editorInstance.focus();
+  }
+
+  private async navigateToOutlineHeading(heading: DocumentHeading) {
+    const activeTab = this.getActiveTab();
+    if (activeTab?.temporary) {
+      void this.promoteToPermanent(activeTab);
+    }
+
+    if (heading.filePath !== this.activeFilePath) {
+      await this.loadFile(heading.filePath);
+    }
     if (this.activeMode === "WYSIWYM") this.switchViewLayoutMode();
     const currentHeading = this.documentOutlineController.findHeading(heading.id) ?? heading;
     const cursor = Math.max(0, Math.min(currentHeading.textFrom, this.editorInstance.state.doc.length));
@@ -1520,7 +1607,7 @@ export class TypstryWorkspaceController {
       selection: { anchor: cursor },
       effects: EditorView.scrollIntoView(cursor, { y: "start", yMargin: 28 })
     });
-    this.documentOutlineController.setCursorPosition(cursor);
+    this.documentOutlineController.setCursorPosition(cursor, this.activeFilePath);
     this.editorInstance.focus();
     if (currentHeading.previewPosition) {
       void this.previewSyncController.navigateToPosition(currentHeading.previewPosition);
@@ -1731,8 +1818,19 @@ export class TypstryWorkspaceController {
 
     this.renderEditorTabs();
     this.editorFontManager.updateDocument(contents);
-    this.documentOutlineController.update(tab.path, contents);
-    this.documentOutlineController.setCursorPosition(this.editorInstance.state.selection.main.head);
+    void this.documentOutlineController.update(
+      tab.path, 
+      contents, 
+      this.workspaceRootPath || "", 
+      async (p) => {
+        try {
+          return await invoke<string>("read_workspace_file", { path: p });
+        } catch {
+          return null;
+        }
+      }
+    );
+    this.documentOutlineController.setCursorPosition(this.editorInstance.state.selection.main.head, this.activeFilePath);
     if (this.activeMode === "WYSIWYM") this.mapMarkupToWysiwym(contents);
 
     const version = ++this.currentVersion;
@@ -1970,6 +2068,10 @@ export class TypstryWorkspaceController {
       }
     });
     
+    document.getElementById("action-restart-workspace")?.addEventListener("click", () => {
+      void this.restartWorkspace();
+    });
+
     document.getElementById("action-close-project")?.addEventListener("click", () => {
       this.closeProject();
     });

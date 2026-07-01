@@ -5,6 +5,7 @@ export type DocumentHeading = {
   id: string;
   level: number;
   title: string;
+  filePath: string;
   from: number;
   textFrom: number;
   to: number;
@@ -33,9 +34,53 @@ function displayTitle(sourceTitle: string): string {
   return withoutLabel || "Untitled heading";
 }
 
-export function parseDocumentOutline(source: string): DocumentHeading[] {
+function resolveIncludePath(currentPath: string, workspaceRoot: string, includePath: string): string {
+  let baseDir = includePath.startsWith("/") ? workspaceRoot : currentPath.substring(0, Math.max(currentPath.lastIndexOf("/"), currentPath.lastIndexOf("\\")));
+  if (includePath.startsWith("/")) includePath = includePath.slice(1);
+  
+  let result = baseDir + "/" + includePath;
+  result = result.replace(/\\/g, "/");
+  result = result.replace(/\/\.\//g, "/");
+  while (result.match(/\/[^/]+\/\.\.\//)) {
+    result = result.replace(/\/[^/]+\/\.\.\//, "/");
+  }
+  return result.replace(/(?<!:)\/+/g, "/");
+}
+
+export async function parseDocumentOutline(
+  filePath: string,
+  source: string,
+  workspaceRoot: string,
+  readFile: (path: string) => Promise<string | null>,
+  visited: Set<string> = new Set()
+): Promise<DocumentHeading[]> {
+  const flat = await parseDocumentOutlineFlat(filePath, source, workspaceRoot, readFile, visited);
+  
+  const roots: DocumentHeading[] = [];
+  const parents: DocumentHeading[] = [];
+  for (const heading of flat) {
+    while (parents.length && parents[parents.length - 1].level >= heading.level) parents.pop();
+    const parent = parents[parents.length - 1];
+    if (parent) parent.children.push(heading);
+    else roots.push(heading);
+    parents.push(heading);
+  }
+  return roots;
+}
+
+const occurrences = new Map<string, number>();
+
+async function parseDocumentOutlineFlat(
+  filePath: string,
+  source: string,
+  workspaceRoot: string,
+  readFile: (path: string) => Promise<string | null>,
+  visited: Set<string>
+): Promise<DocumentHeading[]> {
   const flat: DocumentHeading[] = [];
-  const occurrences = new Map<string, number>();
+  if (visited.size === 0) occurrences.clear();
+  visited.add(filePath);
+  
   let blockCommentDepth = 0;
   let rawFenceLength = 0;
   let lineStart = 0;
@@ -76,12 +121,26 @@ export function parseDocumentOutline(source: string): DocumentHeading[] {
             id: `${signature}:${occurrence}`,
             level,
             title,
+            filePath,
             from: lineStart + match[1].length,
             textFrom: lineStart + markerLength,
             to: lineEnd,
             line: lineNumber,
             children: []
           });
+        } else {
+          const includeMatch = line.match(/include\s*["']([^"']+)["']/);
+          if (includeMatch) {
+            const includePath = includeMatch[1];
+            const resolvedPath = resolveIncludePath(filePath, workspaceRoot, includePath);
+            if (!visited.has(resolvedPath)) {
+              const includeSource = await readFile(resolvedPath);
+              if (includeSource !== null) {
+                const subHeadings = await parseDocumentOutlineFlat(resolvedPath, includeSource, workspaceRoot, readFile, visited);
+                flat.push(...subHeadings);
+              }
+            }
+          }
         }
         blockCommentDepth = updateBlockCommentDepth(line, blockCommentDepth);
       }
@@ -92,16 +151,7 @@ export function parseDocumentOutline(source: string): DocumentHeading[] {
     lineNumber++;
   }
 
-  const roots: DocumentHeading[] = [];
-  const parents: DocumentHeading[] = [];
-  for (const heading of flat) {
-    while (parents.length && parents[parents.length - 1].level >= heading.level) parents.pop();
-    const parent = parents[parents.length - 1];
-    if (parent) parent.children.push(heading);
-    else roots.push(heading);
-    parents.push(heading);
-  }
-  return roots;
+  return flat;
 }
 
 function flattenHeadings(headings: readonly DocumentHeading[]): DocumentHeading[] {
@@ -124,6 +174,7 @@ export class DocumentOutlineController {
   private flatHeadings: DocumentHeading[] = [];
   private readonly collapsed = new Set<string>();
   private cursor = 0;
+  private activePath: string | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -140,8 +191,9 @@ export class DocumentOutlineController {
     this.render();
   }
 
-  public update(path: string | null, source: string): void {
-    this.headings = path?.toLowerCase().endsWith(".typ") ? parseDocumentOutline(source) : [];
+  public async update(path: string | null, source: string, workspaceRoot: string, readFile: (path: string) => Promise<string | null>): Promise<void> {
+    this.activePath = path;
+    this.headings = path?.toLowerCase().endsWith(".typ") ? await parseDocumentOutline(path, source, workspaceRoot, readFile) : [];
     this.flatHeadings = flattenHeadings(this.headings);
     const validIds = new Set(this.flatHeadings.map(heading => heading.id));
     for (const id of this.collapsed) {
@@ -155,16 +207,20 @@ export class DocumentOutlineController {
     this.headings = [];
     this.flatHeadings = [];
     this.cursor = 0;
+    this.activePath = null;
     this.collapsed.clear();
     this.render();
   }
 
-  public setCursorPosition(cursor: number): void {
+  public setCursorPosition(cursor: number, activePath: string | null = this.activePath): void {
     this.cursor = cursor;
+    this.activePath = activePath;
     let active: DocumentHeading | undefined;
     for (const heading of this.flatHeadings) {
-      if (heading.from > cursor) break;
-      active = heading;
+      if (heading.filePath === activePath) {
+        if (heading.from > cursor) break;
+        active = heading;
+      }
     }
     this.container.querySelectorAll<HTMLElement>(".outline-item.active").forEach(item => {
       item.classList.remove("active");
@@ -184,8 +240,10 @@ export class DocumentOutlineController {
   public previewPositionAt(cursor: number): PreviewDocumentPosition | undefined {
     let position: PreviewDocumentPosition | undefined;
     for (const heading of this.flatHeadings) {
-      if (heading.from > cursor) break;
-      if (heading.previewPosition) position = heading.previewPosition;
+      if (heading.filePath === this.activePath) {
+        if (heading.from > cursor) break;
+        if (heading.previewPosition) position = heading.previewPosition;
+      }
     }
     return position;
   }
