@@ -75,6 +75,13 @@ export class SpellcheckController {
 
   public issueAt(position: number, docText: string): SpellingIssue | null {
     const clampedPos = Math.max(0, Math.min(position, docText.length));
+
+    // CodeMirror may resolve a click at a decorated glyph edge to either side
+    // of the mark. Treat both token boundaries as part of the issue first.
+    const direct = this.issues.filter(issue => clampedPos >= issue.from && clampedPos <= issue.to);
+    if (direct.length) {
+      return direct.sort((a, b) => (a.to - a.from) - (b.to - b.from))[0];
+    }
     
     let runStart = clampedPos;
     while (runStart > 0) {
@@ -95,10 +102,25 @@ export class SpellcheckController {
       }
     }
 
-    const matching = this.issues.filter(issue => 
-      (issue.from >= runStart && issue.from <= runEnd) ||
-      (issue.to >= runStart && issue.to <= runEnd)
+    const matching = this.issues.filter(issue =>
+      issue.from <= runEnd && issue.to >= runStart
     );
+    if (!matching.length) {
+      // A right-click immediately outside a single-cluster mark can resolve to
+      // the neighbouring document position. Do not broaden this beyond one
+      // UTF-16 code unit or suggestions could come from an unrelated word.
+      const adjacent = this.issues.filter(issue =>
+        Math.min(Math.abs(clampedPos - issue.from), Math.abs(clampedPos - issue.to)) <= 1
+      );
+      if (adjacent.length) {
+        adjacent.sort((a, b) => {
+          const distA = Math.min(Math.abs(clampedPos - a.from), Math.abs(clampedPos - a.to));
+          const distB = Math.min(Math.abs(clampedPos - b.from), Math.abs(clampedPos - b.to));
+          return distA - distB;
+        });
+        return adjacent[0];
+      }
+    }
     if (matching.length === 0) return null;
 
     matching.sort((a, b) => {

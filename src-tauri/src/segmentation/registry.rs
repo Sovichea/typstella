@@ -54,8 +54,6 @@ impl KhmerProvider {
     }
 }
 
-
-
 fn edit_distance(left: &str, right: &str) -> usize {
     let right_chars: Vec<char> = right.chars().collect();
     let mut previous: Vec<usize> = (0..=right_chars.len()).collect();
@@ -143,12 +141,11 @@ impl LanguageSegmenter for KhmerProvider {
                 .iter()
                 .map(|range| {
                     let token = &normalized[range.clone()];
-                    let known = !token.chars().any(is_spelling_char)
-                        || self.known.contains(token);
+                    let known = !token.chars().any(is_spelling_char) || self.known.contains(token);
 
                     let norm_char_start = norm_byte_to_char[range.start];
                     let norm_char_end = norm_byte_to_char[range.end];
-                    
+
                     let orig_char_start = norm_to_orig_char_idx[norm_char_start];
                     let orig_char_end = norm_to_orig_char_idx[norm_char_end];
 
@@ -173,6 +170,25 @@ impl LanguageSegmenter for KhmerProvider {
     }
 
     fn suggestions(&self, word: &str, limit: usize) -> Vec<String> {
+        if word.is_empty() || limit == 0 {
+            return Vec::new();
+        }
+        let prefix_index = self
+            .words
+            .partition_point(|candidate| candidate.as_str() < word);
+        let mut suggestions: Vec<String> = self
+            .words
+            .iter()
+            .skip(prefix_index)
+            .take_while(|candidate| candidate.starts_with(word))
+            .filter(|candidate| candidate.as_str() != word)
+            .take(limit)
+            .cloned()
+            .collect();
+        if suggestions.len() == limit {
+            return suggestions;
+        }
+
         let first = word.chars().next();
         let length = word.chars().count();
         let mut candidates: Vec<(usize, &str)> = self
@@ -190,11 +206,39 @@ impl LanguageSegmenter for KhmerProvider {
                 .then_with(|| left.1.len().cmp(&right.1.len()))
         });
         candidates.dedup_by(|left, right| left.1 == right.1);
-        candidates
-            .into_iter()
-            .take(limit)
-            .map(|(_, candidate)| candidate.to_owned())
-            .collect()
+        for candidate in candidates.into_iter().map(|(_, candidate)| candidate) {
+            if suggestions.iter().any(|suggestion| suggestion == candidate) {
+                continue;
+            }
+            suggestions.push(candidate.to_owned());
+            if suggestions.len() == limit {
+                break;
+            }
+        }
+        if suggestions.is_empty() {
+            let mut fallback: Vec<(usize, &str)> = self
+                .words
+                .iter()
+                .map(String::as_str)
+                .filter(|candidate| candidate.chars().count().abs_diff(length) <= 2)
+                .map(|candidate| (edit_distance(word, candidate), candidate))
+                .filter(|(distance, _)| *distance <= 3)
+                .collect();
+            fallback.sort_by(|left, right| {
+                left.0
+                    .cmp(&right.0)
+                    .then_with(|| left.1.chars().count().cmp(&right.1.chars().count()))
+                    .then_with(|| left.1.cmp(right.1))
+            });
+            fallback.dedup_by(|left, right| left.1 == right.1);
+            suggestions.extend(
+                fallback
+                    .into_iter()
+                    .take(limit)
+                    .map(|(_, candidate)| candidate.to_owned()),
+            );
+        }
+        suggestions
     }
 
     fn autocomplete(&self, prefix: &str, limit: usize) -> Vec<String> {
@@ -260,7 +304,14 @@ impl LanguageSegmenter for KhmerProvider {
 
 pub struct SegmentationRegistry {
     providers: Vec<Arc<dyn LanguageSegmenter>>,
-    cache: Arc<std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, Vec<Vec<RenderReplacement>>)>>>,
+    cache: Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<
+                std::path::PathBuf,
+                (std::time::SystemTime, Vec<Vec<RenderReplacement>>),
+            >,
+        >,
+    >,
 }
 
 fn collect_replacements(
@@ -268,7 +319,12 @@ fn collect_replacements(
     active_path: &std::path::Path,
     active_contents: &str,
     providers: &[Arc<dyn LanguageSegmenter>],
-    cache: &std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, (std::time::SystemTime, Vec<Vec<RenderReplacement>>)>>,
+    cache: &std::sync::Mutex<
+        std::collections::HashMap<
+            std::path::PathBuf,
+            (std::time::SystemTime, Vec<Vec<RenderReplacement>>),
+        >,
+    >,
     all_replacements: &mut Vec<Vec<RenderReplacement>>,
 ) {
     let Ok(entries) = std::fs::read_dir(root) else {
@@ -279,7 +335,14 @@ fn collect_replacements(
         if path.is_dir() {
             let name = entry.file_name();
             if name != ".git" && name != "target" && name != "node_modules" {
-                collect_replacements(&path, active_path, active_contents, providers, cache, all_replacements);
+                collect_replacements(
+                    &path,
+                    active_path,
+                    active_contents,
+                    providers,
+                    cache,
+                    all_replacements,
+                );
             }
         } else if path.extension().and_then(|extension| extension.to_str()) == Some("typ")
             && !path
@@ -288,7 +351,8 @@ fn collect_replacements(
                 .unwrap_or_default()
                 .contains("typstry-preview")
         {
-            let is_active = path.to_string_lossy().to_lowercase() == active_path.to_string_lossy().to_lowercase();
+            let is_active = path.to_string_lossy().to_lowercase()
+                == active_path.to_string_lossy().to_lowercase();
             if is_active {
                 let replacements: Vec<Vec<RenderReplacement>> = providers
                     .iter()
@@ -301,7 +365,7 @@ fn collect_replacements(
                 let modified = std::fs::metadata(&path)
                     .and_then(|m| m.modified())
                     .unwrap_or_else(|_| std::time::SystemTime::now());
-                
+
                 let cached_reps = {
                     let lock = cache.lock().unwrap();
                     if let Some((time, cached)) = lock.get(&path) {
@@ -357,10 +421,8 @@ pub async fn analyze_text(
 ) -> Result<Option<TextAnalysis>, String> {
     let providers = registry.providers.clone();
     tokio::task::spawn_blocking(move || -> Result<Option<TextAnalysis>, String> {
-        let provider = providers
-            .iter()
-            .find(|provider| provider.supports(&text));
-        
+        let provider = providers.iter().find(|provider| provider.supports(&text));
+
         if let Some(provider) = provider {
             provider.analyze(&text).map(Some)
         } else {
@@ -379,10 +441,8 @@ pub async fn spelling_suggestions(
 ) -> Result<Vec<String>, String> {
     let providers = registry.providers.clone();
     tokio::task::spawn_blocking(move || -> Vec<String> {
-        let provider = providers
-            .iter()
-            .find(|provider| provider.supports(&word));
-            
+        let provider = providers.iter().find(|provider| provider.supports(&word));
+
         if let Some(provider) = provider {
             provider.suggestions(&word, limit.unwrap_or(5).min(10))
         } else {
@@ -401,10 +461,8 @@ pub async fn autocomplete_khmer(
 ) -> Result<Vec<String>, String> {
     let providers = registry.providers.clone();
     tokio::task::spawn_blocking(move || -> Vec<String> {
-        let provider = providers
-            .iter()
-            .find(|provider| provider.supports(&prefix));
-            
+        let provider = providers.iter().find(|provider| provider.supports(&prefix));
+
         if let Some(provider) = provider {
             provider.autocomplete(&prefix, limit.min(50))
         } else {
@@ -424,7 +482,7 @@ pub async fn segmentation_prelude(
 ) -> Result<String, String> {
     let providers = registry.providers.clone();
     let cache = registry.cache.clone();
-    
+
     tokio::task::spawn_blocking(move || -> String {
         let mut all_replacements = vec![Vec::new(); providers.len()];
         collect_replacements(
@@ -435,7 +493,7 @@ pub async fn segmentation_prelude(
             &cache,
             &mut all_replacements,
         );
-        
+
         let mut prelude = String::new();
         for (index, provider) in providers.iter().enumerate() {
             let mut replacements = std::mem::take(&mut all_replacements[index]);
@@ -458,7 +516,7 @@ pub async fn segmentation_prelude(
                 })
                 .collect::<Vec<_>>()
                 .join("\n  ");
-                
+
             prelude.push_str(&format!(
                 "#let __typstry_segs_{} = (\n  {}\n)\n",
                 index, dict_entries
@@ -494,5 +552,20 @@ mod tests {
         assert!(replacements
             .iter()
             .any(|replacement| replacement.hyphenated.contains('\u{00ad}')));
+    }
+
+    #[test]
+    fn suggests_completions_for_an_unknown_dictionary_prefix() {
+        let provider = KhmerProvider::new().expect("Khmer provider");
+        let (prefix, full_word) = provider
+            .words
+            .iter()
+            .find_map(|word| {
+                let prefix: String = word.chars().take(1).collect();
+                (!prefix.is_empty() && !provider.known.contains(&prefix))
+                    .then(|| (prefix, word.clone()))
+            })
+            .expect("dictionary word with an unknown short prefix");
+        assert!(provider.suggestions(&prefix, 10).contains(&full_word));
     }
 }

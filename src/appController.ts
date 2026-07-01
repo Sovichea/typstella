@@ -222,19 +222,6 @@ export class TypstryWorkspaceController {
         }
         const issue = this.spellcheckController.issueAt(position, docText);
         if (issue) return issue;
-
-        const line = this.editorInstance.state.doc.lineAt(position);
-        const lineIssues = this.spellcheckController.issues.filter(i => 
-          i.from >= line.from && i.to <= line.to
-        );
-        if (lineIssues.length > 0) {
-          lineIssues.sort((a, b) => {
-            const distA = Math.min(Math.abs(position - a.from), Math.abs(position - a.to));
-            const distB = Math.min(Math.abs(position - b.from), Math.abs(position - b.to));
-            return distA - distB;
-          });
-          return lineIssues[0];
-        }
       } catch (e) {
         console.error("posAtCoords or line lookup failed in getSpellingIssue:", e);
       }

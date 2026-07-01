@@ -9,7 +9,8 @@ mod segmentation;
 mod toolchain;
 use examples::prepare_examples_workspace;
 use segmentation::{
-    analyze_text, autocomplete_khmer, segmentation_prelude, spelling_suggestions, SegmentationRegistry,
+    analyze_text, autocomplete_khmer, segmentation_prelude, spelling_suggestions,
+    SegmentationRegistry,
 };
 use toolchain::active_tinymist;
 
