@@ -39,6 +39,10 @@ export class PreviewFrame {
   public activateSession(sessionKey: string): boolean {
     const session = this.sessions.get(sessionKey);
     if (!session) return false;
+    if (session.iframe.parentElement !== this.pane) {
+      this.sessions.delete(sessionKey);
+      return false;
+    }
     for (const [key, item] of this.sessions) item.iframe.classList.toggle("hidden", key !== sessionKey);
     session.usedAt = Date.now();
     this.activeSessionKey = sessionKey;

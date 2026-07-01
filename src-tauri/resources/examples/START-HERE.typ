@@ -17,6 +17,8 @@ This workspace contains editable examples for learning Typst and testing multili
 - `04-complex-script-shaping`: Khmer, Lao, Devanagari, Bengali, and Myanmar.
 - `05-cjk-layout`: Chinese, Japanese, and Korean layout.
 - `06-unicode-math`: Unicode symbols and mathematical notation.
+- `07-khmer-example`: Khmer language document with Cetz circuit diagrams.
+- `08-simple-thesis`: Three chapters demonstrating labels and cross-chapter references.
 - `templates/multilingual-article`: A reusable multi-file article structure.
 
 Open any `main.typ` file from the explorer. These files are your own writable copies, so you can change them freely.

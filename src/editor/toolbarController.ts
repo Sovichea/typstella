@@ -8,7 +8,6 @@ import {
   documentScripts,
   parseTypographyBlock,
   preferredInstalledFamily,
-  typographyEdit,
   type DocumentTypography
 } from "./documentTypography";
 
@@ -22,6 +21,7 @@ export type EditorToolbarDependencies = {
   renderWysiwym: (markup: string) => void;
   save: () => Promise<void>;
   syncPreview: (cursor: number) => Promise<void>;
+  applyTypography: (config: DocumentTypography, target: "document" | "template") => Promise<void>;
   // TODO: Re-enable when the WYSIWYM layout is ready for use.
   // toggleMode: () => void;
 };
@@ -74,7 +74,12 @@ export class EditorToolbarController {
     document.getElementById("toolbar-typography-apply")?.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
-      this.applyDocumentTypography();
+      this.applyDocumentTypography("document");
+    });
+    document.getElementById("toolbar-typography-apply-template")?.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.applyDocumentTypography("template");
     });
     document.getElementById("toolbar-complex-script")?.addEventListener("change", event => {
       const scriptId = (event.currentTarget as HTMLSelectElement).value;
@@ -84,6 +89,8 @@ export class EditorToolbarController {
     });
     document.getElementById("toolbar-latin-font")?.addEventListener("change", () => this.updateTypographyAvailability());
     document.getElementById("toolbar-complex-font")?.addEventListener("change", () => this.updateTypographyAvailability());
+    document.getElementById("toolbar-latin-enable")?.addEventListener("change", () => this.updateTypographyAvailability());
+    document.getElementById("toolbar-complex-enable")?.addEventListener("change", () => this.updateTypographyAvailability());
     this.toolbar.addEventListener("pointerdown", event => {
       const target = event.target as HTMLElement;
       if (target.closest("[data-tool]") || target.closest(".toolbar-dropdown-btn")) event.preventDefault();
@@ -220,6 +227,14 @@ export class EditorToolbarController {
       complexScript: script.id,
       complexSizeAdjustmentPt: existing?.complexSizeAdjustmentPt ?? 0
     };
+    const latinEnable = document.getElementById("toolbar-latin-enable") as HTMLInputElement | null;
+    if (latinEnable) {
+      latinEnable.checked = existing ? existing.latinFont !== null : true;
+    }
+    const complexEnable = document.getElementById("toolbar-complex-enable") as HTMLInputElement | null;
+    if (complexEnable) {
+      complexEnable.checked = existing ? existing.complexFont !== null : true;
+    }
     this.setTypographyControl("toolbar-latin-font", latinFont ?? "");
     this.setTypographyControl("toolbar-latin-size", String(this.typographyDefaults.latinSizePt));
     this.setTypographyControl("toolbar-complex-script", script.id);
@@ -230,14 +245,33 @@ export class EditorToolbarController {
   }
 
   private updateTypographyAvailability(): void {
+    const latinEnable = document.getElementById("toolbar-latin-enable") as HTMLInputElement | null;
+    const complexEnable = document.getElementById("toolbar-complex-enable") as HTMLInputElement | null;
+
     const latin = document.getElementById("toolbar-latin-font") as HTMLSelectElement | null;
     const complex = document.getElementById("toolbar-complex-font") as HTMLSelectElement | null;
     const latinSize = document.getElementById("toolbar-latin-size") as HTMLInputElement | null;
+    const complexScript = document.getElementById("toolbar-complex-script") as HTMLSelectElement | null;
     const complexAdjustment = document.getElementById("toolbar-complex-adjustment") as HTMLInputElement | null;
     const apply = document.getElementById("toolbar-typography-apply") as HTMLButtonElement | null;
-    if (latinSize) latinSize.disabled = !latin?.value;
-    if (complexAdjustment) complexAdjustment.disabled = !complex?.value;
-    if (apply) apply.disabled = !latin?.value && !complex?.value;
+    const applyTemplate = document.getElementById("toolbar-typography-apply-template") as HTMLButtonElement | null;
+
+    const isLatinEnabled = latinEnable?.checked ?? true;
+    const isComplexEnabled = complexEnable?.checked ?? true;
+
+    if (latin) latin.disabled = !isLatinEnabled;
+    if (latinSize) latinSize.disabled = !isLatinEnabled || !latin?.value;
+
+    if (complexScript) complexScript.disabled = !isComplexEnabled;
+    if (complex) complex.disabled = !isComplexEnabled;
+    if (complexAdjustment) complexAdjustment.disabled = !isComplexEnabled || !complex?.value;
+
+    if (apply) {
+      const hasLatin = isLatinEnabled && !!latin?.value;
+      const hasComplex = isComplexEnabled && !!complex?.value;
+      apply.disabled = !hasLatin && !hasComplex;
+      if (applyTemplate) applyTemplate.disabled = apply.disabled;
+    }
   }
 
   private updateScriptHint(scriptId: string, detectedLabel: string | null): void {
@@ -262,10 +296,15 @@ export class EditorToolbarController {
     control.value = value;
   }
 
-  private applyDocumentTypography(): void {
+  private applyDocumentTypography(target: "document" | "template"): void {
     const value = (id: string) => (document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null)?.value ?? "";
-    const latinFont = value("toolbar-latin-font") || null;
-    const complexFont = value("toolbar-complex-font") || null;
+    const latinEnable = document.getElementById("toolbar-latin-enable") as HTMLInputElement | null;
+    const complexEnable = document.getElementById("toolbar-complex-enable") as HTMLInputElement | null;
+    const isLatinEnabled = latinEnable?.checked ?? true;
+    const isComplexEnabled = complexEnable?.checked ?? true;
+
+    const latinFont = isLatinEnabled ? (value("toolbar-latin-font") || null) : null;
+    const complexFont = isComplexEnabled ? (value("toolbar-complex-font") || null) : null;
     if (!latinFont && !complexFont) return;
     const config: DocumentTypography = {
       latinFont,
@@ -274,17 +313,9 @@ export class EditorToolbarController {
       complexScript: value("toolbar-complex-script") || this.typographyDefaults.complexScript,
       complexSizeAdjustmentPt: this.boundedTypographyNumber(value("toolbar-complex-adjustment"), -12, 12, 0)
     };
-    const editor = this.dependencies.getEditor();
-    const edit = typographyEdit(editor.state.doc.toString(), config);
-    editor.dispatch({
-      changes: edit,
-      selection: { anchor: edit.from },
-      scrollIntoView: true,
-      userEvent: "input"
-    });
+    void this.dependencies.applyTypography(config, target);
     this.typographyDefaults = config;
     this.closeDropdowns();
-    editor.focus();
   }
 
   private boundedTypographyNumber(value: string, min: number, max: number, fallback: number): number {

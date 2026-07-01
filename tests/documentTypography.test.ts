@@ -34,6 +34,14 @@ describe("document typography", () => {
     });
   });
 
+  test("supports disabling both Latin and complex-script rules", () => {
+    const disabledBoth = { ...config, latinFont: null, complexFont: null };
+    const disabledBlock = renderTypographyBlock(disabledBoth);
+    expect(disabledBlock).not.toContain("#set text(");
+    expect(disabledBlock).not.toContain("#show regex(");
+    expect(parseTypographyBlock(disabledBlock)).toBeNull();
+  });
+
   test("updates one managed block and preserves the preview directive", () => {
     const original = "// @allow-preview\n= Chapter\n";
     const first = typographyEdit(original, config);

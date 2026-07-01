@@ -688,10 +688,38 @@ html {
   line-height: 1.35;
 }
 
-#toolbar-typography-apply {
+.toolbar-typography-option-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 0 4px;
+}
+
+.toolbar-typography-option-header > label {
+  margin: 0;
+  font-weight: 600;
+}
+
+.toolbar-typography-enable {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--ui-header-text);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.toolbar-typography-enable input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  cursor: pointer;
+}
+
+#toolbar-typography-apply,
+#toolbar-typography-apply-template {
   width: 100%;
   height: 30px;
-  margin-top: 12px;
   border: 1px solid #0969da;
   border-radius: 4px;
   color: #fff;
@@ -700,7 +728,8 @@ html {
   cursor: pointer;
 }
 
-#toolbar-typography-apply:hover {
+#toolbar-typography-apply:hover,
+#toolbar-typography-apply-template:hover {
   background: #075bbd;
 }
 
@@ -1605,6 +1634,17 @@ button.welcome-item {
 button.welcome-item:disabled {
   cursor: wait;
   opacity: 0.55;
+}
+
+.toolbar-typography-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.toolbar-typography-actions button {
+  min-width: 0;
 }
 
 .welcome-item-icon {

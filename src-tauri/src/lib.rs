@@ -85,6 +85,25 @@ fn workspace_path_exists(path: String) -> bool {
 }
 
 #[tauri::command]
+fn cleanup_workspace_preview_files(workspace_root_path: String) -> Result<(), String> {
+    let root = std::path::PathBuf::from(workspace_root_path);
+    if !root.is_dir() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(&root)
+        .map_err(|error| format!("Failed to inspect workspace preview files: {error}"))?
+        .flatten()
+    {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if path.is_file() && name.starts_with('.') && name.ends_with(".typstry-preview.typ") {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
 fn save_workspace_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| format!("Failed to save file: {}", e))
 }
@@ -196,6 +215,7 @@ fn reveal_in_explorer(path: String) -> Result<(), String> {
 #[serde(rename_all = "camelCase")]
 struct PreviewTarget {
     root_path: Option<String>,
+    main_path: Option<String>,
     imported: bool,
     live_updates: bool,
 }
@@ -325,7 +345,13 @@ fn collect_typst_files(root: &std::path::Path, files: &mut Vec<std::path::PathBu
                 collect_typst_files(&path, files);
             }
         } else if path.extension().and_then(|value| value.to_str()) == Some("typ") {
-            files.push(normalized_existing_path(&path));
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default();
+            if !name.contains("typstry-preview") {
+                files.push(normalized_existing_path(&path));
+            }
         }
     }
 }
@@ -348,6 +374,7 @@ fn resolve_preview_target(
     if path.extension().and_then(|ext| ext.to_str()) != Some("typ") {
         return Ok(PreviewTarget {
             root_path: None,
+            main_path: None,
             imported: false,
             live_updates: false,
         });
@@ -418,19 +445,22 @@ fn resolve_preview_target(
     };
     let imported = !ancestors.is_empty();
     let allow_preview = allows_live_import_preview(&active_contents);
+    let main_root = ancestors
+        .iter()
+        .filter(|(candidate, _)| preferred(candidate))
+        .max_by_key(|(_, distance)| *distance)
+        .or_else(|| ancestors.iter().max_by_key(|(_, distance)| *distance))
+        .map(|(candidate, _)| candidate.clone());
+
     let root = if imported && allow_preview {
         path.clone()
     } else {
-        ancestors
-            .iter()
-            .filter(|(candidate, _)| preferred(candidate))
-            .max_by_key(|(_, distance)| *distance)
-            .or_else(|| ancestors.iter().max_by_key(|(_, distance)| *distance))
-            .map(|(candidate, _)| candidate.clone())
-            .unwrap_or_else(|| path.clone())
+        main_root.clone().unwrap_or_else(|| path.clone())
     };
+
     Ok(PreviewTarget {
         root_path: Some(root.to_string_lossy().to_string()),
+        main_path: main_root.map(|p| p.to_string_lossy().to_string()),
         imported,
         live_updates: !imported || allow_preview,
     })
@@ -716,7 +746,22 @@ async fn compile_typst_preview(
 
 #[cfg(test)]
 mod preview_main_tests {
-    use super::resolve_preview_target;
+    use super::{cleanup_workspace_preview_files, resolve_preview_target};
+
+    #[test]
+    fn cleanup_only_removes_managed_preview_entries() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let preview = workspace.path().join(".chapter.typ.typstry-preview.typ");
+        let document = workspace.path().join("chapter.typ");
+        std::fs::write(&preview, "preview").expect("write preview");
+        std::fs::write(&document, "chapter").expect("write chapter");
+
+        cleanup_workspace_preview_files(workspace.path().to_string_lossy().to_string())
+            .expect("cleanup previews");
+
+        assert!(!preview.exists());
+        assert!(document.exists());
+    }
 
     #[cfg(windows)]
     #[test]
@@ -753,6 +798,14 @@ mod preview_main_tests {
 
         assert_eq!(
             resolved.root_path.as_deref(),
+            Some(
+                super::normalized_existing_path(&main_path)
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+        assert_eq!(
+            resolved.main_path.as_deref(),
             Some(
                 super::normalized_existing_path(&main_path)
                     .to_string_lossy()
@@ -811,6 +864,14 @@ mod preview_main_tests {
             resolved.root_path.as_deref(),
             Some(
                 super::normalized_existing_path(&draft_path)
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+        assert_eq!(
+            resolved.main_path.as_deref(),
+            Some(
+                super::normalized_existing_path(&main_path)
                     .to_string_lossy()
                     .as_ref()
             )
@@ -1112,6 +1173,7 @@ pub fn run() {
             check_typst_document,
             read_workspace_file,
             workspace_path_exists,
+            cleanup_workspace_preview_files,
             save_workspace_file,
             create_workspace_dir,
             rename_workspace_file,

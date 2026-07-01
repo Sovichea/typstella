@@ -2,6 +2,7 @@ import { filePathKey } from "../platform/paths";
 
 export type PreviewTarget = {
   rootPath: string | null;
+  mainPath: string | null;
   imported: boolean;
   liveUpdates: boolean;
 };

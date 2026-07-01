@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri } from "../src/platform/paths";
+import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri, relativeFilePath } from "../src/platform/paths";
 
 describe("platform paths", () => {
   test("round-trips Windows paths and encodes spaces", () => {
@@ -26,5 +26,11 @@ describe("platform paths", () => {
   test("extracts file names with either separator", () => {
     expect(fileNameFromPath("C:\\Work\\main.typ")).toBe("main.typ");
     expect(fileNameFromPath("/work/main.typ")).toBe("main.typ");
+  });
+
+  test("derives workspace-relative paths without crossing the root", () => {
+    expect(relativeFilePath("C:\\Work", "c:\\Work\\chapters\\one.typ")).toBe("chapters/one.typ");
+    expect(relativeFilePath("/work", "/work/chapters/one.typ")).toBe("chapters/one.typ");
+    expect(relativeFilePath("/work", "/outside/one.typ")).toBeNull();
   });
 });

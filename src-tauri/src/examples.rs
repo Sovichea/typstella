@@ -278,4 +278,14 @@ mod tests {
         assert!(template.contains("title: \"Untitled Article\""));
         assert!(template.contains("author: \"Anonymous\""));
     }
+
+    #[test]
+    fn test_khmer_example_exists_in_resources() {
+        let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let khmer_path = manifest_dir.join("resources/examples/07-khmer-example/main.typ");
+        assert!(
+            khmer_path.is_file(),
+            "07-khmer-example/main.typ must exist in the resources directory"
+        );
+    }
 }

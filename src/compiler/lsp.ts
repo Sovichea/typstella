@@ -410,6 +410,13 @@ export class TinymistLspClient {
     }
   }
 
+  public async pinMain(path: string | null): Promise<void> {
+    await this.request<unknown>("workspace/executeCommand", {
+      command: "tinymist.pinMain",
+      arguments: [path]
+    }, 5000);
+  }
+
   public notifyTextChange(uri: string, text: string, version: number): Promise<void> {
     return this.sendNotification("textDocument/didChange", {
       textDocument: { uri, version },

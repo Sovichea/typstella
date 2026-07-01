@@ -3,6 +3,7 @@ import { confirm, message, open, save } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { dirname, join } from "@tauri-apps/api/path";
 import { EditorState } from "@codemirror/state";
 import { EditorView, highlightActiveLine, highlightActiveLineGutter, lineNumbers } from "@codemirror/view";
 import { undo, redo } from "@codemirror/commands";
@@ -19,7 +20,7 @@ import { TinymistLspClient } from "./compiler/lsp";
 import type { LspDiagnostic, LspLogEntry, LspSourcePosition, LspStatus } from "./compiler/lsp";
 import type { AppSettings } from "./settings";
 import { SettingsController } from "./settingsController";
-import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri } from "./platform/paths";
+import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri, relativeFilePath } from "./platform/paths";
 import { WysiwymAdapter } from "./wysiwym/adapter";
 import { PreviewFrame } from "./preview/previewFrame";
 import { PreviewSyncController } from "./preview/previewSyncController";
@@ -36,6 +37,15 @@ import { EditorToolbarController } from "./editor/toolbarController";
 import { ContextMenuController } from "./components/contextMenuController";
 import { ToolchainController, type ToolchainStatus } from "./toolchain/toolchainController";
 import { DocumentOutlineController, type DocumentHeading } from "./outline/documentOutline";
+import { typographyEdit, type DocumentTypography } from "./editor/documentTypography";
+import {
+  ensureTypographyTemplateApplication,
+  externalReferenceLabels,
+  findLocalTemplateApplication,
+  newTypographyTemplate,
+  templatePreviewSource,
+  templateTypographyEdit
+} from "./editor/templateTypography";
 
 type EditorMode = "CODE" | "WYSIWYM";
 type FallbackDiagnostic = {
@@ -56,6 +66,7 @@ type EditorTab = {
   savedContent: string;
   isDirty: boolean;
   previewRootPath: string | null;
+  previewMainPath: string | null;
   previewTaskId: string | null;
   previewSessionKey: string | null;
   previewImported: boolean;
@@ -73,10 +84,12 @@ export class TypstryWorkspaceController {
   private activeMode: EditorMode = "CODE";
   private activeFilePath: string | null = null;
   private previewRootPath: string | null = null;
+  private previewMainPath: string | null = null;
   private previewTaskId: string | null = null;
   private previewSessionKey: string | null = null;
   private previewImported = false;
   private previewLiveUpdates = true;
+  private pinnedLspMainPath: string | null = null;
   private workspaceRootPath: string | null = null;
   private currentVersion = 1;
   private isLoadingFile = false;
@@ -154,7 +167,8 @@ export class TypstryWorkspaceController {
     serializeWysiwym: () => this.mapWysiwymToMarkup(),
     renderWysiwym: markup => this.mapMarkupToWysiwym(markup),
     save: () => this.saveActiveFile(),
-    syncPreview: cursor => this.previewSyncController.renderAtCursor(cursor)
+    syncPreview: cursor => this.previewSyncController.renderAtCursor(cursor),
+    applyTypography: (config, target) => this.applyTypography(config, target)
     // TODO: Re-enable when the WYSIWYM layout is ready for use.
     // toggleMode: () => this.switchViewLayoutMode()
   });
@@ -600,6 +614,7 @@ export class TypstryWorkspaceController {
     if (this.activeFilePath === oldPath) {
       this.activeFilePath = newPath;
       this.previewRootPath = tab.previewRootPath;
+      this.previewMainPath = tab.previewMainPath;
       this.previewTaskId = tab.previewTaskId;
       this.previewSessionKey = tab.previewSessionKey;
       this.previewImported = tab.previewImported;
@@ -634,6 +649,7 @@ export class TypstryWorkspaceController {
       const nextTab = this.openTabs[Math.min(tabIndex, this.openTabs.length - 1)] ?? null;
       this.activeFilePath = null;
       this.previewRootPath = null;
+      this.previewMainPath = null;
       this.previewTaskId = null;
       this.previewSessionKey = null;
       this.previewImported = false;
@@ -655,6 +671,7 @@ export class TypstryWorkspaceController {
           this.isLoadingFile = false;
         }
         this.previewPane.innerHTML = "";
+        this.previewFrame.clear();
         this.editorFontManager.updateDocument("");
         this.documentOutlineController.clear();
         if (this.activeMode === "WYSIWYM") {
@@ -713,11 +730,12 @@ export class TypstryWorkspaceController {
     }
 
     this.activeFilePath = path;
-    const previewTarget = await invoke<PreviewTarget>("resolve_preview_main", {
+    let previewTarget = await invoke<PreviewTarget>("resolve_preview_main", {
       filePath: path,
       workspaceRootPath: this.workspaceRootPath,
       fileContents: tab.content
     });
+    previewTarget = await this.prepareTemplateAwarePreview(previewTarget, path, tab.content);
     this.applyPreviewTargetToTab(tab, previewTarget);
     this.clearPendingLspSync();
     this.previewSyncController.clearForward();
@@ -730,6 +748,10 @@ export class TypstryWorkspaceController {
     if (this.lspReady && this.lspClient) {
       const uri = filePathToUri(path);
       await this.openDocumentIfNeeded(uri, tab.content, this.currentVersion);
+      const pinChanged = await this.updatePinnedMain(previewTarget.mainPath);
+      if (pinChanged) {
+        await this.recheckActiveDocumentAfterPin(tab.content);
+      }
 
       if (this.previewRootPath) {
         const previewReady = await this.activatePreviewSession(tab.content);
@@ -783,6 +805,7 @@ export class TypstryWorkspaceController {
   private async handleToolchainChanged(status: ToolchainStatus) {
     this.toolchainController.setStatus(status);
     this.lspReady = false;
+    this.pinnedLspMainPath = null;
     this.openedDocumentUris.clear();
     this.previewFrame.clear();
     await this.initLsp(status.lspAvailable);
@@ -856,6 +879,7 @@ export class TypstryWorkspaceController {
         savedContent: contents,
         isDirty: false,
         previewRootPath: null,
+        previewMainPath: null,
         previewTaskId: null,
         previewSessionKey: null,
         previewImported: false,
@@ -911,25 +935,220 @@ export class TypstryWorkspaceController {
     }
   }
 
+  private workspaceText(path: string): Promise<string> {
+    const tab = this.openTabs.find(candidate => filePathKey(candidate.path) === filePathKey(path));
+    return tab ? Promise.resolve(tab.content) : invoke<string>("read_workspace_file", { path });
+  }
+
+  private async writeWorkspaceText(path: string, content: string): Promise<void> {
+    await invoke("save_workspace_file", { path, contents: content });
+    const tab = this.openTabs.find(candidate => filePathKey(candidate.path) === filePathKey(path));
+    if (tab) {
+      tab.content = content;
+      tab.savedContent = content;
+      tab.isDirty = false;
+      tab.version++;
+      tab.latestVersion = tab.version;
+      if (this.activeFilePath && filePathKey(this.activeFilePath) === filePathKey(path)) {
+        this.isLoadingFile = true;
+        try {
+          this.editorInstance.dispatch({
+            changes: { from: 0, to: this.editorInstance.state.doc.length, insert: content }
+          });
+        } finally {
+          this.isLoadingFile = false;
+        }
+      }
+      this.renderEditorTabs();
+    }
+    if (this.lspReady && this.lspClient) {
+      const uri = filePathToUri(path);
+      await this.openDocumentIfNeeded(uri, content, tab?.version ?? 1);
+      await this.lspClient.notifyTextChange(uri, content, tab?.version ?? 2);
+      await this.lspClient.notifyTextSave(uri, content);
+    }
+  }
+
+  private applyEdit(text: string, edit: { from: number; to: number; insert: string }): string {
+    return text.slice(0, edit.from) + edit.insert + text.slice(edit.to);
+  }
+
+  private async applyTypography(
+    config: DocumentTypography,
+    target: "document" | "template"
+  ): Promise<void> {
+    if (!this.activeFilePath) return;
+    try {
+      if (target === "document") {
+        const editor = this.editorInstance;
+        const edit = typographyEdit(editor.state.doc.toString(), config);
+        editor.dispatch({
+          changes: edit,
+          selection: { anchor: edit.from },
+          scrollIntoView: true,
+          userEvent: "input"
+        });
+        await this.saveActiveFile();
+        editor.focus();
+        return;
+      }
+
+      const mainPath = this.previewMainPath ?? this.activeFilePath;
+      const mainText = await this.workspaceText(mainPath);
+      const application = findLocalTemplateApplication(mainText);
+      let updatedLocalTemplate = false;
+
+      if (application) {
+        const candidate = await join(await dirname(mainPath), application.importPath);
+        const relativeToWorkspace = this.workspaceRootPath
+          ? relativeFilePath(this.workspaceRootPath, candidate)
+          : "";
+        const insideWorkspace = !this.workspaceRootPath
+          || relativeToWorkspace !== null;
+        if (insideWorkspace && await invoke<boolean>("workspace_path_exists", { path: candidate })) {
+          const templateText = await this.workspaceText(candidate);
+          const edit = templateTypographyEdit(templateText, application.functionName, config);
+          if (edit) {
+            await this.writeWorkspaceText(candidate, this.applyEdit(templateText, edit));
+            updatedLocalTemplate = true;
+          }
+        }
+      }
+
+      if (!updatedLocalTemplate) {
+        const mainDirectory = await dirname(mainPath);
+        const templatePath = await join(mainDirectory, "typstry-template.typ");
+        const exists = await invoke<boolean>("workspace_path_exists", { path: templatePath });
+        let templateText = exists ? await this.workspaceText(templatePath) : newTypographyTemplate(config);
+        if (exists) {
+          const edit = templateTypographyEdit(templateText, "typstry-typography", config);
+          templateText = edit ? this.applyEdit(templateText, edit) : newTypographyTemplate(config);
+        }
+        await this.writeWorkspaceText(templatePath, templateText);
+
+        const applicationEdit = ensureTypographyTemplateApplication(mainText);
+        if (applicationEdit.insert || applicationEdit.from !== applicationEdit.to) {
+          await this.writeWorkspaceText(mainPath, this.applyEdit(mainText, applicationEdit));
+        }
+      }
+
+      this.setLspStatus({ kind: "preview-ready", message: "Typography applied to template" });
+      await this.refreshActivePreviewRoot();
+      this.editorInstance.focus();
+    } catch (error) {
+      this.appendLspLog({
+        kind: "error",
+        source: "typography",
+        message: `Failed to apply template typography: ${String(error)}`
+      });
+      await message(String(error), { title: "Unable to apply typography", kind: "error" });
+    }
+  }
+
   private applyPreviewTargetToTab(tab: EditorTab, target: PreviewTarget): void {
     const style = previewRefreshStyle(target);
     const identity = target.rootPath ? previewSessionIdentity(target.rootPath, style) : null;
     tab.previewRootPath = target.rootPath;
+    tab.previewMainPath = target.mainPath;
     tab.previewTaskId = identity?.taskId ?? null;
     tab.previewSessionKey = identity?.key ?? null;
     tab.previewImported = target.imported;
     tab.previewLiveUpdates = target.liveUpdates;
     this.previewRootPath = tab.previewRootPath;
+    this.previewMainPath = tab.previewMainPath;
     this.previewTaskId = tab.previewTaskId;
     this.previewSessionKey = tab.previewSessionKey;
     this.previewImported = tab.previewImported;
     this.previewLiveUpdates = tab.previewLiveUpdates;
   }
 
+  private async rootRelativeTypstPath(path: string): Promise<string | null> {
+    if (!this.workspaceRootPath) return null;
+    const value = relativeFilePath(this.workspaceRootPath, path);
+    if (value === null) return null;
+    return `/${value.replace(/\\/g, "/")}`;
+  }
+
+  private async prepareTemplateAwarePreview(
+    target: PreviewTarget,
+    activePath: string,
+    activeContents: string
+  ): Promise<PreviewTarget> {
+    if (
+      !this.workspaceRootPath
+      || !target.imported
+      || !target.liveUpdates
+      || !target.mainPath
+      || !target.rootPath
+      || filePathKey(target.rootPath) !== filePathKey(activePath)
+    ) return target;
+
+    try {
+      const mainText = await this.workspaceText(target.mainPath);
+      const application = findLocalTemplateApplication(mainText);
+      if (!application) return target;
+      const templatePath = await join(await dirname(target.mainPath), application.importPath);
+      if (!await invoke<boolean>("workspace_path_exists", { path: templatePath })) return target;
+      const templateRootPath = await this.rootRelativeTypstPath(templatePath);
+      const chapterRootPath = await this.rootRelativeTypstPath(activePath);
+      if (!templateRootPath || !chapterRootPath) return target;
+
+      const identity = previewSessionIdentity(activePath, "on-type");
+      const previewPath = await join(
+        this.workspaceRootPath,
+        `.${fileNameFromPath(activePath)}.${identity.taskId}.typstry-preview.typ`
+      );
+      const previewSource = templatePreviewSource(application, templateRootPath, chapterRootPath, activeContents);
+      const existingSource = await invoke<string>("read_workspace_file", { path: previewPath }).catch(() => null);
+      if (existingSource !== previewSource) {
+        await invoke("save_workspace_file", { path: previewPath, contents: previewSource });
+      }
+      return { ...target, rootPath: previewPath };
+    } catch (error) {
+      this.appendLspLog({
+        kind: "warning",
+        source: "preview",
+        message: `Using direct standalone preview because the main template could not be reused: ${String(error)}`
+      });
+      return target;
+    }
+  }
+
   private async openDocumentIfNeeded(uri: string, text: string, version: number): Promise<void> {
     if (this.openedDocumentUris.has(uri)) return;
     await this.lspClient.openTextDocument(uri, text, version);
     this.openedDocumentUris.add(uri);
+  }
+
+  private async updatePinnedMain(path: string | null, force = false): Promise<boolean> {
+    if (!this.lspReady || !this.lspClient) return false;
+    if (!force && filePathKey(this.pinnedLspMainPath ?? "") === filePathKey(path ?? "")) return false;
+    try {
+      await this.lspClient.pinMain(path);
+      this.pinnedLspMainPath = path;
+      return true;
+    } catch (error) {
+      this.appendLspLog({
+        kind: "warning",
+        source: "lsp",
+        message: `Unable to set Tinymist main-file context: ${String(error)}`
+      });
+      return false;
+    }
+  }
+
+  private async recheckActiveDocumentAfterPin(text: string): Promise<void> {
+    if (!this.activeFilePath || !this.lspReady || !this.lspClient) return;
+
+    this.clearDiagnostics();
+    const version = ++this.currentVersion;
+    this.latestDocumentVersion = version;
+    const activeTab = this.getActiveTab();
+    if (activeTab && activeTab.path === this.activeFilePath) {
+      activeTab.version = version;
+      activeTab.latestVersion = version;
+    }
+    await this.lspClient.notifyTextChange(filePathToUri(this.activeFilePath), text, version);
   }
 
   private async activatePreviewSession(activeContents: string): Promise<boolean> {
@@ -943,6 +1162,10 @@ export class TypstryWorkspaceController {
       style
     );
     if (!previewUrl || !this.previewSessionKey) return false;
+    const pinChanged = await this.updatePinnedMain(this.previewMainPath, true);
+    if (pinChanged) {
+      await this.recheckActiveDocumentAfterPin(activeContents);
+    }
     await this.previewFrame.mountSession(this.previewSessionKey, previewUrl);
     return true;
   }
@@ -964,6 +1187,7 @@ export class TypstryWorkspaceController {
     try {
       await this.lspClient.restart();
       this.lspReady = true;
+      this.pinnedLspMainPath = null;
       this.openedDocumentUris.clear();
       this.previewFrame.clear();
       if (!this.activeFilePath || this.previewRootPath !== previewRootPath) {
@@ -975,6 +1199,7 @@ export class TypstryWorkspaceController {
         activeContents,
         this.currentVersion
       );
+      await this.updatePinnedMain(this.previewMainPath, true);
       return await this.lspClient.startPreview(previewRootPath, taskId, refreshStyle);
     } catch (error) {
       this.lspReady = false;
@@ -1031,6 +1256,15 @@ export class TypstryWorkspaceController {
 
     this.setLspStatus({ kind: "syncing", message: "Syncing preview" });
     this.previewSyncController.reset();
+    if (this.previewImported && this.previewLiveUpdates) {
+      const target: PreviewTarget = {
+        rootPath: path,
+        mainPath: this.previewMainPath,
+        imported: true,
+        liveUpdates: true
+      };
+      await this.prepareTemplateAwarePreview(target, path, text);
+    }
     const version = ++this.currentVersion;
     this.latestDocumentVersion = version;
     const activeTab = this.getActiveTab();
@@ -1162,9 +1396,16 @@ export class TypstryWorkspaceController {
 
 
 
-    const filteredDiagnostics = diagnostics.filter(
-      (diagnostic) => !diagnostic.message.includes("cannot export multiple images without a page number template")
-    );
+    const externalLabels = this.previewImported && this.previewLiveUpdates
+      ? new Set(externalReferenceLabels(this.editorInstance.state.doc.toString()))
+      : new Set<string>();
+    const filteredDiagnostics = diagnostics.filter(diagnostic => {
+      if (diagnostic.message.includes("cannot export multiple images without a page number template")) return false;
+      if (!/label.*does not exist|unknown label/i.test(diagnostic.message)) return true;
+      return ![...externalLabels].some(label =>
+        diagnostic.message.includes(label) || this.diagnosticSourceText(diagnostic).includes(`@${label}`)
+      );
+    });
 
     const editorDiagnostics = filteredDiagnostics
       .map((diagnostic) => this.editorDiagnosticFromLsp(diagnostic))
@@ -1188,6 +1429,13 @@ export class TypstryWorkspaceController {
       severity: this.diagnosticSeverityFromLsp(diagnostic.severity),
       message: diagnostic.message
     };
+  }
+
+  private diagnosticSourceText(diagnostic: LspDiagnostic): string {
+    const from = this.editorPositionFromLspPosition(diagnostic.range.start);
+    const to = this.editorPositionFromLspPosition(diagnostic.range.end);
+    if (from === null || to === null) return "";
+    return this.editorInstance.state.doc.sliceString(from, Math.max(from, to));
   }
 
   private logEntryFromDiagnostic(uri: string, diagnostic: LspDiagnostic): LogConsoleEntryInput {
@@ -1351,6 +1599,7 @@ export class TypstryWorkspaceController {
                savedContent: contents,
                isDirty: false,
                previewRootPath: null,
+               previewMainPath: null,
                previewTaskId: null,
                previewSessionKey: null,
                previewImported: false,
@@ -1499,11 +1748,13 @@ export class TypstryWorkspaceController {
   private async refreshActivePreviewRoot(): Promise<void> {
     if (!this.activeFilePath) return;
     const contents = this.editorInstance.state.doc.toString();
-    const target = await invoke<PreviewTarget>("resolve_preview_main", {
+    let target = await invoke<PreviewTarget>("resolve_preview_main", {
       filePath: this.activeFilePath,
       workspaceRootPath: this.workspaceRootPath,
       fileContents: contents
     });
+    target = await this.prepareTemplateAwarePreview(target, this.activeFilePath, contents);
+    await this.updatePinnedMain(target.mainPath);
     const identity = target.rootPath
       ? previewSessionIdentity(target.rootPath, previewRefreshStyle(target))
       : null;
@@ -1547,6 +1798,7 @@ export class TypstryWorkspaceController {
     if (this.workspaceRootPath && this.workspaceRootPath !== selected) {
       this.closeProject();
     }
+    await invoke("cleanup_workspace_preview_files", { workspaceRootPath: selected });
     this.workspaceRootPath = selected;
     await this.explorer.loadWorkspace(selected);
     await this.workspaceWatcher.start(selected);
@@ -1576,7 +1828,11 @@ export class TypstryWorkspaceController {
 
   private closeProject() {
     this.saveWorkspaceState();
+    void this.updatePinnedMain(null, true);
     this.workspaceWatcher.stop();
+    if (this.workspaceRootPath) {
+      void invoke("cleanup_workspace_preview_files", { workspaceRootPath: this.workspaceRootPath });
+    }
     this.externalConflictPaths.clear();
     
     this.workspaceRootPath = null;

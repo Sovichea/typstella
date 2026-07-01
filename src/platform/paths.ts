@@ -42,3 +42,13 @@ export function fileNameFromPath(path: string): string {
   const parts = path.replace(/\\/g, "/").split("/");
   return parts[parts.length - 1] || path;
 }
+
+export function relativeFilePath(root: string, path: string): string | null {
+  const normalizedRoot = root.replace(/\\/g, "/").replace(/\/$/, "");
+  const normalizedPath = path.replace(/\\/g, "/");
+  const rootKey = filePathKey(normalizedRoot);
+  const pathKey = filePathKey(normalizedPath);
+  if (pathKey === rootKey) return "";
+  if (!pathKey.startsWith(`${rootKey}/`)) return null;
+  return normalizedPath.slice(normalizedRoot.length + 1);
+}
