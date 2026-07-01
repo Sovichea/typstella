@@ -21,7 +21,8 @@ This file serves as a consolidated reference for the architectural decisions, pa
   - `src/preview/`: Pure source highlighting, iframe ownership, and forward/inverse preview synchronization state.
   - `src/workspace/`: Typed workspace-state persistence and recent-project rendering.
   - `src/wysiwym/adapter.ts`: WYSIWYM block parsing, DOM rendering, and Typst serialization.
-  - `src/diagnostics/logConsoleController.ts`, `src/editor/fontManager.ts`, `src/editor/toolbarController.ts`, `src/layout/layoutController.ts`: Feature-local DOM/state controllers. `fontCatalog.ts` defines the selectable code and Unicode font engines.
+  - `src/diagnostics/logConsoleController.ts`, `src/editor/fontManager.ts`, `src/editor/toolbarController.ts`, `src/layout/layoutController.ts`: Feature-local DOM/state controllers. `fontCatalog.ts` defines the selectable code and Unicode font engines; `documentTypography.ts` generates managed document font rules.
+  - `src/editor/templateTypography.ts`: Pure parsing/edit helpers for local `#show: function.with(...)` templates, managed typography blocks, standalone chapter preview entries, and external-reference placeholders.
   - `src/editor/typstLanguage.ts`: StreamLanguage-based parser for Typst.
   - `src/editor/extensions.ts`: Custom CodeMirror extensions (autoclose overrides, LSP bridges, themes).
   - `src/editor/themes.ts`: Global HighlightStyle and editor layouts.
@@ -31,6 +32,7 @@ This file serves as a consolidated reference for the architectural decisions, pa
   - `src/editor/diagnostics.ts`: CodeMirror diagnostic underline decorations via `StateEffect`/`StateField`.
   - `src-tauri/src/lib.rs`: IPC commands, filesystem operations, toolchain download, Typst check/compile, Tinymist child-process bridge.
   - `src-tauri/src/font_store.rs`: Current-user font installation, operating-system font enumeration, allowlisted MiSans downloads, and obsolete app-cache migration.
+  - `src-tauri/src/examples.rs`: Installs version-tracked writable examples under the OS Documents directory without overwriting user-modified copies.
   - `src-tauri/capabilities/default.json`: Grants broad FS/plugin permissions; frontend assumes these commands are available.
 
 ### A. Frontend Controller Flow (`src/appController.ts`)
@@ -49,36 +51,36 @@ This file serves as a consolidated reference for the architectural decisions, pa
 - File commands: `read_workspace_file`, `save_workspace_file`, `create_workspace_dir`, `rename_workspace_file`, `copy_workspace_file`, `read_workspace_dir`, `move_to_trash`, `reveal_in_explorer`.
 - Settings commands: `load_app_settings` and `save_app_settings`; Rust owns config-path resolution and pretty JSON disk I/O while TypeScript owns schema normalization.
 - Font commands: `list_system_fonts` enumerates OS families and monospace metadata; `install_unicode_font` downloads only allowlisted official MiSans archives or Google Fonts Noto variable TTFs after frontend consent and installs them for the current user.
-- Preview/document commands: `resolve_preview_main`, `check_typst_document`, `compile_typst_document`.
+- Preview/document commands: `resolve_preview_main`, `cleanup_workspace_preview_files`, `check_typst_document`, `compile_typst_preview`, `compile_typst_document`.
 - Toolchain/LSP commands: `ensure_toolchain`, `start_tinymist_lsp`, `send_lsp_message`.
-- Executable resolution first checks the OS-appropriate managed filename (`.exe` only on Windows), then falls back to `PATH` for both Typst and Tinymist.
-- `ensure_toolchain()` retains the Windows PowerShell download bootstrap. macOS/Linux require `typst` and `tinymist` in `PATH` and receive an actionable error otherwise.
-- `start_tinymist_lsp()` kills any prior child, increments a generation guard, resolves managed/PATH Tinymist, spawns `tinymist lsp`, and forwards stdio JSON-RPC as `lsp-rx`/`lsp-status` events.
+- Tinymist is the single managed toolchain on Windows, Linux, and macOS. Stable platform assets are downloaded into app-local data; compilation uses its embedded Typst compiler and never requires a separate `typst` executable.
+- `ensure_toolchain()` validates the selected managed Tinymist release and installs the latest supported stable release when necessary.
+- `start_tinymist_lsp()` kills any prior child, increments a generation guard, resolves managed Tinymist, spawns `tinymist lsp`, and forwards stdio JSON-RPC as `lsp-rx`/`lsp-status` events.
 - `send_lsp_message()` pushes JSON strings into an MPSC channel; frontend must send fully serialized JSON-RPC payloads.
-- `check_typst_document()` writes a hidden sibling `.stem.typstry-check.typ`, compiles SVG with short diagnostics, parses stderr, then deletes temp files.
-- `compile_typst_document()` writes a hidden sibling `.stem.export.typ`, compiles a real PDF to the active file's sibling `.pdf`, deletes the temp input, and returns the PDF path string.
+- `check_typst_document()` and `compile_typst_preview()` invoke `tinymist compile` for diagnostics/SVG fallback.
+- `compile_typst_document()` invokes `tinymist compile` and exports a PDF beside the active document.
 
 ### C. LSP/Preview Flow (`src/compiler/lsp.ts`)
 - Frontend does not connect directly to `ws://127.0.0.1:8589`; Rust owns Tinymist stdio and frontend listens to `lsp-rx`.
 - `TauriLspTransport` owns the single `lsp-rx` and `lsp-status` subscription plus serialized message sends. Do not add per-request event listeners.
 - `connect()` starts Tinymist, attaches the transport once, sends `initialize`, then `initialized`; responses resolve through one typed pending-request map.
-- Initialization disables Tinymist auto export (`exportPdf/exportSvg/exportPng: "never"`) and enables preview background host `127.0.0.1:8589`.
-- `startPreview(path)` must pass raw OS paths, not file URIs. It sends `tinymist.pinMain`, `tinymist.focusMain`, then `tinymist.doStartPreview` with `arguments: [[path]]`.
+- Initialization disables Tinymist auto export (`exportPdf/exportSvg/exportPng: "never"`). Preview tasks request random loopback data-plane ports.
+- `startPreview(path, taskId, refreshStyle)` must pass a raw OS path, not a file URI. It executes `tinymist.doStartPreview` with a stable task ID, `--not-primary`, a random loopback data-plane port, and either `on-type` or `on-save` refresh.
 - Preview result normalization handles string results and object shapes containing `staticServerAddr`, `staticServerPort`, or `dataPlanePort`.
 - Server requests handled locally: capability registration, message requests, workspace configuration, and `window/showDocument` for inverse sync. `window/showDocument` positions are URI-scoped; switch/load the reported file before applying its line/character.
 - LSP positions use the server-negotiated `positionEncoding` from initialize capabilities. Tinymist 0.15.2 advertises `utf-16`; do not hardcode UTF-8 byte offsets. All CodeMirror conversions must go through `TinymistLspClient` helper methods.
 
 ### D. Live Sync, Diagnostics, and Preview Highlight
-- Typing calls `handleContentMutation()`, queues `pendingLspSyncText`, and debounces `textDocument/didChange` by 350 ms.
+- Typing calls `handleContentMutation()`, queues `pendingLspSyncText`, and debounces `textDocument/didChange` using the configured preview delay.
 - Completion flushes pending text sync before asking Tinymist for completions so server state matches the typed prefix.
-- Fallback diagnostics run via `typst compile --diagnostic-format short --format svg` after each sync and are ignored if version/path is stale.
-- LSP diagnostics are ignored for stale versions, temporary preview-only versions, package/preview files, and the known multi-image page template message.
-- `PreviewSyncController` owns forward-sync timers, temporary versions, diagnostic suppression, inverse mapping, and revert scheduling. `PreviewFrame` owns iframe mounting/click capture/scrolling; `sourceHighlight.ts` contains testable pure syntax-range logic.
-- Forward preview sync is a controlled hack: selected word is temporarily wrapped with `#text(fill:rgb("#fe0102"))[...]`, sent as a preview-only version, scrolled into view in the iframe, then reverted to editor text.
-- Preview root resolution checks the active tab's in-memory content first: renderable active files preview themselves even when `main.typ` exists; declaration-only/library files fall back to the nearest `main.typ`, `index.typ`, or `document.typ`.
-- Preview highlight only runs when `activeFilePath === previewRootPath`; library/template files receive diagnostics but no live preview highlight.
-- Highlightable ranges exclude comments, raw inline code, math, block comments, and Typst code-expression spans (`#set`, `#show`, function calls, etc.).
-- Inverse sync maps Tinymist `window/showDocument` source positions back through the temporary highlight mapping when present, then optionally refines the collapsed CodeMirror cursor using the clicked iframe text node/offset. Preview HTML is mounted as `srcdoc` with a `<base>` tag when available so the iframe DOM stays readable while Tinymist assets still resolve. It does not trigger forward preview sync/highlighting.
+- Fallback diagnostics and SVG/PDF compilation use the managed Tinymist executable's embedded Typst compiler; no standalone `typst` binary is required.
+- LSP diagnostics are ignored for stale versions, package/preview files, placeholder-managed external references, and the known multi-image page-template message.
+- `PreviewSyncController` owns forward/inverse navigation state. `PreviewFrame` owns direct loopback iframe sessions, retains up to five sessions by LRU, and must reject cached iframes detached from its pane.
+- Imported sources without `// @allow-preview` preview the top-level importer using on-save refresh. The first-line directive makes an imported chapter its own on-type preview root.
+- If that chapter's main document applies a local `#show: function.with(...)` template, `prepareTemplateAwarePreview()` maintains a hidden workspace-root entry that imports the template and includes the chapter. Managed preview files are excluded from dependency scanning and removed on project boundaries.
+- Standalone chapter entries install targeted `show ref.where(...)` placeholders for references whose labels are outside the chapter. The active chapter is still pinned to its real main document for LSP completion; placeholder-managed missing-label diagnostics are filtered without altering source.
+- Pinning main-file context is a lifecycle operation: open the chapter, execute `tinymist.pinMain`, clear stale diagnostics, and send a new versioned `didChange`. Repeat after preview startup/restart because Tinymist can replace compiler context.
+- Forward sync sends the source location directly to the matching preview task. Inverse sync honors the URI reported by Tinymist and switches source files before placing a collapsed cursor.
 
 ### E. WYSIWYM Mode
 - WYSIWYM is a secondary DOM editing view, not the source of truth. `WysiwymAdapter.render()` maps Typst to blocks and `.serialize()` maps blocks back to Typst.
@@ -157,9 +159,9 @@ This file serves as a consolidated reference for the architectural decisions, pa
 | **LSP Positions** | Hardcoding LSP `character` as UTF-8 bytes or plain JS offsets. | Read Tinymist `capabilities.positionEncoding` and convert through `TinymistLspClient` helpers. | Tinymist 0.15.2 uses `utf-16`; wrong encoding breaks Khmer/non-ASCII inverse sync, diagnostics, hover, and completion positions. |
 | **Inverse Sync Target File** | Applying `window/showDocument` line/character to whichever tab is active. | Read `params.uri`, normalize slash/case differences, switch/load that file, then compute the CodeMirror cursor. | Preview clicks can target `main.typ` or an included source while another tab is active; ignoring URI lands on the wrong code location. |
 | **Inverse Sync Selection** | Selecting a word around the mapped preview-click cursor. | Use a collapsed CodeMirror cursor at the exact mapped `window/showDocument` position. | Word expansion is unreliable for Khmer, punctuation, short words, and numbers; source position accuracy is the only stable contract. |
-| **Coarse Preview Source Spans** | Trusting Tinymist `window/showDocument` character offsets as exact inside rendered text runs, or guessing with parenthetical heuristics. | Mount preview HTML through same-origin `srcdoc`, capture clicked iframe text node/offset, and search that text within Tinymist's reported source line. | Tinymist can map a whole rendered run to an earlier inline span; DOM text context is needed to place the cursor after inline constructs. |
+| **Coarse Preview Source Spans** | Guessing source words from rendered text or rewriting the document to manufacture finer spans. | Treat Tinymist's URI-scoped `window/showDocument` position as the navigation contract and place a collapsed cursor. | Preview DOM access is not reliable across loopback origins; source mutation introduces compilation lag and diagnostics churn. |
 | **Preview Highlight Sync** | Persisting the red `#text(...)` wrapper as document content. | Track preview-only versions, suppress diagnostics briefly, then immediately send a revert `didChange`. | Forward sync mutates only Tinymist's transient document state; saved/editor text must stay untouched. |
-| **Preview Root Files** | Resolving ancestor `main.typ` before inspecting the active file. | Prefer renderable in-memory active content, then fall back to nearest `main.typ`, `index.typ`, or `document.typ`. | Otherwise merely having `main.typ` prevents every other renderable file from previewing itself; declaration-only libraries still need the entry-point fallback. |
+| **Preview Root Files** | Selecting `main.typ` only by filename or always previewing the active imported source. | Build the local import/include graph: imported files use the top-level entry on save unless their first line is `// @allow-preview`; unrelated files preview themselves. | Filename-only routing breaks independent files, while direct imported previews lose project template context and external labels. |
 | **Workspace Restore** | Assuming unsaved tabs survive restart. | Restore tab paths and reload file contents from disk. | `localStorage` stores layout/selection only; dirty content is intentionally not serialized. |
 | **Export PDF Action** | Trusting SVG preview compilation to satisfy "Export PDF". | `compile_typst_document` now compiles `.stem.export.typ` to `file_stem.pdf` and returns that PDF path. | Preview SVG and export PDF are separate workflows; keep future preview changes out of the export command. |
 | **Function Highlighting Themes** | Relying on third-party CodeMirror themes where function tokens can match content color, or overriding broad syntax layers. | Set per-theme `--editor-function-color` and add only a narrow function-token highlighter after theme/font layers. | This preserves existing theme syntax while making Typst functions distinct from prose/content across all themes. |
@@ -173,3 +175,7 @@ This file serves as a consolidated reference for the architectural decisions, pa
 | **Bun Dependency Lock** | Changing `package.json` without refreshing or committing `bun.lock`. | Run `bun install`, commit both files, and use `bun install --frozen-lockfile` in setup/CI. | Bun can otherwise resolve a different graph or omit a newly direct dependency; the frozen install makes drift fail early. |
 | **Release Build Preview Blank** | Using `VSCODE_PROXY_URI` environment variable (set to `tauri.localhost`) and complex `srcdoc` HTML/JS/CSS resource inlining. | Remove `VSCODE_PROXY_URI` env, let Tinymist preview server default to loopback IP (`127.0.0.1`), and mount `iframe.src` directly. | WebView2/Chromium exempts loopback addresses (`127.0.0.1` and `localhost`) from Mixed Content blocks. The custom `tauri.localhost` domain was not exempted, causing direct loads to block and necessitating the fragile `srcdoc` inlining bypass, which broke WebSocket URL host resolution (resulting in permanent preview failure on restart/tab-switch). |
 | **Forward Sync Ripple Jitter** | Triggering the scroll ripple prematurely, dispatching multiple redundant scrolls, and matching stale highlights. | Remove the red-highlight mutation hack entirely, clean up all document reverts and polling loops, and scroll directly to the cursor coordinates. | Document-mutation highlight overlays are fragile and cause compile latency and sync lag. Directly sending scroll commands to the preview coordinates is faster, cleaner, and completely reliable. |
+| **Template Typography** | Requiring both font roles or writing chapter-only rules that disappear when the chapter is included under a main template. | Keep Latin/complex rules independently optional; update the local function used by `#show: ...with(...)`, with a portable `typstry-template.typ` fallback. | Typst show rules are scoped by the compiled root; typography intended for a whole project belongs inside the applied template. |
+| **Standalone Chapter References** | Compiling an imported chapter directly and expecting labels from sibling chapters to resolve. | Build a temporary entry with the real local template and targeted external-reference placeholders; pin LSP analysis to the real main document. | Typst labels exist only within one compiled document. The helper must preserve ordinary `@label` source so other editors and final main compilation behave normally. |
+| **Preview Cache After Tab Close** | Clearing `previewPane.innerHTML` while retaining iframe entries in the preview-session map. | Call `PreviewFrame.clear()` when the last tab closes and make `activateSession()` discard detached iframes. | A detached iframe can still exist as a JavaScript object, causing activation to report success while the preview pane remains blank. |
+| **Live Placeholder Updates** | Generating the standalone preview entry only when the chapter tab opens. | Regenerate it during debounced on-type synchronization when the set of external references changes. | Newly typed `@labels` otherwise lack matching placeholder rules until the tab or project is reopened. |

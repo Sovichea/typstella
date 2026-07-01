@@ -19,7 +19,11 @@ A lightweight, local-first Typst code editor with advanced Unicode font fallback
 * **Rich IDE-Grade Autocompletion**: Smart, context-aware suggestions with LSP `sortText` prioritization (which correctly places specific parameters like `numbering` or `supplement` at the top of the list). Intelligently blocks autocomplete from triggering on brackets, punctuation, or spaces to ensure a distraction-free typing flow.
 * **True Local-First Experience**: No cloud dependencies. Everything compiles instantly on your local machine.
 * **Live Document Preview**: Powered by Tinymist with bidirectional source synchronization and compiler-rendered SVG fallback.
+* **Template-Aware Chapter Editing**: Imported chapters can reuse their main document's local template in standalone live preview. Cross-chapter references render as clear placeholders until the complete document is previewed, while the source remains standard Typst.
 * **Managed Toolchain**: The settings panel installs stable Tinymist releases. Tinymist's embedded Typst compiler handles preview, diagnostics, and export; no separate Typst installation is required.
+* **Document Typography Controls**: Choose Latin and complex-script fonts independently from the toolbar, adjust complex-script sizing relative to the Latin size, and apply either selection to the current document or its local template.
+* **Interactive Document Outline**: Browse collapsible heading levels beside the file explorer and navigate both source and preview from a single click.
+* **Writable Example Workspace**: Open installed examples from the welcome screen, including Unicode-focused documents, a Khmer technical document, and a three-chapter thesis demonstrating external labels.
 * **Focus-Driven UI**: A custom, frameless window design, persistent multi-tab workspace state (preserving open tabs, split ratios, and cursor positions), and integrated native-feel search and replace.
 * **Native Settings System**: A compact settings panel with live editor reconfiguration and a versioned `settings.json` stored in the platform application-config directory.
 * **Context-Aware Editor & Bracket Colorizer**: Implements intelligent syntax recognition, skipping bracket coloring inside comments, strings, and equations. Integrates theme-aware monospace coloring for raw code/equations, nested function coloring without requiring `#` prefixes, and precise parsing of escaped symbols (like `\$` for literal dollars and ignoring URL comments).
@@ -31,7 +35,7 @@ A lightweight, local-first Typst code editor with advanced Unicode font fallback
 * `Ctrl + B`: Toggle Explorer Sidebar
 * `Ctrl + ,`: Open Settings
 * `Alt + Z`: Toggle Word Wrap
-* `Ctrl + ` `: Toggle Log Console
+* `Ctrl + ~`: Toggle Log Console
 
 ## Settings
 
@@ -70,9 +74,11 @@ Invalid or missing fields fall back to bounded defaults. Existing theme and word
 
 The Toolchain panel installs stable Tinymist releases and shows each release's embedded Typst version. Tinymist is the only toolchain download: its embedded compiler handles diagnostics, fallback SVG compilation, and PDF export, so a separate Typst installation is not required.
 
-Each preview root has a uniquely identified Tinymist task whose iframe is cached across tab switches. When an open file is imported by another Typst file, Typstry previews the top-level importing document and updates that preview on save. Put `// @allow-preview` on the imported file's first line to preview that file itself and update it live while editing.
+Each preview root has a uniquely identified Tinymist task whose iframe is cached across tab switches. Imported files normally preview through the top-level `main.typ` and update on save. Put `// @allow-preview` on an imported file's first line to give that chapter an independent on-type preview. When `main.typ` applies a local template with `#show: template.with(...)`, Typstry creates a temporary preview entry that applies the same template without modifying the chapter. References to labels outside the chapter appear as explanatory placeholders in this standalone view; open `main.typ` to inspect final numbering and reference output. These helpers do not change the portable Typst source.
 
 Only MiSans Latin and Fira Mono are bundled. Typstry installs them in the current user's font directory on first launch, avoiding administrator access on Windows, Linux, and macOS. Settings enumerates the operating system's fonts: the code-font selector contains monospace families, while Unicode fallback accepts any installed family. Automatic detection recommends the matching MiSans family when one exists and a script-specific Noto Sans family otherwise. It never downloads without confirmation and does not repeat a recommendation the user declines. Recommendations are optional; users can select any installed fallback or disable fallback entirely. MiSans downloads and use are subject to Xiaomi's [MiSans license agreement](https://hyperos.mi.com/font/en/download/); Noto fonts use the [SIL Open Font License](https://openfontlicense.org/).
+
+The typography toolbar controls the fonts used by the compiled document, separately from the editor font settings. Enable either the Latin rule, the complex-script rule, or both. **Apply to document** writes a managed `typstry:typography` block into the active file. **Apply as template** updates the local function used by the main document's `#show: ...with(...)` rule, or creates `typstry-template.typ` when no editable local template can be identified.
 
 ## Tech Stack & Architecture
 * **Core Framework**: [Tauri v2](https://v2.tauri.app/)
@@ -264,6 +270,8 @@ The current development release is `v0.1.2`.
 - [x] Visual Toolbar for inserting Typst math symbols, fractions, and code snippets
   - [x] UI implementation for visual toolbar
   - [x] Logic to insert symbols and markup correctly
+  - [x] Independent Latin/complex-script typography controls
+  - [x] Apply typography to the active document or local template
 - [ ] Global project-wide search (`Ctrl+Shift+F`)
   - [ ] Search interface and UI
   - [ ] Result navigation and highlighting
@@ -296,6 +304,9 @@ The current development release is `v0.1.2`.
 - [x] Interactive Document Outline (Table of Contents) sidebar for quick navigation
   - [x] Parse document headers via LSP
   - [x] Outline UI sidebar
+- [x] Install a writable Unicode-focused example workspace
+  - [x] Khmer technical document with managed typography
+  - [x] Three-chapter thesis with cross-chapter labels and standalone previews
 - [ ] Integrated Typst Package Manager UI
   - [ ] Package search and discovery interface
   - [ ] Package installation and update handling
