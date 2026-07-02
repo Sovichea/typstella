@@ -28,6 +28,7 @@ export const activeLineCompartment = new Compartment();
 export const closeBracketsCompartment = new Compartment();
 export const indentationGuidesCompartment = new Compartment();
 export const tabSizeCompartment = new Compartment();
+export const completionCompartment = new Compartment();
 
 function foldedTypstPlaceholderSuffix(state: EditorState, range: { from: number; to: number }): string {
   const foldedText = state.doc.sliceString(range.from, range.to).trimEnd();
@@ -251,7 +252,7 @@ export function getEditorExtensions(
     bracketMatching(),
     bracketColorizer,
     createHoverTooltip(getClient, getUri),
-    createTypstAutocomplete(getClient, getUri, flushLspSync),
+    completionCompartment.of(createTypstAutocomplete(getClient, getUri, flushLspSync)),
     themeCompartment.of(getThemeExtension("default")),
     editorFontCompartment.of(editorFontTheme()),
     keymap.of([

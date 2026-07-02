@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +16,23 @@ pub struct TextAnalysis {
     pub provider: &'static str,
     pub normalized_changed: bool,
     pub tokens: Vec<SegmentToken>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionRequest {
+    pub text: String,
+    pub cursor_utf16: usize,
+    pub limit: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionResponse {
+    pub provider: String,
+    pub from: usize,
+    pub to: usize,
+    pub options: Vec<String>,
 }
 
 pub trait LanguageSegmenter: Send + Sync {

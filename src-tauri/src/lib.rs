@@ -9,7 +9,7 @@ mod segmentation;
 mod toolchain;
 use examples::prepare_examples_workspace;
 use segmentation::{
-    analyze_text, autocomplete_khmer, segmentation_prelude, spelling_suggestions,
+    analyze_text, complete_language_word, segmentation_prelude, spelling_suggestions,
     SegmentationRegistry,
 };
 use toolchain::active_tinymist;
@@ -1196,7 +1196,7 @@ pub fn run() {
             install_unicode_font,
             analyze_text,
             spelling_suggestions,
-            autocomplete_khmer,
+            complete_language_word,
             segmentation_prelude,
             prepare_examples_workspace,
             list_tinymist_releases,

@@ -1,7 +1,10 @@
-use super::provider::{LanguageSegmenter, RenderReplacement, SegmentToken, TextAnalysis};
-use khmer_segmenter::kdict::KHypDict;
+use super::provider::{
+    CompletionRequest, CompletionResponse, LanguageSegmenter, RenderReplacement, SegmentToken,
+    TextAnalysis,
+};
+use khmer_segmenter::kdict::{KDict, KHypDict};
 use khmer_segmenter::{KhmerSegmenter, SegmenterConfig};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -15,8 +18,9 @@ const KHMER_HYPHENATION: &[u8] =
 
 struct KhmerProvider {
     segmenter: KhmerSegmenter,
-    words: Vec<String>,
+    lookup_words: Vec<String>,
     known: HashSet<String>,
+    completion_costs: HashMap<String, f32>,
     hyphenation: KHypDict,
 }
 
@@ -33,25 +37,55 @@ impl KhmerProvider {
             .collect();
         words.sort();
         words.dedup();
-        let known = words.iter().cloned().collect();
         let hyphenation = KHypDict::from_bytes(KHMER_HYPHENATION.to_vec())
             .map_err(|error| format!("Failed to load Khmer hyphenation dictionary: {error}"))?;
+        let completion_dictionary = KDict::from_bytes(KHMER_DICTIONARY.to_vec())
+            .map_err(|error| format!("Failed to load Khmer completion dictionary: {error}"))?;
+        let mut completion_costs = HashMap::<String, f32>::new();
+        for word in &words {
+            let key = modern_khmer_key(word);
+            let cost = completion_dictionary.cost(word).unwrap_or(f32::MAX);
+            completion_costs
+                .entry(key)
+                .and_modify(|current| *current = current.min(cost))
+                .or_insert(cost);
+        }
+        let mut lookup_words: Vec<String> = completion_costs.keys().cloned().collect();
+        lookup_words.sort();
+        let known = lookup_words.iter().cloned().collect();
         Ok(Self {
             segmenter,
-            words,
+            lookup_words,
             known,
+            completion_costs,
             hyphenation,
         })
     }
 
     fn has_prefix(&self, prefix: &str) -> bool {
+        let prefix = modern_khmer_key(prefix);
         let index = self
-            .words
-            .partition_point(|candidate| candidate.as_str() < prefix);
-        self.words
+            .lookup_words
+            .partition_point(|candidate| candidate.as_str() < prefix.as_str());
+        self.lookup_words
             .get(index)
-            .is_some_and(|candidate| candidate.starts_with(prefix))
+            .is_some_and(|candidate| candidate.starts_with(&prefix))
     }
+}
+
+/// Modern Khmer renders COENG+DA and COENG+TA identically. Use COENG+TA as
+/// the provider's comparison key while retaining the original source text.
+fn modern_khmer_key(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut characters = text.chars().peekable();
+    while let Some(character) = characters.next() {
+        output.push(character);
+        if character == '\u{17d2}' && characters.peek() == Some(&'\u{178a}') {
+            characters.next();
+            output.push('\u{178f}');
+        }
+    }
+    output
 }
 
 fn edit_distance(left: &str, right: &str) -> usize {
@@ -96,72 +130,31 @@ impl LanguageSegmenter for KhmerProvider {
             .filter(|&c| c != '\u{200b}' && c != '\u{200c}' && c != '\u{200d}')
             .collect();
         let normalized_changed = normalized != clean_text;
-
-        let tokens = if normalized_changed {
-            Vec::new()
-        } else {
-            // Build norm_to_orig_char_idx
-            let mut norm_to_orig_char_idx = Vec::with_capacity(normalized.chars().count() + 1);
-            let mut orig_char_idx = 0;
-            for c in text.chars() {
-                if c == '\u{200b}' || c == '\u{200c}' || c == '\u{200d}' {
-                    orig_char_idx += 1;
-                    continue;
+        let mut byte_to_utf16 = vec![0; text.len() + 1];
+        let mut utf16_offset = 0;
+        for (byte_offset, character) in text.char_indices() {
+            byte_to_utf16[byte_offset] = utf16_offset;
+            utf16_offset += character.len_utf16();
+        }
+        byte_to_utf16[text.len()] = utf16_offset;
+        let is_spelling_char = |character: char| ('\u{1780}'..='\u{17d3}').contains(&character);
+        let tokens = result
+            .mapped_segments()
+            .iter()
+            .map(|segment| {
+                let token = &normalized[segment.normalized_range.clone()];
+                let lookup_key = modern_khmer_key(token);
+                let known =
+                    !token.chars().any(is_spelling_char) || self.known.contains(&lookup_key);
+                SegmentToken {
+                    text: token.to_owned(),
+                    from: byte_to_utf16[segment.source_range.start],
+                    to: byte_to_utf16[segment.source_range.end],
+                    known,
+                    known_prefix: known || self.has_prefix(token),
                 }
-                norm_to_orig_char_idx.push(orig_char_idx);
-                orig_char_idx += 1;
-            }
-            norm_to_orig_char_idx.push(orig_char_idx);
-
-            // Build char_to_utf16 for original text
-            let mut char_to_utf16 = Vec::with_capacity(text.chars().count() + 1);
-            let mut current_utf16 = 0;
-            for c in text.chars() {
-                char_to_utf16.push(current_utf16);
-                current_utf16 += c.len_utf16();
-            }
-            char_to_utf16.push(current_utf16);
-
-            // Build norm_byte_to_char for normalized text
-            let mut norm_byte_to_char = Vec::with_capacity(normalized.len() + 1);
-            let mut current_char = 0;
-            for c in normalized.chars() {
-                let len = c.len_utf8();
-                for _ in 0..len {
-                    norm_byte_to_char.push(current_char);
-                }
-                current_char += 1;
-            }
-            norm_byte_to_char.push(current_char);
-
-            let is_spelling_char = |c: char| c >= '\u{1780}' && c <= '\u{17d3}';
-
-            result
-                .ranges()
-                .iter()
-                .map(|range| {
-                    let token = &normalized[range.clone()];
-                    let known = !token.chars().any(is_spelling_char) || self.known.contains(token);
-
-                    let norm_char_start = norm_byte_to_char[range.start];
-                    let norm_char_end = norm_byte_to_char[range.end];
-
-                    let orig_char_start = norm_to_orig_char_idx[norm_char_start];
-                    let orig_char_end = norm_to_orig_char_idx[norm_char_end];
-
-                    let from_utf16 = char_to_utf16[orig_char_start];
-                    let to_utf16 = char_to_utf16[orig_char_end];
-
-                    SegmentToken {
-                        text: token.to_owned(),
-                        from: from_utf16,
-                        to: to_utf16,
-                        known,
-                        known_prefix: known || self.has_prefix(token),
-                    }
-                })
-                .collect()
-        };
+            })
+            .collect();
         Ok(TextAnalysis {
             provider: self.id(),
             normalized_changed,
@@ -173,15 +166,16 @@ impl LanguageSegmenter for KhmerProvider {
         if word.is_empty() || limit == 0 {
             return Vec::new();
         }
+        let word = modern_khmer_key(word);
         let prefix_index = self
-            .words
-            .partition_point(|candidate| candidate.as_str() < word);
+            .lookup_words
+            .partition_point(|candidate| candidate.as_str() < word.as_str());
         let mut suggestions: Vec<String> = self
-            .words
+            .lookup_words
             .iter()
             .skip(prefix_index)
-            .take_while(|candidate| candidate.starts_with(word))
-            .filter(|candidate| candidate.as_str() != word)
+            .take_while(|candidate| candidate.starts_with(&word))
+            .filter(|candidate| candidate.as_str() != word.as_str())
             .take(limit)
             .cloned()
             .collect();
@@ -192,12 +186,12 @@ impl LanguageSegmenter for KhmerProvider {
         let first = word.chars().next();
         let length = word.chars().count();
         let mut candidates: Vec<(usize, &str)> = self
-            .words
+            .lookup_words
             .iter()
             .map(String::as_str)
             .filter(|candidate| candidate.chars().next() == first)
             .filter(|candidate| candidate.chars().count().abs_diff(length) <= 2)
-            .map(|candidate| (edit_distance(word, candidate), candidate))
+            .map(|candidate| (edit_distance(&word, candidate), candidate))
             .filter(|(distance, _)| *distance <= 3)
             .collect();
         candidates.sort_by(|left, right| {
@@ -217,11 +211,11 @@ impl LanguageSegmenter for KhmerProvider {
         }
         if suggestions.is_empty() {
             let mut fallback: Vec<(usize, &str)> = self
-                .words
+                .lookup_words
                 .iter()
                 .map(String::as_str)
                 .filter(|candidate| candidate.chars().count().abs_diff(length) <= 2)
-                .map(|candidate| (edit_distance(word, candidate), candidate))
+                .map(|candidate| (edit_distance(&word, candidate), candidate))
                 .filter(|(distance, _)| *distance <= 3)
                 .collect();
             fallback.sort_by(|left, right| {
@@ -245,15 +239,37 @@ impl LanguageSegmenter for KhmerProvider {
         if prefix.is_empty() {
             return Vec::new();
         }
+        let prefix = modern_khmer_key(prefix);
         let index = self
-            .words
-            .partition_point(|candidate| candidate.as_str() < prefix);
-        self.words
+            .lookup_words
+            .partition_point(|candidate| candidate.as_str() < prefix.as_str());
+        let mut candidates: Vec<_> = self
+            .lookup_words
             .iter()
             .skip(index)
-            .take_while(|candidate| candidate.starts_with(prefix))
-            .cloned()
+            .take_while(|candidate| candidate.starts_with(&prefix))
+            .filter(|candidate| candidate.as_str() != prefix.as_str())
+            .map(|candidate| {
+                (
+                    self.completion_costs
+                        .get(candidate)
+                        .copied()
+                        .unwrap_or(f32::MAX),
+                    candidate.chars().count(),
+                    candidate,
+                )
+            })
+            .collect();
+        candidates.sort_by(|left, right| {
+            left.0
+                .total_cmp(&right.0)
+                .then_with(|| left.1.cmp(&right.1))
+                .then_with(|| left.2.cmp(right.2))
+        });
+        candidates
+            .into_iter()
             .take(limit)
+            .map(|(_, _, candidate)| candidate.clone())
             .collect()
     }
 
@@ -454,23 +470,56 @@ pub async fn spelling_suggestions(
 }
 
 #[tauri::command]
-pub async fn autocomplete_khmer(
+pub async fn complete_language_word(
     registry: tauri::State<'_, SegmentationRegistry>,
-    prefix: String,
-    limit: usize,
-) -> Result<Vec<String>, String> {
+    request: CompletionRequest,
+) -> Result<Option<CompletionResponse>, String> {
     let providers = registry.providers.clone();
-    tokio::task::spawn_blocking(move || -> Vec<String> {
-        let provider = providers.iter().find(|provider| provider.supports(&prefix));
-
-        if let Some(provider) = provider {
-            provider.autocomplete(&prefix, limit.min(50))
-        } else {
-            Vec::new()
-        }
+    tokio::task::spawn_blocking(move || -> Result<Option<CompletionResponse>, String> {
+        let Some(provider) = providers
+            .iter()
+            .find(|provider| provider.supports(&request.text))
+        else {
+            return Ok(None);
+        };
+        complete_with_provider(provider.as_ref(), &request)
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|error| error.to_string())?
+}
+
+fn complete_with_provider(
+    provider: &dyn LanguageSegmenter,
+    request: &CompletionRequest,
+) -> Result<Option<CompletionResponse>, String> {
+    let analysis = provider.analyze(&request.text)?;
+    let Some(end_index) = analysis
+        .tokens
+        .iter()
+        .rposition(|token| token.from < request.cursor_utf16 && token.to == request.cursor_utf16)
+    else {
+        return Ok(None);
+    };
+    // Khmer compounds can be segmented into an already-known word plus the
+    // newly typed suffix. Try the longest recent token sequence first so a
+    // prefix such as `សាលា` + `រ` remains `សាលារ`, not merely `រ`.
+    let first_index = end_index.saturating_sub(3);
+    for start_index in first_index..=end_index {
+        let prefix = analysis.tokens[start_index..=end_index]
+            .iter()
+            .map(|token| token.text.as_str())
+            .collect::<String>();
+        let options = provider.autocomplete(&prefix, request.limit.min(50));
+        if !options.is_empty() {
+            return Ok(Some(CompletionResponse {
+                provider: provider.id().to_owned(),
+                from: analysis.tokens[start_index].from,
+                to: request.cursor_utf16,
+                options,
+            }));
+        }
+    }
+    Ok(None)
 }
 
 #[tauri::command]
@@ -537,12 +586,159 @@ mod tests {
     use super::*;
 
     #[test]
+    fn refreshes_and_ranks_school_completion_for_each_prefix() {
+        let provider = KhmerProvider::new().unwrap();
+        for prefix in ["ស", "សា", "សាល", "សាលា", "សាលារ"] {
+            let response = complete_with_provider(
+                &provider,
+                &CompletionRequest {
+                    text: prefix.into(),
+                    cursor_utf16: prefix.encode_utf16().count(),
+                    limit: 10,
+                },
+            )
+            .unwrap()
+            .expect("completion response");
+            assert!(!response.options.iter().any(|option| option == prefix));
+        }
+        let response = complete_with_provider(
+            &provider,
+            &CompletionRequest {
+                text: "សាលា".into(),
+                cursor_utf16: "សាលា".encode_utf16().count(),
+                limit: 10,
+            },
+        )
+        .unwrap()
+        .expect("school completion");
+        assert_eq!(
+            response.options.first().map(String::as_str),
+            Some("សាលារៀន")
+        );
+        let continued = complete_with_provider(
+            &provider,
+            &CompletionRequest {
+                text: "សាលារ".into(),
+                cursor_utf16: "សាលារ".encode_utf16().count(),
+                limit: 10,
+            },
+        )
+        .unwrap()
+        .expect("continued school completion");
+        assert_eq!(continued.from, 0);
+        assert_eq!(
+            continued.options.first().map(String::as_str),
+            Some("សាលារៀន")
+        );
+    }
+
+    #[test]
     fn analyzes_khmer_with_editor_safe_ranges() {
         let provider = KhmerProvider::new().expect("Khmer provider");
         let analysis = provider.analyze("ក្រុមហ៊ុនទទួលបានប្រាក់ចំណូល").expect("analysis");
         assert!(!analysis.normalized_changed);
         assert!(!analysis.tokens.is_empty());
         assert!(analysis.tokens.iter().all(|token| token.from <= token.to));
+    }
+
+    #[test]
+    fn preserves_source_ranges_through_normalization_and_utf16_conversion() {
+        let provider = KhmerProvider::new().expect("Khmer provider");
+        let source = "\u{1f600}\u{1780}\u{17c6}\u{17b6}";
+        let analysis = provider.analyze(source).expect("analysis");
+        assert!(analysis.normalized_changed);
+        let khmer_tokens: Vec<_> = analysis
+            .tokens
+            .iter()
+            .filter(|token| {
+                token
+                    .text
+                    .chars()
+                    .any(|character| ('\u{1780}'..='\u{17ff}').contains(&character))
+            })
+            .collect();
+        assert!(!khmer_tokens.is_empty());
+        assert_eq!(khmer_tokens.first().unwrap().from, 2);
+        assert_eq!(khmer_tokens.last().unwrap().to, 5);
+
+        let composed = provider
+            .analyze("\u{1f600}\u{1780}\u{17c1}\u{17b8}")
+            .expect("composed vowel analysis");
+        assert!(composed.normalized_changed);
+        assert!(composed
+            .tokens
+            .iter()
+            .any(|token| token.from == 2 && token.to == 5));
+    }
+
+    #[test]
+    fn preserves_ranges_across_removed_joiners() {
+        let provider = KhmerProvider::new().expect("Khmer provider");
+        for joiner in ['\u{200b}', '\u{200c}', '\u{200d}'] {
+            let source = format!("\u{1f600}\u{1780}{joiner}\u{17b6}");
+            let analysis = provider.analyze(&source).expect("joiner analysis");
+            assert!(analysis
+                .tokens
+                .iter()
+                .any(|token| token.from == 2 && token.to == 5));
+        }
+    }
+
+    #[test]
+    fn treats_modern_coeng_ta_and_legacy_coeng_da_as_equivalent() {
+        let provider = KhmerProvider::new().expect("Khmer provider");
+        let legacy = "គ្របដណ\u{17d2}\u{178a}ប់";
+        let modern = "គ្របដណ\u{17d2}\u{178f}ប់";
+        assert_eq!(modern_khmer_key(legacy), modern);
+        for spelling in [legacy, modern] {
+            let analysis = provider.analyze(spelling).expect("analysis");
+            assert!(analysis.tokens.iter().all(|token| token.known));
+            assert_eq!(analysis.tokens.first().unwrap().from, 0);
+            assert_eq!(
+                analysis.tokens.last().unwrap().to,
+                spelling.encode_utf16().count()
+            );
+        }
+    }
+
+    #[test]
+    fn completes_the_last_segment_in_an_unspaced_run() {
+        let provider = KhmerProvider::new().expect("Khmer provider");
+        let prefix = provider
+            .lookup_words
+            .iter()
+            .find_map(|word| {
+                let prefix: String = word.chars().take(1).collect();
+                (!prefix.is_empty() && !provider.known.contains(&prefix)).then_some(prefix)
+            })
+            .expect("completion prefix");
+        let response = provider.lookup_words.iter().take(200).find_map(|first| {
+            let text = format!("{first}{prefix}");
+            let request = CompletionRequest {
+                cursor_utf16: text.encode_utf16().count(),
+                text,
+                limit: 10,
+            };
+            complete_with_provider(&provider, &request)
+                .expect("completion")
+                .filter(|response| response.from == first.encode_utf16().count())
+                .map(|response| (first, response))
+        });
+        let (first, _) =
+            response.expect("no dictionary pair produced a segmented suffix completion");
+        let punctuated = format!("{first}\u{17d4}{prefix}");
+        let response = complete_with_provider(
+            &provider,
+            &CompletionRequest {
+                cursor_utf16: punctuated.encode_utf16().count(),
+                text: punctuated,
+                limit: 10,
+            },
+        )
+        .expect("punctuated completion")
+        .expect("completion after punctuation");
+        assert_eq!(response.from, first.encode_utf16().count() + 1);
+        assert!(!response.options.is_empty());
     }
 
     #[test]
@@ -558,7 +754,7 @@ mod tests {
     fn suggests_completions_for_an_unknown_dictionary_prefix() {
         let provider = KhmerProvider::new().expect("Khmer provider");
         let (prefix, full_word) = provider
-            .words
+            .lookup_words
             .iter()
             .find_map(|word| {
                 let prefix: String = word.chars().take(1).collect();
@@ -566,6 +762,8 @@ mod tests {
                     .then(|| (prefix, word.clone()))
             })
             .expect("dictionary word with an unknown short prefix");
-        assert!(provider.suggestions(&prefix, 10).contains(&full_word));
+        assert!(provider
+            .suggestions(&prefix, 10)
+            .contains(&modern_khmer_key(&full_word)));
     }
 }

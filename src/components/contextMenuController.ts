@@ -25,6 +25,7 @@ export type ContextMenuDependencies = {
   getSpellingIssue: (x: number, y: number, target?: HTMLElement) => SpellingIssue | null;
   getSpellingSuggestions: (issue: SpellingIssue) => Promise<string[]>;
   replaceSpelling: (issue: SpellingIssue, replacement: string) => void;
+  addSpellingToDictionary: (issue: SpellingIssue) => void;
 };
 
 const previewItems = `
@@ -82,6 +83,9 @@ export class ContextMenuController {
       case "ctx-editor-toggle-comment": toggleLineComment(this.dependencies.getEditor()); return;
       case "ctx-editor-select-all": selectAll(this.dependencies.getEditor()); return;
       case "ctx-editor-format": await this.dependencies.save(); return;
+      case "ctx-spelling-add":
+        if (this.spellingIssue) this.dependencies.addSpellingToDictionary(this.spellingIssue);
+        return;
       case "ctx-fs-copy":
         if (this.targetIsDirectory) alert("Copying directories directly is not yet supported.");
         else this.copiedFilePath = this.targetPath;
@@ -377,7 +381,7 @@ export class ContextMenuController {
 
   private editorItems(): string {
     const spelling = this.spellingIssue
-      ? `${this.spellingSuggestions.map((suggestion, index) => `<div class="dropdown-item spelling-suggestion" id="ctx-spelling-${index}">${this.escapeHtml(suggestion)}</div>`).join("")}<div class="dropdown-separator"></div>`
+      ? `${this.spellingSuggestions.map((suggestion, index) => `<div class="dropdown-item spelling-suggestion" id="ctx-spelling-${index}">${this.escapeHtml(suggestion)}</div>`).join("")}<div class="dropdown-item" id="ctx-spelling-add">Add “${this.escapeHtml(this.spellingIssue.sourceText)}” to dictionary</div><div class="dropdown-separator"></div>`
       : "";
     return `${spelling}<div class="dropdown-item" id="ctx-copy-text">Copy <span class="hotkey">Ctrl+C</span></div><div class="dropdown-item" id="ctx-paste-text">Paste <span class="hotkey">Ctrl+V</span></div><div class="dropdown-item" id="ctx-cut-text">Cut <span class="hotkey">Ctrl+X</span></div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-editor-toggle-comment">Toggle Line Comment</div><div class="dropdown-item" id="ctx-editor-format">Format Document</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-undo">Undo</div><div class="dropdown-item" id="ctx-redo">Redo</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-editor-select-all">Select All</div>`;
   }

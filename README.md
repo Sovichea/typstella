@@ -24,7 +24,7 @@ A lightweight, local-first Typst code editor with advanced Unicode font fallback
 * **Template-Aware Chapter Editing**: Imported chapters can reuse their main document's local template in standalone live preview. Cross-chapter references render as clear placeholders until the complete document is previewed, while the source remains standard Typst.
 * **Managed Toolchain**: The settings panel installs stable Tinymist releases. Tinymist's embedded Typst compiler handles preview, diagnostics, and export; no separate Typst installation is required.
 * **Document Typography Controls**: Choose Latin and complex-script fonts independently from the toolbar, adjust complex-script sizing relative to the Latin size, and apply either selection to the current document or its local template.
-* **Khmer Language Support**: Optional real-time dictionary spellcheck underlines unknown Khmer words and offers corrections while typing or from the editor context menu. Preview and PDF export add non-destructive Khmer word-break opportunities, including discretionary hyphenation in justified paragraphs.
+* **Khmer Language Support**: Optional real-time dictionary spellcheck underlines unknown Khmer words and offers corrections from the editor context menu. Typing suggestions can be controlled independently, and unknown words can be added to a persistent personal dictionary. See [Khmer Spellcheck and Word Completion](./KHMER_SPELLCHECK.md). Preview and PDF export add non-destructive Khmer word-break opportunities, including discretionary hyphenation in justified paragraphs.
 * **Interactive Document Outline**: Browse collapsible heading levels beside the file explorer and navigate both source and preview from a single click.
 * **Writable Example Workspace**: Open installed examples from the welcome screen, including Unicode-focused documents, a Khmer technical document, and a three-chapter thesis demonstrating external labels.
 * **Focus-Driven UI**: A custom, frameless window design, persistent multi-tab workspace state (preserving open tabs, split ratios, and cursor positions), and integrated native-feel search and replace.
@@ -56,6 +56,8 @@ Open Settings from **File → Settings**, the status bar, or `Ctrl + ,`. Changes
     "codeFont": "Fira Mono",
     "unicodeFont": "auto",
     "spellcheck": true,
+    "wordCompletion": true,
+    "userDictionary": [],
     "wordWrap": true,
     "tabSize": 2,
     "lineNumbers": true,
@@ -84,7 +86,7 @@ Only MiSans Latin and Fira Mono are bundled. Typstry installs them in the curren
 
 The typography toolbar controls the fonts used by the compiled document, separately from the editor font settings. Enable either the Latin rule, the complex-script rule, or both. **Apply to document** writes a managed `typstry:typography` block into the active file. **Apply as template** updates the local function used by the main document's `#show: ...with(...)` rule, or creates `typstry-template.typ` when no editable local template can be identified.
 
-Language spellcheck can be disabled in Editor settings. Khmer analysis is provided by the modular Rust segmentation layer backed by the `khmer_segmenter` submodule. The renderer leaves source files unchanged: generated preview and export input receives zero-width word-break opportunities for normal paragraphs and soft-hyphen opportunities for justified paragraphs. Soft hyphens are visible only when Typst actually breaks a word.
+Language spellcheck and typing word suggestions can be controlled independently in Editor settings. Khmer analysis is provided by the modular Rust segmentation layer backed by the `khmer_segmenter` submodule; implementation details and modern Khmer encoding policy are documented in [Khmer Spellcheck and Word Completion](./KHMER_SPELLCHECK.md). The renderer leaves source files unchanged: generated preview and export input receives zero-width word-break opportunities for normal paragraphs and soft-hyphen opportunities for justified paragraphs. Soft hyphens are visible only when Typst actually breaks a word.
 
 ## Tech Stack & Architecture
 * **Core Framework**: [Tauri v2](https://v2.tauri.app/)

@@ -33,6 +33,25 @@ type LspCompletionResponse = LspCompletionItem[] | {
   };
 } | null;
 
+export type LanguageCompletionResponse = {
+  provider: string;
+  from: number;
+  to: number;
+  options: string[];
+};
+
+export function languageCompletionRange(
+  runFrom: number,
+  runLength: number,
+  completion: LanguageCompletionResponse | null
+): { from: number; to: number } | null {
+  if (!completion || completion.from < 0 || completion.from >= completion.to
+    || completion.to !== runLength) return null;
+  return { from: runFrom + completion.from, to: runFrom + completion.to };
+}
+
+export const languageCompletionValidFor = () => false;
+
 function textEditFromDefault(range: LspEditRange | undefined, newText: string): LspTextEdit | undefined {
   if (!range) return undefined;
   if ("start" in range) return { newText, range };
@@ -204,25 +223,37 @@ function getCmCompletionType(kind?: number): string {
   }
 }
 
-export function createTypstAutocomplete(getClient: () => TinymistLspClient | undefined, getUri: () => string, flushLspSync: () => void) {
+export function createTypstAutocomplete(
+  getClient: () => TinymistLspClient | undefined,
+  getUri: () => string,
+  flushLspSync: () => void,
+  languageWordCompletion = true
+) {
   return autocompletion({
     override: [
       async (context: CompletionContext) => {
         const khmerWord = context.matchBefore(/[\u1780-\u17ff]+/u);
-        if (khmerWord) {
+        if (languageWordCompletion && khmerWord) {
           try {
-            const suggestions = await invoke<string[]>("autocomplete_khmer", {
-              prefix: khmerWord.text,
-              limit: 10
+            const completion = await invoke<LanguageCompletionResponse | null>("complete_language_word", {
+              request: {
+                text: khmerWord.text,
+                cursorUtf16: khmerWord.text.length,
+                limit: 10
+              }
             });
-            if (suggestions && suggestions.length > 0) {
+            const replacement = languageCompletionRange(khmerWord.from, khmerWord.text.length, completion);
+            if (completion && replacement && completion.options.length > 0) {
               return {
-                from: khmerWord.from,
-                options: suggestions.map(word => ({
+                from: replacement.from,
+                options: completion.options.map(word => ({
                   label: word,
                   type: "text",
-                  detail: "Khmer Word"
-                }))
+                  detail: completion.provider
+                })),
+                // Results are deliberately bounded and ranked for the current
+                // segmented prefix, so every typed character must query again.
+                validFor: languageCompletionValidFor
               };
             }
           } catch (e) {
