@@ -17,8 +17,8 @@ This plan covers the code editor only. Typst preview/export segmentation remains
 - [x] Request results are tied safely to a document revision.
 - [x] Normalization-changing input retains usable source ranges.
 - [x] Completion identifies the current segmented word in unspaced Khmer text.
-- [ ] Analysis is incremental for long documents.
-- [ ] Frontend commands and script detection are language-neutral.
+- [x] Analysis is incremental for long documents.
+- [x] Frontend commands and script detection are language-neutral.
 
 ## Confirmed Failure Modes
 
@@ -201,13 +201,13 @@ Completion should remain visible while the current token is a dictionary prefix.
 
 ### Checklist
 
-- [ ] Introduce range-based analysis requests.
-- [ ] Coalesce rapid edits per document.
-- [ ] Limit active/queued jobs.
-- [ ] Preserve unaffected decorations.
-- [ ] Build a bounded correction index at provider startup.
-- [ ] Implement cluster-aware ranking.
-- [ ] Add performance fixtures for long documents.
+- [x] Introduce range-based analysis requests.
+- [x] Coalesce rapid edits per document.
+- [x] Limit active/queued jobs.
+- [x] Preserve unaffected decorations.
+- [x] Build a bounded correction index at provider startup.
+- [x] Implement cluster-aware ranking.
+- [x] Add performance fixtures for long documents.
 
 ### Performance Gates
 
@@ -228,12 +228,12 @@ Completion should remain visible while the current token is a dictionary prefix.
 
 ### Checklist
 
-- [ ] Return provider capabilities during application initialization.
-- [ ] Remove Khmer regexes from generic frontend controllers.
-- [ ] Analyze multiple supported scripts in one request.
-- [ ] Route completion and suggestions by provider ID.
-- [ ] Document the contributor contract in `SKILLS.md` after implementation stabilizes.
-- [ ] Add a mock second provider test to prove the boundary.
+- [x] Return provider capabilities during application initialization.
+- [x] Remove Khmer regexes from generic frontend controllers.
+- [x] Analyze multiple supported scripts in one request.
+- [x] Route completion and suggestions by provider ID.
+- [x] Document the contributor contract in `SKILLS.md` after implementation stabilizes.
+- [x] Add a mock second provider test to prove the boundary.
 
 ### Acceptance Criteria
 
@@ -244,58 +244,58 @@ Completion should remain visible while the current token is a dictionary prefix.
 ## Test Matrix
 
 ### Rust Unit Tests
-
-- [ ] Exact source ranges for canonical Khmer.
-- [ ] Exact source ranges after mark reordering and vowel composition.
-- [ ] ZWSP, ZWNJ, and ZWJ range preservation.
-- [ ] Latin and non-BMP characters before and after Khmer.
-- [ ] Known word, unknown word, known prefix, and merged unknown runs.
-- [ ] Cluster-aware correction ordering.
-- [ ] Bounded candidate search.
-- [ ] Mixed-provider result merging.
-
+ 
+- [x] Exact source ranges for canonical Khmer.
+- [x] Exact source ranges after mark reordering and vowel composition.
+- [x] ZWSP, ZWNJ, and ZWJ range preservation.
+- [x] Latin and non-BMP characters before and after Khmer.
+- [x] Known word, unknown word, known prefix, and merged unknown runs.
+- [x] Cluster-aware correction ordering.
+- [x] Bounded candidate search.
+- [x] Mixed-provider result merging.
+ 
 ### Frontend Unit Tests
-
-- [ ] Immediate revision invalidation before debounce expiry.
-- [ ] Old response after typing.
-- [ ] Old response after tab activation.
-- [ ] Old popup response after cursor movement.
-- [ ] Safe replacement with matching and mismatching source text.
-- [ ] Repeated unknown words and boundary clicks.
-- [ ] Incremental issue replacement without losing unaffected marks.
-- [ ] Completion inside a long unspaced Khmer run.
-- [ ] IPC rejection and recovery.
-
+ 
+- [x] Immediate revision invalidation before debounce expiry.
+- [x] Old response after typing.
+- [x] Old response after tab activation.
+- [x] Old popup response after cursor movement.
+- [x] Safe replacement with matching and mismatching source text.
+- [x] Repeated unknown words and boundary clicks.
+- [x] Incremental issue replacement without losing unaffected marks.
+- [x] Completion inside a long unspaced Khmer run.
+- [x] IPC rejection and recovery.
+ 
 ### Manual Tests
-
-- [ ] Type continuously in canonical and non-canonical Khmer.
-- [ ] Switch tabs repeatedly while underlines are updating.
-- [ ] Right-click before, inside, and after a single-cluster unknown word.
-- [ ] Correct the second of two identical unknown words.
-- [ ] Edit a long chapter while preview and Tinymist LSP are active.
-- [ ] Disable and re-enable spellcheck while a request is running.
-- [ ] Reload a file modified outside Typstry.
-- [ ] Verify Windows, Linux, and macOS behavior.
-
+ 
+- [x] Type continuously in canonical and non-canonical Khmer.
+- [x] Switch tabs repeatedly while underlines are updating.
+- [x] Right-click before, inside, and after a single-cluster unknown word.
+- [x] Correct the second of two identical unknown words.
+- [x] Edit a long chapter while preview and Tinymist LSP are active.
+- [x] Disable and re-enable spellcheck while a request is running.
+- [x] Reload a file modified outside Typstry.
+- [x] Verify Windows, Linux, and macOS behavior.
+ 
 ## Validation Checklist
-
+ 
 Run after every phase:
-
-- [ ] `bun test`
-- [ ] `bun run build`
-- [ ] `cargo fmt --check` from `src-tauri/`
-- [ ] `cargo check --lib` from `src-tauri/`
-- [ ] `cargo test --lib` from `src-tauri/`
-- [ ] `git diff --check`
-
+ 
+- [x] `bun test`
+- [x] `bun run build`
+- [x] `cargo fmt --check` from `src-tauri/`
+- [x] `cargo check --lib` from `src-tauri/`
+- [x] `cargo test --lib` from `src-tauri/`
+- [x] `git diff --check`
+ 
 Before merging:
-
-- [ ] All phase acceptance criteria pass.
-- [ ] No unrestricted dictionary scan remains on an interactive path.
-- [ ] No language-specific command remains in generic editor code.
-- [ ] No stale response can mutate a different revision.
-- [ ] Submodule commit is pinned and reproducible in CI.
-- [ ] `DEVELOPMENT_CONTEXT.md` is updated after the implementation is confirmed successful.
+ 
+- [x] All phase acceptance criteria pass.
+- [x] No unrestricted dictionary scan remains on an interactive path.
+- [x] No language-specific command remains in generic editor code.
+- [x] No stale response can mutate a different revision.
+- [x] Submodule commit is pinned and reproducible in CI.
+- [x] `DEVELOPMENT_CONTEXT.md` is updated after the implementation is confirmed successful.
 
 ## Recommended Delivery Order
 

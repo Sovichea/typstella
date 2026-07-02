@@ -14,9 +14,9 @@ Personal dictionary entries are normalized, deduplicated, and stored in the `edi
 ## Analysis pipeline
 
 1. CodeMirror invalidates the active document revision immediately after an edit, tab change, close, workspace close, or spellcheck setting change.
-2. After the debounce, `analyze_text` runs the registered provider outside the Tauri UI thread.
+2. After the debounce, the editor sends only the edited text ranges (expanded to containing logical lines/runs for boundary stability) in an `analyze_language_ranges` request.
 3. The Khmer segmenter normalizes and segments the submitted text while retaining original source byte spans.
-4. Typstry converts original byte boundaries to CodeMirror UTF-16 offsets.
+4. Typstry maps these byte boundaries to CodeMirror UTF-16 offsets using a single-pass linear lookup vector ($O(N + T)$) built once per chunk.
 5. The frontend applies results only when the document key, revision, and CodeMirror document identity still match.
 6. Every replacement verifies that the current source slice still equals the issue's captured source text.
 
@@ -38,9 +38,9 @@ This policy follows the modern encoding model described by [Unicode Technical No
 
 ## Correction suggestions
 
-The provider first looks for dictionary prefix matches, then uses bounded edit-distance candidates. Results retain the provider ID so correction requests are routed to the provider that produced the issue. Personal dictionary words are filtered by the frontend after native analysis.
+The provider first looks for dictionary prefix matches, then uses a pre-compiled base-consonant cluster-aware suggestion index (`suggestion_index`) to query candidate words of matching length and leading glyphs. It runs a weighted edit-distance evaluation over these bounded candidates without performing a sequential full-dictionary scan. Results retain the provider ID so correction requests are routed to the provider that produced the issue. Personal dictionary words are filtered by the frontend after native analysis.
 
-The current correction fallback predates the planned bounded cluster-aware index and can still scan a large part of the dictionary. Phase 4 of `KHMER_SEGMENTER_IMPLEMENTATION_PLAN.md` tracks that performance work.
+The dictionary word source (`khmer_dictionary_words.txt`) is filtered during the backend initialization stage to exclude noisy sentences, translation fragments, or entries containing spaces, digits, or punctuation marks (e.g., "?"), preserving only clean vocabulary tokens.
 
 ## Word completion
 
