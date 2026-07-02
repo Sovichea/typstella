@@ -223,43 +223,56 @@ function getCmCompletionType(kind?: number): string {
   }
 }
 
+export type ProviderCapabilities = {
+  id: string;
+  pattern: string;
+};
+
 export function createTypstAutocomplete(
   getClient: () => TinymistLspClient | undefined,
   getUri: () => string,
   flushLspSync: () => void,
-  languageWordCompletion = true
+  languageWordCompletion = true,
+  getProviders: () => ProviderCapabilities[] = () => []
 ) {
   return autocompletion({
     override: [
       async (context: CompletionContext) => {
-        const khmerWord = context.matchBefore(/[\u1780-\u17ff]+/u);
-        if (languageWordCompletion && khmerWord) {
-          try {
-            const completion = await invoke<LanguageCompletionResponse | null>("complete_language_word", {
-              request: {
-                text: khmerWord.text,
-                cursorUtf16: khmerWord.text.length,
-                limit: 10
+        if (languageWordCompletion) {
+          const providers = getProviders();
+          for (const provider of providers) {
+            const pattern = new RegExp(provider.pattern + "$", "u");
+            const word = context.matchBefore(pattern);
+            if (word) {
+              try {
+                const completion = await invoke<LanguageCompletionResponse | null>("complete_language_word", {
+                  request: {
+                    provider: provider.id,
+                    text: word.text,
+                    cursorUtf16: word.text.length,
+                    limit: 10
+                  }
+                });
+                const replacement = languageCompletionRange(word.from, word.text.length, completion);
+                if (completion && replacement && completion.options.length > 0) {
+                  return {
+                    from: replacement.from,
+                    options: completion.options.map(w => ({
+                      label: w,
+                      type: "text",
+                      detail: completion.provider
+                    })),
+                    // Results are deliberately bounded and ranked for the current
+                    // segmented prefix, so every typed character must query again.
+                    validFor: languageCompletionValidFor
+                  };
+                }
+              } catch (e) {
+                console.warn(`${provider.id} autocomplete error`, e);
               }
-            });
-            const replacement = languageCompletionRange(khmerWord.from, khmerWord.text.length, completion);
-            if (completion && replacement && completion.options.length > 0) {
-              return {
-                from: replacement.from,
-                options: completion.options.map(word => ({
-                  label: word,
-                  type: "text",
-                  detail: completion.provider
-                })),
-                // Results are deliberately bounded and ranked for the current
-                // segmented prefix, so every typed character must query again.
-                validFor: languageCompletionValidFor
-              };
+              return null;
             }
-          } catch (e) {
-            console.warn("Khmer autocomplete error", e);
           }
-          return null;
         }
 
         const fontValueFrom = fontCompletionValueStart(context.state.doc, context.pos);

@@ -11,7 +11,7 @@ import { indentationMarkers } from '@replit/codemirror-indentation-markers';
 
 import * as uiwThemes from "@uiw/codemirror-themes-all";
 import { oneDark } from "@codemirror/theme-one-dark";
-import { createTypstAutocomplete } from "./autocomplete";
+import { createTypstAutocomplete, type ProviderCapabilities } from "./autocomplete";
 import { completionKeymap, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { bracketMatching } from "@codemirror/language";
 import { toggleLineComment } from "@codemirror/commands";
@@ -182,7 +182,8 @@ export function getEditorExtensions(
   getClient: () => TinymistLspClient | undefined,
   getUri: () => string,
   flushLspSync: () => void,
-  onNavigateToDefinition?: (uri: string, line: number, character: number) => void
+  onNavigateToDefinition?: (uri: string, line: number, character: number) => void,
+  getProviders?: () => ProviderCapabilities[]
 ): Extension[] {
   return [
     ctrlClickLinkPlugin,
@@ -252,7 +253,7 @@ export function getEditorExtensions(
     bracketMatching(),
     bracketColorizer,
     createHoverTooltip(getClient, getUri),
-    completionCompartment.of(createTypstAutocomplete(getClient, getUri, flushLspSync)),
+    completionCompartment.of(createTypstAutocomplete(getClient, getUri, flushLspSync, true, getProviders)),
     themeCompartment.of(getThemeExtension("default")),
     editorFontCompartment.of(editorFontTheme()),
     keymap.of([

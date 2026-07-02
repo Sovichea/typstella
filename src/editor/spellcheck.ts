@@ -1,22 +1,28 @@
 import { StateEffect, StateField, type Extension, type Text } from "@codemirror/state";
-import { Decoration, EditorView, type DecorationSet } from "@codemirror/view";
+import { Decoration, EditorView, type DecorationSet, type ViewUpdate } from "@codemirror/view";
 import { invoke } from "@tauri-apps/api/core";
 
-type SegmentToken = {
-  text: string;
-  from: number;
-  to: number;
+export type EditorToken = {
+  provider: string;
+  sourceFromUtf16: number;
+  sourceToUtf16: number;
+  sourceText: string;
+  normalizedText: string;
   known: boolean;
   knownPrefix: boolean;
 };
 
-type TextAnalysis = {
-  provider: string;
-  normalizedChanged: boolean;
-  tokens: SegmentToken[];
+export type AnalyzeResponse = {
+  tokens: EditorToken[];
+};
+
+export type ProviderCapabilities = {
+  id: string;
+  pattern: string;
 };
 
 export type SpellingIssue = {
+  provider: string;
   documentKey: string;
   revision: number;
   docIdentity: Text;
@@ -45,6 +51,58 @@ const spellingField = StateField.define<DecorationSet>({
   provide: field => EditorView.decorations.from(field)
 });
 
+function expandRange(doc: Text, from: number, to: number, patterns: RegExp[]): { from: number, to: number } {
+  const matchesAny = (char: string) => patterns.some(pat => pat.test(char));
+  let newFrom = from;
+  while (newFrom > 0 && matchesAny(doc.sliceString(newFrom - 1, newFrom))) {
+    newFrom--;
+  }
+  while (newFrom > 0 && !matchesAny(doc.sliceString(newFrom - 1, newFrom)) && doc.sliceString(newFrom - 1, newFrom) !== "\n") {
+    newFrom--;
+  }
+  while (newFrom > 0 && matchesAny(doc.sliceString(newFrom - 1, newFrom))) {
+    newFrom--;
+  }
+  
+  let newTo = to;
+  const docLength = doc.length;
+  while (newTo < docLength && matchesAny(doc.sliceString(newTo, newTo + 1))) {
+    newTo++;
+  }
+  while (newTo < docLength && !matchesAny(doc.sliceString(newTo, newTo + 1)) && doc.sliceString(newTo, newTo + 1) !== "\n") {
+    newTo++;
+  }
+  while (newTo < docLength && matchesAny(doc.sliceString(newTo, newTo + 1))) {
+    newTo++;
+  }
+  
+  const lineStart = doc.lineAt(from).from;
+  const lineEnd = doc.lineAt(to).to;
+  return {
+    from: Math.max(lineStart, newFrom),
+    to: Math.min(lineEnd, newTo)
+  };
+}
+
+function coalesceRanges(ranges: { from: number; to: number }[]): { from: number; to: number }[] {
+  if (ranges.length === 0) return [];
+  const sorted = [...ranges].sort((a, b) => a.from - b.from);
+  const coalesced: { from: number; to: number }[] = [];
+  for (const r of sorted) {
+    if (coalesced.length === 0) {
+      coalesced.push(r);
+    } else {
+      const last = coalesced[coalesced.length - 1];
+      if (r.from <= last.to) {
+        last.to = Math.max(last.to, r.to);
+      } else {
+        coalesced.push(r);
+      }
+    }
+  }
+  return coalesced;
+}
+
 export class SpellcheckController {
   private enabled = true;
   private timer: number | null = null;
@@ -56,10 +114,31 @@ export class SpellcheckController {
   public issues: SpellingIssue[] = [];
   private suggestionCache = new Map<string, string[]>();
   private readonly popup = document.createElement("div");
+  private providers: ProviderCapabilities[] = [];
+  
+  private pendingRanges: { from: number; to: number }[] = [];
+  private activeRequest: { documentKey: string; revision: number; docIdentity: Text } | null = null;
+  private queuedRequest: { ranges: { from: number; to: number }[] } | null = null;
 
   constructor(private readonly getEditor: () => EditorView) {
     this.popup.className = "spellcheck-suggestions hidden";
     document.body.appendChild(this.popup);
+  }
+
+  public async initialize(): Promise<void> {
+    try {
+      this.providers = await invoke<ProviderCapabilities[]>("get_provider_capabilities");
+    } catch (error) {
+      console.error("Failed to fetch provider capabilities:", error);
+    }
+  }
+
+  public getProviders(): ProviderCapabilities[] {
+    return this.providers;
+  }
+
+  private getPatterns(): RegExp[] {
+    return this.providers.map(p => new RegExp(p.pattern, "u"));
   }
 
   public extension(): Extension {
@@ -70,7 +149,13 @@ export class SpellcheckController {
     if (this.enabled === enabled) return;
     this.enabled = enabled;
     this.invalidate(true);
-    if (enabled) this.schedule();
+    if (enabled) {
+      const doc = this.getEditor()?.state.doc;
+      if (doc) {
+        this.pendingRanges = [{ from: 0, to: doc.length }];
+        this.schedule();
+      }
+    }
   }
 
   public setUserDictionary(words: readonly string[]): void {
@@ -79,18 +164,61 @@ export class SpellcheckController {
       && [...next].every(word => this.userDictionary.has(word))) return;
     this.userDictionary = next;
     this.invalidate(true);
-    this.schedule();
+    const doc = this.getEditor()?.state.doc;
+    if (doc) {
+      this.pendingRanges = [{ from: 0, to: doc.length }];
+      this.schedule();
+    }
   }
 
   /** Must be called before replacing the editor state for another document. */
   public activateDocument(documentKey: string): void {
     this.documentKey = documentKey;
     this.invalidate(true);
+    const doc = this.getEditor()?.state.doc;
+    if (doc) {
+      this.pendingRanges = [{ from: 0, to: doc.length }];
+      this.schedule();
+    }
   }
 
   /** Invalidates async work immediately; debounce scheduling happens afterwards. */
-  public documentChanged(): void {
-    this.invalidate(false);
+  public documentChanged(update: ViewUpdate): void {
+    if (!this.enabled || !this.documentKey) return;
+    this.revision++;
+    this.popupGeneration++;
+    this.hidePopup();
+    if (this.timer !== null) window.clearTimeout(this.timer);
+    this.timer = null;
+
+    // Map existing issues offsets through the changes
+    this.issues = this.issues.map(issue => {
+      const from = update.changes.mapPos(issue.from, -1);
+      const to = update.changes.mapPos(issue.to, 1);
+      return {
+        ...issue,
+        from,
+        to,
+        docIdentity: update.state.doc
+      };
+    });
+
+    // Map existing pending ranges through the changes
+    this.pendingRanges = this.pendingRanges.map(r => ({
+      from: update.changes.mapPos(r.from, -1),
+      to: update.changes.mapPos(r.to, 1)
+    }));
+
+    // Extract new changed ranges and expand them
+    const patterns = this.getPatterns();
+    let newRanges: { from: number; to: number }[] = [];
+    update.changes.iterChanges((_fromA, _toA, fromB, toB) => {
+      newRanges.push({ from: fromB, to: toB });
+    });
+
+    newRanges = newRanges.map(r => expandRange(update.state.doc, r.from, r.to, patterns));
+    this.pendingRanges = coalesceRanges([...this.pendingRanges, ...newRanges]);
+
     this.schedule();
   }
 
@@ -104,7 +232,7 @@ export class SpellcheckController {
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.timer = window.setTimeout(() => {
       this.timer = null;
-      void this.analyze();
+      void this.runAnalysis();
     }, 160);
   }
 
@@ -120,13 +248,20 @@ export class SpellcheckController {
     const cached = this.suggestionCache.get(issue.word);
     if (cached) return this.popupRequestIsCurrent(request, issue) ? cached : [];
     try {
-      const suggestions = await invoke<string[]>("spelling_suggestions", { word: issue.word, limit: 5 });
+      const response = await invoke<{ suggestions: string[] }>("language_suggestions", {
+        request: {
+          provider: issue.provider,
+          word: issue.word,
+          limit: 5
+        }
+      });
+      const suggestions = response.suggestions;
       if (!this.popupRequestIsCurrent(request, issue)) return [];
       this.suggestionCache.set(issue.word, suggestions);
       return suggestions;
     } catch (error) {
       if (request === this.popupGeneration) this.hidePopup();
-      this.warnOnce("spelling_suggestions", error);
+      this.warnOnce("language_suggestions", error);
       return [];
     }
   }
@@ -156,6 +291,8 @@ export class SpellcheckController {
     this.popupGeneration++;
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.timer = null;
+    this.pendingRanges = [];
+    this.queuedRequest = null;
     this.hidePopup();
     if (!clearIssues) return;
     this.issues = [];
@@ -163,46 +300,121 @@ export class SpellcheckController {
     if (editor) editor.dispatch({ effects: setSpellingIssues.of([]) });
   }
 
-  private async analyze(): Promise<void> {
+  private async runAnalysis(): Promise<void> {
+    if (this.activeRequest !== null) {
+      if (!this.queuedRequest) {
+        this.queuedRequest = { ranges: [...this.pendingRanges] };
+      } else {
+        this.queuedRequest.ranges = coalesceRanges([...this.queuedRequest.ranges, ...this.pendingRanges]);
+      }
+      this.pendingRanges = [];
+      return;
+    }
+
+    const rangesToAnalyze = [...this.pendingRanges];
+    this.pendingRanges = [];
+    if (rangesToAnalyze.length === 0) return;
+
     const editor = this.getEditor();
+    if (!editor) return;
+
     const docIdentity = editor.state.doc;
-    const text = docIdentity.toString();
     const documentKey = this.documentKey;
     const revision = this.revision;
-    if (!/[\u1780-\u17ff]/u.test(text)) {
-      if (this.analysisIsCurrent(documentKey, revision, docIdentity)) this.clearIssuesOnly(editor);
+
+    this.activeRequest = { documentKey, revision, docIdentity };
+
+    // Filter out chunks that do not match any provider pattern
+    const patterns = this.getPatterns();
+    const chunks = rangesToAnalyze
+      .map(range => ({
+        text: docIdentity.sliceString(range.from, range.to),
+        startUtf16: range.from
+      }))
+      .filter(chunk => patterns.some(pat => pat.test(chunk.text)));
+
+    if (chunks.length === 0) {
+      this.activeRequest = null;
+      this.applyAnalysisResponse({ tokens: [] }, rangesToAnalyze);
+      this.checkQueuedRequest();
       return;
     }
-    let analysis: TextAnalysis | null;
+
+    const startTime = performance.now();
+    let response: AnalyzeResponse | null = null;
     try {
-      analysis = await invoke<TextAnalysis | null>("analyze_text", { text });
+      response = await invoke<AnalyzeResponse>("analyze_language_ranges", {
+        request: { chunks }
+      });
     } catch (error) {
-      if (this.analysisIsCurrent(documentKey, revision, docIdentity)) {
-        this.popupGeneration++;
-        this.hidePopup();
+      this.warnOnce("analyze_language_ranges", error);
+    } finally {
+      const duration = performance.now() - startTime;
+      console.log(`[Spellcheck] Range-based analysis completed in ${duration.toFixed(2)}ms for ${chunks.length} chunk(s)`);
+
+      this.activeRequest = null;
+
+      if (response && this.analysisIsCurrent(documentKey, revision, docIdentity)) {
+        this.applyAnalysisResponse(response, rangesToAnalyze);
       }
-      this.warnOnce("analyze_text", error);
-      return;
+
+      this.checkQueuedRequest();
     }
-    if (!this.analysisIsCurrent(documentKey, revision, docIdentity) || !analysis) return;
+  }
+
+  private checkQueuedRequest(): void {
+    if (this.queuedRequest) {
+      const queued = this.queuedRequest;
+      this.queuedRequest = null;
+      this.pendingRanges = queued.ranges;
+      void this.runAnalysis();
+    }
+  }
+
+  private applyAnalysisResponse(response: AnalyzeResponse, analyzedRanges: { from: number, to: number }[]): void {
+    const editor = this.getEditor();
+    if (!editor) return;
+
+    const docIdentity = editor.state.doc;
+    const documentKey = this.documentKey;
+    const revision = this.revision;
+
+    // Remove existing issues that fall within analyzedRanges
+    let nextIssues = this.issues.filter(issue => {
+      return !analyzedRanges.some(range => {
+        return !(issue.to <= range.from || issue.from >= range.to);
+      });
+    });
+
+    // Map new tokens to SpellingIssues
     const cursor = editor.state.selection.main.head;
-    this.issues = analysis.tokens
-      .filter(token => !token.known && !this.userDictionary.has(token.text) && /[\u1780-\u17ff]/u.test(token.text))
+    const newIssues = response.tokens
+      .filter(token => !token.known && !this.userDictionary.has(token.normalizedText))
       .map(token => ({
+        provider: token.provider,
         documentKey,
         revision,
         docIdentity,
-        from: token.from,
-        to: token.to,
-        sourceText: docIdentity.sliceString(token.from, token.to),
-        word: token.text,
+        from: token.sourceFromUtf16,
+        to: token.sourceToUtf16,
+        sourceText: token.sourceText,
+        word: token.normalizedText,
         knownPrefix: token.knownPrefix
       }));
+
+    nextIssues = [...nextIssues, ...newIssues];
+    nextIssues.sort((a, b) => a.from - b.from);
+    this.issues = nextIssues;
+
     const visible = this.issues.filter(issue => !(issue.knownPrefix && cursor === issue.to));
     editor.dispatch({ effects: setSpellingIssues.of(visible) });
+
     const current = visible.find(issue => cursor >= issue.from && cursor < issue.to);
-    if (current) await this.showSuggestions(current);
-    else this.hidePopup();
+    if (current) {
+      void this.showSuggestions(current);
+    } else {
+      this.hidePopup();
+    }
   }
 
   private async showSuggestions(issue: SpellingIssue): Promise<void> {
@@ -241,12 +453,6 @@ export class SpellcheckController {
       && (!verifyText || editor.state.doc.sliceString(issue.from, issue.to) === issue.sourceText);
   }
 
-  private clearIssuesOnly(editor: EditorView): void {
-    this.issues = [];
-    this.popupGeneration++;
-    this.hidePopup();
-    editor.dispatch({ effects: setSpellingIssues.of([]) });
-  }
 
   private warnOnce(command: string, error: unknown): void {
     const key = `${command}:${String(error)}`;

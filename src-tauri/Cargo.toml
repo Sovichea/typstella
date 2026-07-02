@@ -39,3 +39,6 @@ codegen-units = 16 # Use multiple codegen units to enable multithreaded compilat
 lto = true # Enables link-time optimizations
 opt-level = "s" # Optimize for binary size
 strip = true # Automatically strip symbols from the binary
+
+[profile.dev.package.khmer_segmenter]
+opt-level = 3

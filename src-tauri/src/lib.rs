@@ -9,14 +9,19 @@ mod segmentation;
 mod toolchain;
 use examples::prepare_examples_workspace;
 use segmentation::{
-    analyze_text, complete_language_word, segmentation_prelude, spelling_suggestions,
-    SegmentationRegistry,
+    analyze_language_ranges, complete_language_word, get_provider_capabilities,
+    language_suggestions, segmentation_prelude, SegmentationRegistry,
 };
 use toolchain::active_tinymist;
 
 #[tauri::command]
 fn list_system_fonts() -> font_store::SystemFontCatalog {
     font_store::list_system_fonts()
+}
+
+#[tauri::command]
+fn open_devtools(window: tauri::WebviewWindow) {
+    let _ = window.open_devtools();
 }
 
 #[tauri::command]
@@ -136,6 +141,7 @@ use std::sync::{
 };
 use tokio::sync::mpsc;
 
+#[allow(dead_code)]
 #[cfg(windows)]
 fn disable_webview_context_menus(webview: tauri::webview::PlatformWebview) {
     unsafe {
@@ -147,6 +153,7 @@ fn disable_webview_context_menus(webview: tauri::webview::PlatformWebview) {
     }
 }
 
+#[allow(dead_code)]
 #[cfg(not(windows))]
 fn disable_webview_context_menus(_webview: tauri::webview::PlatformWebview) {}
 
@@ -1168,6 +1175,7 @@ pub fn run() {
             if let Err(error) = font_store::ensure_base_fonts_installed() {
                 eprintln!("Failed to install bundled fonts for the current user: {error}");
             }
+            #[cfg(not(debug_assertions))]
             if let Some(webview) = app.get_webview_window("main") {
                 let _ = webview.with_webview(disable_webview_context_menus);
             }
@@ -1194,8 +1202,10 @@ pub fn run() {
             get_toolchain_status,
             list_system_fonts,
             install_unicode_font,
-            analyze_text,
-            spelling_suggestions,
+            analyze_language_ranges,
+            language_suggestions,
+            get_provider_capabilities,
+            open_devtools,
             complete_language_word,
             segmentation_prelude,
             prepare_examples_workspace,

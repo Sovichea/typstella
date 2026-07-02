@@ -240,6 +240,7 @@ export class TypstryWorkspaceController {
 
   public async bootstrap() {
     await this.settingsController.load();
+    await this.spellcheckController.initialize();
     this.recentProjectsController.initialize();
     this.initCodeMirror();
     this.documentOutlineController.initialize();
@@ -337,7 +338,8 @@ export class TypstryWorkspaceController {
               () => this.lspClient,
               () => this.activeFilePath ? filePathToUri(this.activeFilePath) : "",
               () => this.flushPendingLspSync(),
-              editor.wordCompletion
+              editor.wordCompletion,
+              () => this.spellcheckController.getProviders()
             ))
         ]
       });
@@ -480,7 +482,8 @@ export class TypstryWorkspaceController {
             () => this.lspClient,
             () => this.activeFilePath ? filePathToUri(this.activeFilePath) : "",
             () => this.flushPendingLspSync(),
-            (uri, line, character) => void this.navigateToLspLocation(uri, line, character)
+            (uri, line, character) => void this.navigateToLspLocation(uri, line, character),
+            () => this.spellcheckController.getProviders()
           ),
           this.spellcheckController.extension(),
           EditorView.updateListener.of((update) => {
@@ -489,7 +492,7 @@ export class TypstryWorkspaceController {
               this.previewSyncController.clearForward();
               this.editorFontManager.updateDocument(currentText);
               this.handleContentMutation(currentText);
-              this.spellcheckController.documentChanged();
+              this.spellcheckController.documentChanged(update);
             }
             if (update.selectionSet) {
               this.spellcheckController.selectionChanged();
@@ -2083,6 +2086,12 @@ export class TypstryWorkspaceController {
     document.addEventListener("keydown", (e) => {
       const isMac = navigator.userAgent.toLowerCase().includes("mac");
       const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+      
+      // Ctrl+F12 to open devtools in dev build
+      if (cmdOrCtrl && e.key === "F12" && import.meta.env.DEV) {
+        e.preventDefault();
+        void invoke("open_devtools");
+      }
       
       // Block common function keys (except F3 which we handle conditionally)
       if (["F5", "F6", "F7", "F11"].includes(e.key)) {

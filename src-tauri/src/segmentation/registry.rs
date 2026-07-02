@@ -1,6 +1,7 @@
 use super::provider::{
-    CompletionRequest, CompletionResponse, LanguageSegmenter, RenderReplacement, SegmentToken,
-    TextAnalysis,
+    AnalyzeRequest, AnalyzeResponse, CompletionRequest, CompletionResponse, EditorToken,
+    LanguageSegmenter, ProviderCapabilities, RenderReplacement, SegmentToken, SuggestionRequest,
+    SuggestionResponse, TextAnalysis,
 };
 use khmer_segmenter::kdict::{KDict, KHypDict};
 use khmer_segmenter::{KhmerSegmenter, SegmenterConfig};
@@ -16,12 +17,56 @@ const KHMER_WORDS: &str = include_str!(
 const KHMER_HYPHENATION: &[u8] =
     include_bytes!("../../../third_party/khmer_segmenter/port/common/khmer_hyphenation.kdict");
 
+fn khmer_clusters(text: &str) -> Vec<String> {
+    let mut clusters = Vec::new();
+    let mut current = String::new();
+    let mut prev_is_coeng = false;
+    for c in text.chars() {
+        let is_base = ('\u{1780}'..='\u{17b3}').contains(&c);
+        if is_base && !current.is_empty() && !prev_is_coeng {
+            clusters.push(current);
+            current = String::new();
+        }
+        current.push(c);
+        prev_is_coeng = c == '\u{17d2}';
+    }
+    if !current.is_empty() {
+        clusters.push(current);
+    }
+    clusters
+}
+
+fn cluster_edit_distance(left: &[String], right: &[String]) -> usize {
+    let mut previous: Vec<usize> = (0..=right.len()).collect();
+    for (left_index, left_cluster) in left.iter().enumerate() {
+        let mut current = vec![left_index + 1];
+        for (right_index, right_cluster) in right.iter().enumerate() {
+            current.push(
+                (previous[right_index + 1] + 1)
+                    .min(current[right_index] + 1)
+                    .min(previous[right_index] + usize::from(left_cluster != right_cluster)),
+            );
+        }
+        previous = current;
+    }
+    previous[right.len()]
+}
+
+#[derive(Clone, Debug)]
+pub struct IndexedWord {
+    pub word: String,
+    pub clusters: Vec<String>,
+    pub cost: f32,
+}
+
 struct KhmerProvider {
     segmenter: KhmerSegmenter,
     lookup_words: Vec<String>,
     known: HashSet<String>,
     completion_costs: HashMap<String, f32>,
     hyphenation: KHypDict,
+    suggestion_index: HashMap<char, Vec<IndexedWord>>,
+    top_frequent_words: Vec<IndexedWord>,
 }
 
 impl KhmerProvider {
@@ -33,6 +78,16 @@ impl KhmerProvider {
             .lines()
             .map(str::trim)
             .filter(|word| !word.is_empty())
+            .filter(|word| {
+                !word.chars().any(|c| {
+                    c.is_ascii_punctuation()
+                        || c.is_whitespace()
+                        || c.is_ascii_digit()
+                        || c == '\u{17d4}' // ។
+                        || c == '\u{17d5}' // ៕
+                        || ('\u{17e0}'..='\u{17e9}').contains(&c) // Khmer digits
+                })
+            })
             .map(str::to_owned)
             .collect();
         words.sort();
@@ -53,12 +108,44 @@ impl KhmerProvider {
         let mut lookup_words: Vec<String> = completion_costs.keys().cloned().collect();
         lookup_words.sort();
         let known = lookup_words.iter().cloned().collect();
+
+        // Build Suggestion Index
+        let mut suggestion_index = HashMap::<char, Vec<IndexedWord>>::new();
+        let mut all_indexed_words = Vec::<IndexedWord>::new();
+        for word in &lookup_words {
+            let key = modern_khmer_key(word);
+            let cost = completion_costs.get(&key).copied().unwrap_or(f32::MAX);
+            let clusters = khmer_clusters(&key);
+            if let Some(first_char) = key.chars().next() {
+                let indexed = IndexedWord {
+                    word: key.clone(),
+                    clusters,
+                    cost,
+                };
+                suggestion_index
+                    .entry(first_char)
+                    .or_default()
+                    .push(indexed.clone());
+                all_indexed_words.push(indexed);
+            }
+        }
+
+        // Sort all indexed words by cost to get the top frequent words for fallback
+        all_indexed_words.sort_by(|a, b| {
+            a.cost
+                .partial_cmp(&b.cost)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let top_frequent_words = all_indexed_words.iter().take(1000).cloned().collect();
+
         Ok(Self {
             segmenter,
             lookup_words,
             known,
             completion_costs,
             hyphenation,
+            suggestion_index,
+            top_frequent_words,
         })
     }
 
@@ -86,23 +173,6 @@ fn modern_khmer_key(text: &str) -> String {
         }
     }
     output
-}
-
-fn edit_distance(left: &str, right: &str) -> usize {
-    let right_chars: Vec<char> = right.chars().collect();
-    let mut previous: Vec<usize> = (0..=right_chars.len()).collect();
-    for (left_index, left_char) in left.chars().enumerate() {
-        let mut current = vec![left_index + 1];
-        for (right_index, right_char) in right_chars.iter().enumerate() {
-            current.push(
-                (previous[right_index + 1] + 1)
-                    .min(current[right_index] + 1)
-                    .min(previous[right_index] + usize::from(left_char != *right_char)),
-            );
-        }
-        previous = current;
-    }
-    previous[right_chars.len()]
 }
 
 impl LanguageSegmenter for KhmerProvider {
@@ -167,6 +237,12 @@ impl LanguageSegmenter for KhmerProvider {
             return Vec::new();
         }
         let word = modern_khmer_key(word);
+        let word_clusters = khmer_clusters(&word);
+        if word_clusters.is_empty() {
+            return Vec::new();
+        }
+
+        // 1. Prefix matches first (same as original code, but fast)
         let prefix_index = self
             .lookup_words
             .partition_point(|candidate| candidate.as_str() < word.as_str());
@@ -179,59 +255,82 @@ impl LanguageSegmenter for KhmerProvider {
             .take(limit)
             .cloned()
             .collect();
+
         if suggestions.len() == limit {
             return suggestions;
         }
 
-        let first = word.chars().next();
-        let length = word.chars().count();
-        let mut candidates: Vec<(usize, &str)> = self
-            .lookup_words
+        // 2. Fetch candidates from the first char bucket
+        let mut candidates = Vec::new();
+        if let Some(first_char) = word.chars().next() {
+            if let Some(bucket) = self.suggestion_index.get(&first_char) {
+                let length = word_clusters.len();
+                candidates = bucket
+                    .iter()
+                    .filter(|candidate| candidate.clusters.len().abs_diff(length) <= 2)
+                    .cloned()
+                    .collect();
+            }
+        }
+
+        // If candidates are empty, try fallback to top frequent words
+        if candidates.is_empty() {
+            let length = word_clusters.len();
+            candidates = self
+                .top_frequent_words
+                .iter()
+                .filter(|candidate| candidate.clusters.len().abs_diff(length) <= 2)
+                .cloned()
+                .collect();
+        }
+
+        // Bound candidate count before edit distance calculation
+        if candidates.len() > 1000 {
+            let length = word_clusters.len();
+            candidates.sort_by(|a, b| {
+                let a_diff = a.clusters.len().abs_diff(length);
+                let b_diff = b.clusters.len().abs_diff(length);
+                a_diff.cmp(&b_diff).then_with(|| {
+                    a.cost
+                        .partial_cmp(&b.cost)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+            });
+            candidates.truncate(1000);
+        }
+
+        // Compute edit distance and rank
+        let mut ranked: Vec<(usize, f32, &IndexedWord)> = candidates
             .iter()
-            .map(String::as_str)
-            .filter(|candidate| candidate.chars().next() == first)
-            .filter(|candidate| candidate.chars().count().abs_diff(length) <= 2)
-            .map(|candidate| (edit_distance(&word, candidate), candidate))
-            .filter(|(distance, _)| *distance <= 3)
+            .map(|candidate| {
+                let distance = cluster_edit_distance(&word_clusters, &candidate.clusters);
+                (distance, candidate.cost, candidate)
+            })
+            .filter(|(distance, _, _)| *distance <= 3)
             .collect();
-        candidates.sort_by(|left, right| {
-            left.0
-                .cmp(&right.0)
-                .then_with(|| left.1.len().cmp(&right.1.len()))
+
+        // Sort by distance, then cost, then length difference, then lexical
+        ranked.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .then_with(|| {
+                    let a_len_diff = a.2.clusters.len().abs_diff(word_clusters.len());
+                    let b_len_diff = b.2.clusters.len().abs_diff(word_clusters.len());
+                    a_len_diff.cmp(&b_len_diff)
+                })
+                .then_with(|| a.2.word.cmp(&b.2.word))
         });
-        candidates.dedup_by(|left, right| left.1 == right.1);
-        for candidate in candidates.into_iter().map(|(_, candidate)| candidate) {
-            if suggestions.iter().any(|suggestion| suggestion == candidate) {
+
+        for (_, _, candidate) in ranked {
+            if suggestions.contains(&candidate.word) {
                 continue;
             }
-            suggestions.push(candidate.to_owned());
+            suggestions.push(candidate.word.clone());
             if suggestions.len() == limit {
                 break;
             }
         }
-        if suggestions.is_empty() {
-            let mut fallback: Vec<(usize, &str)> = self
-                .lookup_words
-                .iter()
-                .map(String::as_str)
-                .filter(|candidate| candidate.chars().count().abs_diff(length) <= 2)
-                .map(|candidate| (edit_distance(&word, candidate), candidate))
-                .filter(|(distance, _)| *distance <= 3)
-                .collect();
-            fallback.sort_by(|left, right| {
-                left.0
-                    .cmp(&right.0)
-                    .then_with(|| left.1.chars().count().cmp(&right.1.chars().count()))
-                    .then_with(|| left.1.cmp(right.1))
-            });
-            fallback.dedup_by(|left, right| left.1 == right.1);
-            suggestions.extend(
-                fallback
-                    .into_iter()
-                    .take(limit)
-                    .map(|(_, candidate)| candidate.to_owned()),
-            );
-        }
+
         suggestions
     }
 
@@ -248,7 +347,17 @@ impl LanguageSegmenter for KhmerProvider {
             .iter()
             .skip(index)
             .take_while(|candidate| candidate.starts_with(&prefix))
-            .filter(|candidate| candidate.as_str() != prefix.as_str())
+            .filter(|candidate| {
+                candidate.as_str() != prefix.as_str()
+                    && !candidate.chars().any(|c| {
+                        c.is_ascii_punctuation()
+                            || c.is_whitespace()
+                            || c.is_ascii_digit()
+                            || c == '\u{17d4}'
+                            || c == '\u{17d5}'
+                            || ('\u{17e0}'..='\u{17e9}').contains(&c)
+                    })
+            })
             .map(|candidate| {
                 (
                     self.completion_costs
@@ -318,6 +427,7 @@ impl LanguageSegmenter for KhmerProvider {
     }
 }
 
+#[derive(Clone)]
 pub struct SegmentationRegistry {
     providers: Vec<Arc<dyn LanguageSegmenter>>,
     cache: Arc<
@@ -428,45 +538,138 @@ impl SegmentationRegistry {
             cache: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
         })
     }
+
+    pub fn analyze_ranges(&self, request: AnalyzeRequest) -> Result<AnalyzeResponse, String> {
+        let mut merged_tokens: Vec<EditorToken> = Vec::new();
+
+        for chunk in request.chunks {
+            let active_providers: Vec<_> = self.providers
+                .iter()
+                .filter(|provider| provider.supports(&chunk.text))
+                .collect();
+
+            if active_providers.is_empty() {
+                continue;
+            }
+
+            // Build UTF-16 to byte offset lookup map in one linear pass
+            let mut utf16_to_byte = vec![0; chunk.text.encode_utf16().count() + 1];
+            let mut current_utf16 = 0;
+            for (byte_offset, character) in chunk.text.char_indices() {
+                let len_u16 = character.len_utf16();
+                utf16_to_byte[current_utf16] = byte_offset;
+                if len_u16 > 1 {
+                    utf16_to_byte[current_utf16 + 1] = byte_offset;
+                }
+                current_utf16 += len_u16;
+            }
+            utf16_to_byte[current_utf16] = chunk.text.len();
+
+            let get_byte_range = |from: usize, to: usize, map: &[usize]| -> std::ops::Range<usize> {
+                let start = map.get(from).copied().unwrap_or(0);
+                let end = map.get(to).copied().unwrap_or(0);
+                start..end
+            };
+
+            let default_provider = active_providers[0];
+            let analysis = default_provider.analyze(&chunk.text)?;
+            let mut chunk_tokens: Vec<EditorToken> = analysis
+                .tokens
+                .iter()
+                .map(|token| {
+                    let range = get_byte_range(token.from, token.to, &utf16_to_byte);
+                    let source_text = chunk.text[range].to_owned();
+                    EditorToken {
+                        provider: default_provider.id().to_owned(),
+                        source_from_utf16: token.from + chunk.start_utf16,
+                        source_to_utf16: token.to + chunk.start_utf16,
+                        source_text,
+                        normalized_text: token.text.clone(),
+                        known: token.known,
+                        known_prefix: token.known_prefix,
+                    }
+                })
+                .collect();
+
+            for provider in active_providers.iter().skip(1) {
+                let analysis = provider.analyze(&chunk.text)?;
+                for token in analysis.tokens {
+                    let range = get_byte_range(token.from, token.to, &utf16_to_byte);
+                    let source_text = chunk.text[range].to_owned();
+                    if provider.supports(&source_text) {
+                        let from_adjusted = token.from + chunk.start_utf16;
+                        let to_adjusted = token.to + chunk.start_utf16;
+
+                        chunk_tokens.retain(|existing| {
+                            existing.source_to_utf16 <= from_adjusted
+                                || existing.source_from_utf16 >= to_adjusted
+                        });
+
+                        chunk_tokens.push(EditorToken {
+                            provider: provider.id().to_owned(),
+                            source_from_utf16: from_adjusted,
+                            source_to_utf16: to_adjusted,
+                            source_text,
+                            normalized_text: token.text.clone(),
+                            known: token.known,
+                            known_prefix: token.known_prefix,
+                        });
+                    }
+                }
+            }
+
+            chunk_tokens.sort_by_key(|t| t.source_from_utf16);
+            merged_tokens.extend(chunk_tokens);
+        }
+
+        Ok(AnalyzeResponse {
+            tokens: merged_tokens,
+        })
+    }
 }
 
 #[tauri::command]
-pub async fn analyze_text(
+pub fn get_provider_capabilities(
     registry: tauri::State<'_, SegmentationRegistry>,
-    text: String,
-) -> Result<Option<TextAnalysis>, String> {
-    let providers = registry.providers.clone();
-    tokio::task::spawn_blocking(move || -> Result<Option<TextAnalysis>, String> {
-        let provider = providers.iter().find(|provider| provider.supports(&text));
+) -> Vec<ProviderCapabilities> {
+    registry
+        .providers
+        .iter()
+        .map(|provider| ProviderCapabilities {
+            id: provider.id().to_owned(),
+            pattern: provider.pattern().to_owned(),
+        })
+        .collect()
+}
 
-        if let Some(provider) = provider {
-            provider.analyze(&text).map(Some)
+#[tauri::command]
+pub async fn analyze_language_ranges(
+    registry: tauri::State<'_, SegmentationRegistry>,
+    request: AnalyzeRequest,
+) -> Result<AnalyzeResponse, String> {
+    let registry = registry.inner().clone();
+    tokio::task::spawn_blocking(move || registry.analyze_ranges(request))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn language_suggestions(
+    registry: tauri::State<'_, SegmentationRegistry>,
+    request: SuggestionRequest,
+) -> Result<SuggestionResponse, String> {
+    let providers = registry.providers.clone();
+    tokio::task::spawn_blocking(move || {
+        let provider = providers.iter().find(|p| p.id() == request.provider);
+        let suggestions = if let Some(provider) = provider {
+            provider.suggestions(&request.word, request.limit.min(50))
         } else {
-            Ok(None)
-        }
+            Vec::new()
+        };
+        Ok(SuggestionResponse { suggestions })
     })
     .await
     .map_err(|e| e.to_string())?
-}
-
-#[tauri::command]
-pub async fn spelling_suggestions(
-    registry: tauri::State<'_, SegmentationRegistry>,
-    word: String,
-    limit: Option<usize>,
-) -> Result<Vec<String>, String> {
-    let providers = registry.providers.clone();
-    tokio::task::spawn_blocking(move || -> Vec<String> {
-        let provider = providers.iter().find(|provider| provider.supports(&word));
-
-        if let Some(provider) = provider {
-            provider.suggestions(&word, limit.unwrap_or(5).min(10))
-        } else {
-            Vec::new()
-        }
-    })
-    .await
-    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -478,7 +681,7 @@ pub async fn complete_language_word(
     tokio::task::spawn_blocking(move || -> Result<Option<CompletionResponse>, String> {
         let Some(provider) = providers
             .iter()
-            .find(|provider| provider.supports(&request.text))
+            .find(|provider| provider.id() == request.provider)
         else {
             return Ok(None);
         };
@@ -592,6 +795,7 @@ mod tests {
             let response = complete_with_provider(
                 &provider,
                 &CompletionRequest {
+                    provider: "khmer-segmenter".to_string(),
                     text: prefix.into(),
                     cursor_utf16: prefix.encode_utf16().count(),
                     limit: 10,
@@ -604,6 +808,7 @@ mod tests {
         let response = complete_with_provider(
             &provider,
             &CompletionRequest {
+                provider: "khmer-segmenter".to_string(),
                 text: "សាលា".into(),
                 cursor_utf16: "សាលា".encode_utf16().count(),
                 limit: 10,
@@ -618,6 +823,7 @@ mod tests {
         let continued = complete_with_provider(
             &provider,
             &CompletionRequest {
+                provider: "khmer-segmenter".to_string(),
                 text: "សាលារ".into(),
                 cursor_utf16: "សាលារ".encode_utf16().count(),
                 limit: 10,
@@ -715,6 +921,7 @@ mod tests {
         let response = provider.lookup_words.iter().take(200).find_map(|first| {
             let text = format!("{first}{prefix}");
             let request = CompletionRequest {
+                provider: "khmer-segmenter".to_string(),
                 cursor_utf16: text.encode_utf16().count(),
                 text,
                 limit: 10,
@@ -730,6 +937,7 @@ mod tests {
         let response = complete_with_provider(
             &provider,
             &CompletionRequest {
+                provider: "khmer-segmenter".to_string(),
                 cursor_utf16: punctuated.encode_utf16().count(),
                 text: punctuated,
                 limit: 10,
@@ -765,5 +973,97 @@ mod tests {
         assert!(provider
             .suggestions(&prefix, 10)
             .contains(&modern_khmer_key(&full_word)));
+    }
+
+    struct MockProvider;
+    impl LanguageSegmenter for MockProvider {
+        fn id(&self) -> &'static str {
+            "mock-provider"
+        }
+        fn pattern(&self) -> &'static str {
+            "[a-zA-Z]+"
+        }
+        fn supports(&self, text: &str) -> bool {
+            text.chars().any(|c| c.is_ascii_alphabetic())
+        }
+        fn analyze(&self, text: &str) -> Result<TextAnalysis, String> {
+            let mut tokens = Vec::new();
+            let mut start = None;
+            let mut current_utf16 = 0;
+            for (index, character) in text.char_indices() {
+                let is_alpha = character.is_ascii_alphabetic();
+                match (start, is_alpha) {
+                    (None, true) => start = Some((index, current_utf16)),
+                    (Some((_from_byte, from_utf16)), false) => {
+                        let word = &text[_from_byte..index];
+                        tokens.push(SegmentToken {
+                            text: word.to_string(),
+                            from: from_utf16,
+                            to: current_utf16,
+                            known: word == "hello" || word == "world",
+                            known_prefix: false,
+                        });
+                        start = None;
+                    }
+                    _ => {}
+                }
+                current_utf16 += character.len_utf16();
+            }
+            if let Some((_from_byte, from_utf16)) = start {
+                let word = &text[_from_byte..];
+                tokens.push(SegmentToken {
+                    text: word.to_string(),
+                    from: from_utf16,
+                    to: current_utf16,
+                    known: word == "hello" || word == "world",
+                    known_prefix: false,
+                });
+            }
+            Ok(TextAnalysis {
+                provider: self.id(),
+                normalized_changed: false,
+                tokens,
+            })
+        }
+        fn suggestions(&self, _word: &str, _limit: usize) -> Vec<String> {
+            vec!["hello".to_string(), "world".to_string()]
+        }
+        fn render_replacements(&self, _text: &str) -> Vec<RenderReplacement> {
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn merges_tokens_from_multiple_providers() {
+        use crate::segmentation::provider::{AnalyzeChunk, AnalyzeRequest};
+
+        let registry = SegmentationRegistry {
+            providers: vec![
+                Arc::new(KhmerProvider::new().unwrap()),
+                Arc::new(MockProvider),
+            ],
+            cache: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+        };
+
+        let response = registry.analyze_ranges(
+            AnalyzeRequest {
+                chunks: vec![AnalyzeChunk {
+                    text: "សាលារៀន hello invalidword".to_string(),
+                    start_utf16: 0,
+                }],
+            },
+        )
+        .expect("analyze language ranges");
+
+        assert!(!response.tokens.is_empty());
+        let khmer_tokens: Vec<_> = response.tokens.iter().filter(|t| t.provider == "khmer-segmenter").collect();
+        let mock_tokens: Vec<_> = response.tokens.iter().filter(|t| t.provider == "mock-provider").collect();
+
+        assert!(!khmer_tokens.is_empty());
+        assert!(!mock_tokens.is_empty());
+
+        assert!(khmer_tokens.iter().any(|t| t.source_text == "សាលារៀន" && t.known));
+        assert!(mock_tokens.iter().any(|t| t.source_text == "hello" && t.known));
+        assert!(mock_tokens.iter().any(|t| t.source_text == "invalidword" && !t.known));
     }
 }
