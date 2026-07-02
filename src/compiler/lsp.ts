@@ -634,11 +634,14 @@ export class TinymistLspClient {
       const uri = typeof params?.uri === "string" ? params.uri : undefined;
       const mappedSelection = await this.onInverseSync(uri, position);
       if (!this.editorView) return;
+      // undefined means the handler suppressed navigation (e.g. the position
+      // resolved to a package file the user did not open).
+      if (mappedSelection === undefined) return;
 
       const defaultCursorPos = this.editorPositionFromLspPosition(position);
       const selection = typeof mappedSelection === "number"
         ? { anchor: mappedSelection }
-        : mappedSelection && typeof mappedSelection.anchor === "number"
+        : mappedSelection != null && typeof mappedSelection.anchor === "number"
           ? mappedSelection
           : { anchor: defaultCursorPos };
       const scrollPos = selection.head ?? selection.anchor;

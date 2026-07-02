@@ -10,7 +10,7 @@ dist/
 dist-ssr/
 
 # Tauri & Rust
-src-tauri/target/
+**/target/
 src-tauri/gen/
 **/*.rs.bk
 

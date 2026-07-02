@@ -1,0 +1,7 @@
+[package]
+name = "khmer-segmenter"
+version = "0.1.0"
+entrypoint = "lib.typ"
+authors = ["Sovichea"]
+license = "MIT"
+description = "A native WebAssembly plugin for Khmer word segmentation and line breaking in Typst."

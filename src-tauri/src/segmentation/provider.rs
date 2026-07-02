@@ -97,12 +97,4 @@ pub trait LanguageSegmenter: Send + Sync {
     fn autocomplete(&self, _prefix: &str, _limit: usize) -> Vec<String> {
         Vec::new()
     }
-    fn render_replacements(&self, text: &str) -> Vec<RenderReplacement>;
-}
-
-#[derive(Clone, Debug)]
-pub struct RenderReplacement {
-    pub source: String,
-    pub segmented: String,
-    pub hyphenated: String,
 }

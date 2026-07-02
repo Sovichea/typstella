@@ -1462,13 +1462,36 @@ export class TypstryWorkspaceController {
   }
 
 
-  private async handleInverseSync(uri: string | undefined, position: LspSourcePosition): Promise<number> {
+  private async handleInverseSync(uri: string | undefined, position: LspSourcePosition): Promise<number | undefined> {
     const targetPath = uri ? filePathFromUri(uri) : null;
+    const activePathKey = filePathKey(this.activeFilePath ?? "");
+    if (targetPath
+      && filePathKey(targetPath) !== activePathKey
+      && fileNameFromPath(targetPath).toLocaleLowerCase() === "lib.typ") {
+      const mapped = this.previewSyncController.mapGeneratedInversePosition();
+      if (mapped !== undefined) {
+        this.previewSyncController.clearForward();
+        if (this.activeMode === "WYSIWYM") this.switchViewLayoutMode();
+        return mapped;
+      }
+      return undefined;
+    }
     const existingTargetTab = targetPath
       ? this.openTabs.find((tab) => filePathKey(tab.path) === filePathKey(targetPath))
       : null;
+
+    // If the compiler reports a position in a file the user never opened (e.g. a
+    // local package helper like lib.typ injected by the WASM plugin), suppress
+    // navigation entirely so the editor stays on the active document.
+    const isUserFile = !targetPath || existingTargetTab !== null
+      || filePathKey(targetPath) === activePathKey;
+    if (!isUserFile) {
+      this.previewSyncController.clearForward();
+      return this.previewSyncController.mapGeneratedInversePosition();
+    }
+
     const resolvedTargetPath = existingTargetTab?.path ?? targetPath;
-    if (resolvedTargetPath && filePathKey(resolvedTargetPath) !== filePathKey(this.activeFilePath ?? "")) {
+    if (resolvedTargetPath && filePathKey(resolvedTargetPath) !== activePathKey) {
       await this.loadFile(resolvedTargetPath);
     }
 

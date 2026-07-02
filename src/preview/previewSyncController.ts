@@ -1,7 +1,7 @@
 import type { EditorView } from "@codemirror/view";
 import type { LspSourcePosition, PreviewDocumentPosition, TinymistLspClient } from "../compiler/lsp";
 import type { PreviewTextPoint } from "./previewFrame";
-import { findPreviewTextMatchInSourceLine } from "./sourceHighlight";
+import { findPreviewTextMatchInSourceLine, findPreviewTextMatchesInSource } from "./sourceHighlight";
 
 export type PreviewSyncDependencies = {
   getEditor: () => EditorView | undefined;
@@ -87,8 +87,21 @@ export class PreviewSyncController {
     this.pendingTextClick = null;
   }
 
-  public mapInversePosition(position: LspSourcePosition, fallback: number): number {
+  public mapInversePosition(position: LspSourcePosition, fallback: number): number | undefined {
     return this.refineFromTextClick(position, fallback);
+  }
+
+  public mapGeneratedInversePosition(): number | undefined {
+    const click = this.pendingTextClick;
+    this.pendingTextClick = null;
+    const editor = this.dependencies.getEditor();
+    if (!editor || !click || Date.now() - click.timestamp > 1500 || !click.text.trim()) return undefined;
+    const matches = findPreviewTextMatchesInSource(editor.state.doc.toString(), click.text, click.offset);
+    if (!matches.length) return undefined;
+    const cursor = editor.state.selection.main.head;
+    return matches.reduce((nearest, candidate) =>
+      Math.abs(candidate - cursor) < Math.abs(nearest - cursor) ? candidate : nearest
+    );
   }
 
   private canSync(): boolean {
@@ -100,13 +113,23 @@ export class PreviewSyncController {
       && !!this.dependencies.getClient();
   }
 
-  private refineFromTextClick(position: LspSourcePosition, fallback: number): number {
+  private refineFromTextClick(position: LspSourcePosition, fallback: number): number | undefined {
     const click = this.pendingTextClick;
     this.pendingTextClick = null;
     const editor = this.dependencies.getEditor();
-    if (!editor || !click || Date.now() - click.timestamp > 1500 || !click.text.trim()) return fallback;
-    const doc = editor.state.doc;
-    const line = doc.line(Math.max(1, Math.min(position.line + 1, doc.lines)));
+    const doc = editor?.state.doc;
+    const line = doc ? doc.line(Math.max(1, Math.min(position.line + 1, doc.lines))) : null;
+
+    if (!editor || !click || Date.now() - click.timestamp > 1500 || !click.text.trim()) {
+      // If we don't have text (e.g. clicking on Khmer SVG paths) and Typst maps us to a show rule,
+      // suppress the jump entirely to avoid throwing the user to the top of their document.
+      if (line && (line.text.includes("show regex") || line.text.includes("apply-khmer-segmentation"))) {
+        return undefined;
+      }
+      return fallback;
+    }
+    
+    if (!line) return fallback;
     const match = findPreviewTextMatchInSourceLine(line.text, click.text, click.offset);
     return match ? Math.max(line.from, Math.min(line.from + match.sourceOffset, line.to)) : fallback;
   }

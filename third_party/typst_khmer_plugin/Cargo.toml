@@ -1,0 +1,12 @@
+[package]
+name = "typst_khmer_plugin"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-minimal-protocol = "0.1"
+khmer_segmenter = { path = "../khmer_segmenter/port/rust" }
+once_cell = "1.19"

@@ -16,6 +16,73 @@ export function findPreviewTextMatchInSourceLine(
   return findPreviewSnippetInSourceLine(sourceLineForSearch, around, Math.min(before.length, around.length));
 }
 
+export function findPreviewTextMatchesInSource(
+  source: string,
+  previewText: string,
+  previewOffset: number
+): number[] {
+  const normalizedSource = normalizeTextWithOffsets(source);
+  const normalizedPreview = normalizeTextWithOffsets(previewText);
+  if (normalizedPreview.text.trim().length < 2) return [];
+
+  const clickedOffset = normalizeTextWithOffsets(previewText.slice(0, Math.max(0, previewOffset))).text.length;
+  const matches = findAll(normalizedSource.text, normalizedPreview.text);
+  if (matches.length) {
+    return matches.map(index => normalizedSource.offsets[Math.min(index + clickedOffset, normalizedSource.offsets.length - 1)]);
+  }
+
+  const contextFrom = Math.max(0, clickedOffset - 24);
+  const contextTo = Math.min(normalizedPreview.text.length, clickedOffset + 48);
+  const context = normalizedPreview.text.slice(contextFrom, contextTo).trim();
+  if (context.length < 3) return [];
+  const leadingTrim = normalizedPreview.text.slice(contextFrom, contextTo).length
+    - normalizedPreview.text.slice(contextFrom, contextTo).trimStart().length;
+  const contextClick = Math.max(0, clickedOffset - contextFrom - leadingTrim);
+  return findAll(normalizedSource.text, context)
+    .map(index => normalizedSource.offsets[Math.min(index + contextClick, normalizedSource.offsets.length - 1)]);
+}
+
+function normalizeTextWithOffsets(value: string): { text: string; offsets: number[] } {
+  let text = "";
+  const offsets: number[] = [];
+  let sourceOffset = 0;
+  let previousWasSpace = false;
+  for (const character of value) {
+    const width = character.length;
+    if (character === "\u200b" || character === "\u200c" || character === "\u200d" || character === "\u00ad") {
+      sourceOffset += width;
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      if (!previousWasSpace) {
+        text += " ";
+        offsets.push(sourceOffset);
+      }
+      previousWasSpace = true;
+      sourceOffset += width;
+      continue;
+    }
+    previousWasSpace = false;
+    text += character;
+    for (let index = 0; index < width; index++) offsets.push(sourceOffset);
+    sourceOffset += width;
+  }
+  offsets.push(sourceOffset);
+  return { text, offsets };
+}
+
+function findAll(value: string, search: string): number[] {
+  const matches: number[] = [];
+  let from = 0;
+  while (from <= value.length - search.length) {
+    const index = value.indexOf(search, from);
+    if (index < 0) break;
+    matches.push(index);
+    from = index + Math.max(1, search.length);
+  }
+  return matches;
+}
+
 function findPreviewSnippetInSourceLine(sourceLine: string, snippet: string, snippetOffset: number): { sourceOffset: number } | null {
   const trimmedSnippet = snippet.trim();
   if (trimmedSnippet.length < 2) return null;
