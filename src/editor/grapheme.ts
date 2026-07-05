@@ -1,5 +1,5 @@
-import { EditorSelection, type Text } from "@codemirror/state";
-import type { EditorView, ViewUpdate } from "@codemirror/view";
+import { EditorSelection, EditorState, type Extension, type Text, type Transaction } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 
 type SegmentRecord = { segment: string; index: number };
 type SegmenterLike = {
@@ -135,27 +135,29 @@ export function snapPositionToGraphemeBoundary(doc: Text, position: number): num
   return Math.max(line.from, Math.min(position, line.to));
 }
 
-export function snapSelectionUpdateToGraphemeBoundaries(update: ViewUpdate): void {
-  if (!update.selectionSet || update.docChanged) return;
-  const selection = update.state.selection;
+export const graphemeSelectionBoundaryFilter: Extension = EditorState.transactionFilter.of((transaction: Transaction) => {
+  if (!transaction.selection || transaction.docChanged) return transaction;
+  const snapped = snapSelectionToGraphemeBoundaries(transaction.newDoc, transaction.selection);
+  if (snapped.eq(transaction.selection)) return transaction;
+  return {
+    selection: snapped,
+    scrollIntoView: transaction.scrollIntoView
+  };
+});
+
+export function snapSelectionToGraphemeBoundaries(doc: Text, selection: EditorSelection): EditorSelection {
   const ranges = selection.ranges.map(range => {
-    const anchor = snapPositionToGraphemeBoundary(update.state.doc, range.anchor);
-    const head = snapPositionToGraphemeBoundary(update.state.doc, range.head);
+    const anchor = snapPositionToGraphemeBoundary(doc, range.anchor);
+    const head = snapPositionToGraphemeBoundary(doc, range.head);
     return anchor === head ? EditorSelection.cursor(anchor) : EditorSelection.range(anchor, head);
   });
-  const snapped = EditorSelection.create(ranges, selection.mainIndex);
-  if (snapped.eq(selection)) return;
-  update.view.dispatch({
-    selection: snapped,
-    scrollIntoView: true,
-    userEvent: "select"
-  });
+  return EditorSelection.create(ranges, selection.mainIndex);
 }
 
 function deleteByCodePoint(view: EditorView, direction: "backward" | "forward"): boolean {
   const selection = view.state.selection;
   if (!selection.main.empty) return false;
-  const position = selection.main.head;
+  const position = snapPositionToGraphemeBoundary(view.state.doc, selection.main.head);
   const range = codePointDeletionRange(view.state.doc, position, direction);
   if (!range) return false;
   view.dispatch({

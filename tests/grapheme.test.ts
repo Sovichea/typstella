@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { Text } from "@codemirror/state";
-import { codePointDeletionRange, graphemeBoundaries, nextGraphemeBoundary, previousGraphemeBoundary, snapPositionToGraphemeBoundary } from "../src/editor/grapheme";
+import { EditorSelection, Text } from "@codemirror/state";
+import { codePointDeletionRange, graphemeBoundaries, nextGraphemeBoundary, previousGraphemeBoundary, snapPositionToGraphemeBoundary, snapSelectionToGraphemeBoundaries } from "../src/editor/grapheme";
 
 describe("editor grapheme navigation", () => {
   test("keeps Khmer coeng clusters together", () => {
@@ -19,6 +19,12 @@ describe("editor grapheme navigation", () => {
     const doc = Text.of(["ខ្មែរ"]);
     expect(snapPositionToGraphemeBoundary(doc, 1)).toBe(0);
     expect(snapPositionToGraphemeBoundary(doc, 3)).toBe(4);
+  });
+
+  test("snaps CodeMirror selections before they can commit inside a cluster", () => {
+    const doc = Text.of(["ខ្មែរ"]);
+    const selection = snapSelectionToGraphemeBoundaries(doc, EditorSelection.create([EditorSelection.cursor(2)]));
+    expect(selection.main.head).toBe(4);
   });
 
   test("delete ranges are one Unicode code point, not one grapheme cluster", () => {
