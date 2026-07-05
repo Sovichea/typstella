@@ -59,7 +59,6 @@ function khmerAwareGraphemeBoundaries(text: string): GraphemeBoundary[] {
       && (
         previousSegment.endsWith("\u17D2")
         || startsWithKhmerDependentMark(segment)
-        || containsDanglingKhmerCoeng(previousSegment)
       )
     ) {
       previous.to = boundary.to;
@@ -76,11 +75,6 @@ function startsWithKhmerDependentMark(text: string): boolean {
     (first >= 0x17B6 && first <= 0x17D3)
     || first === 0x17DD
   );
-}
-
-function containsDanglingKhmerCoeng(text: string): boolean {
-  const coengIndex = text.lastIndexOf("\u17D2");
-  return coengIndex !== -1 && coengIndex >= text.length - 2;
 }
 
 export function previousGraphemeBoundary(doc: Text, position: number): number {
@@ -115,11 +109,19 @@ export function deleteNextGrapheme(view: EditorView): boolean {
 }
 
 export function movePreviousGrapheme(view: EditorView): boolean {
-  return moveByGrapheme(view, "backward");
+  return moveByGrapheme(view, "backward", false);
 }
 
 export function moveNextGrapheme(view: EditorView): boolean {
-  return moveByGrapheme(view, "forward");
+  return moveByGrapheme(view, "forward", false);
+}
+
+export function selectPreviousGrapheme(view: EditorView): boolean {
+  return moveByGrapheme(view, "backward", true);
+}
+
+export function selectNextGrapheme(view: EditorView): boolean {
+  return moveByGrapheme(view, "forward", true);
 }
 
 export function snapPositionToGraphemeBoundary(doc: Text, position: number): number {
@@ -182,20 +184,36 @@ export function codePointDeletionRange(doc: Text, position: number, direction: "
   return { from: line.from + local, to: line.from + to };
 }
 
-function moveByGrapheme(view: EditorView, direction: "backward" | "forward"): boolean {
+function moveByGrapheme(view: EditorView, direction: "backward" | "forward", extend: boolean): boolean {
   const selection = view.state.selection;
-  if (!selection.main.empty) return false;
-  const position = selection.main.head;
-  const target = direction === "backward"
-    ? previousGraphemeBoundary(view.state.doc, position)
-    : nextGraphemeBoundary(view.state.doc, position);
-  if (target === position) return false;
+  const nextSelection = moveSelectionByGrapheme(view.state.doc, selection, direction, extend);
+  if (nextSelection.eq(selection)) return false;
   view.dispatch({
-    selection: { anchor: target },
+    selection: nextSelection,
     scrollIntoView: true,
     userEvent: "select"
   });
   return true;
+}
+
+export function moveSelectionByGrapheme(
+  doc: Text,
+  selection: EditorSelection,
+  direction: "backward" | "forward",
+  extend: boolean
+): EditorSelection {
+  const ranges = selection.ranges.map(range => {
+    const head = snapPositionToGraphemeBoundary(doc, range.head);
+    const target = direction === "backward"
+      ? previousGraphemeBoundary(doc, head)
+      : nextGraphemeBoundary(doc, head);
+    if (extend) {
+      const anchor = snapPositionToGraphemeBoundary(doc, range.anchor);
+      return anchor === target ? EditorSelection.cursor(target) : EditorSelection.range(anchor, target);
+    }
+    return EditorSelection.cursor(target);
+  });
+  return EditorSelection.create(ranges, selection.mainIndex);
 }
 
 function previousCodePointOffset(text: string, offset: number): number {

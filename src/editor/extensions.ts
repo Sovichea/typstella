@@ -19,7 +19,7 @@ import { bracketColorizer } from "./bracketColorizer";
 import { createHoverTooltip } from "./hover";
 import type { TinymistLspClient } from "../compiler/lsp";
 import { typstFunctionFoldService } from "./folding";
-import { deleteNextGrapheme, deletePreviousGrapheme, graphemeSelectionBoundaryFilter, moveNextGrapheme, movePreviousGrapheme } from "./grapheme";
+import { deleteNextGrapheme, deletePreviousGrapheme, graphemeSelectionBoundaryFilter, moveNextGrapheme, movePreviousGrapheme, selectNextGrapheme, selectPreviousGrapheme } from "./grapheme";
 
 export const themeCompartment = new Compartment();
 export const wrapCompartment = new Compartment();
@@ -289,6 +289,8 @@ export function getEditorExtensions(
       { key: "Delete", run: deleteNextGrapheme },
       { key: "ArrowLeft", run: movePreviousGrapheme },
       { key: "ArrowRight", run: moveNextGrapheme },
+      { key: "Shift-ArrowLeft", run: selectPreviousGrapheme },
+      { key: "Shift-ArrowRight", run: selectNextGrapheme },
       indentWithTab, 
       ...closeBracketsKeymap, 
       ...defaultKeymap, 
