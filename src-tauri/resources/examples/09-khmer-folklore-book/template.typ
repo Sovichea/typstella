@@ -12,6 +12,15 @@
     .replace("9", "៩")
 }
 
+#let khmer_justification_limits(
+  spacing: (min: 85%, max: 115%),
+  tracking: (min: -0.8pt, max: 0pt),
+  body,
+) = block[
+  #set par(justification-limits: (spacing: spacing, tracking: tracking))
+  #body
+]
+
 #let khmer_folklore_book(body) = {
   // typstry:typography:start
   set text(font: "MiSans Latin", size: 11pt)

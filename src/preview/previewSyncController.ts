@@ -38,6 +38,10 @@ export class PreviewSyncController {
     this.pendingTextClick = { ...point, timestamp: Date.now() };
   }
 
+  public hasRecentTextClick(maxAgeMs = 1500): boolean {
+    return this.pendingTextClick !== null && Date.now() - this.pendingTextClick.timestamp <= maxAgeMs;
+  }
+
   public schedule(delayMs: number): void {
     if (!this.canSync()) return;
     this.clearForward();

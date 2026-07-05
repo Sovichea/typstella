@@ -1,7 +1,9 @@
+import { invoke } from "@tauri-apps/api/core";
+
 export type PreviewTextPoint = { text: string; offset: number };
 
 export type PreviewInteractionStatus = {
-  kind: "installed" | "blocked";
+  kind: "installed" | "blocked" | "debug";
   url: string;
   reason?: string;
 };
@@ -11,7 +13,7 @@ export class PreviewFrame {
   private svgIframe: HTMLIFrameElement | null = null;
   private mountedUrl = "";
   private activeSessionKey = "";
-  private readonly sessions = new Map<string, { iframe: HTMLIFrameElement; url: string; usedAt: number; scrollKey: string }>();
+  private readonly sessions = new Map<string, { iframe: HTMLIFrameElement; url: string; usedAt: number; scrollKey: string; blobUrl?: string; scriptBlobUrls?: string[] }>();
   private readonly scrollPositions = new Map<string, { top: number; left: number }>();
   private readonly maxSessions = 5;
   private lastInteractionStatusKey = "";
@@ -20,7 +22,27 @@ export class PreviewFrame {
     private readonly pane: HTMLElement,
     private readonly onTextClick: (point: PreviewTextPoint) => void,
     private readonly onInteractionStatus?: (status: PreviewInteractionStatus) => void
-  ) {}
+  ) {
+    window.addEventListener("message", event => {
+      const data = event.data as { typstryPreviewStatus?: string; message?: string; source?: string; lineno?: number; colno?: number } | null;
+      if (!data) return;
+      if (data.typstryPreviewStatus === "debug") {
+        this.reportDebug(this.mountedUrl, data.message ?? "Preview iframe debug event.");
+        return;
+      }
+      if (data.typstryPreviewStatus !== "runtime-error") return;
+      const location = data.source ? ` at ${data.source}${data.lineno ? `:${data.lineno}:${data.colno ?? 0}` : ""}` : "";
+      const reason = `runtime error${location}: ${data.message ?? "unknown error"}`;
+      this.reportInteractionStatus({
+        kind: "blocked",
+        url: this.mountedUrl,
+        reason
+      });
+      if (this.iframe?.contentWindow === event.source) {
+        this.showInterceptedPreviewError(this.iframe, this.mountedUrl, reason);
+      }
+    });
+  }
 
   public get element(): HTMLIFrameElement | null {
     return this.iframe;
@@ -76,13 +98,20 @@ export class PreviewFrame {
   ): Promise<boolean> {
     const existing = this.sessions.get(sessionKey);
     if (existing?.url === previewUrl && existing.iframe.parentElement === this.pane) {
+      this.reportDebug(previewUrl, `Reusing preview session ${sessionKey}.`);
       this.activateSession(sessionKey);
       return false;
     }
-    if (existing) existing.iframe.remove();
+    if (existing) {
+      this.reportDebug(previewUrl, `Replacing existing preview session ${sessionKey}.`);
+      if (existing.blobUrl) URL.revokeObjectURL(existing.blobUrl);
+      for (const url of existing.scriptBlobUrls ?? []) URL.revokeObjectURL(url);
+      existing.iframe.remove();
+    }
     const iframe = document.createElement("iframe");
     iframe.className = "preview-frame";
     iframe.addEventListener("load", () => {
+      this.reportDebug(previewUrl, `Iframe load event. src="${iframe.src || "(empty)"}", has srcdoc=${iframe.srcdoc.length > 0}.`);
       this.configureDocument(iframe);
       const session = this.sessions.get(sessionKey);
       if (session) this.restoreScroll(session);
@@ -93,14 +122,115 @@ export class PreviewFrame {
     this.iframe = iframe;
     this.mountedUrl = previewUrl;
     this.activateSession(sessionKey);
+    this.reportDebug(previewUrl, `Mounted preview iframe for session ${sessionKey}. Pane children=${this.pane.children.length}.`);
     const previewHtml = await getPreviewHtml?.().catch(() => "");
+    this.reportDebug(previewUrl, `Tinymist preview HTML ${previewHtml ? `received (${previewHtml.length} chars)` : "missing"}. Data plane=${dataPlaneUrl || "(none)"}.`);
     if (previewHtml) {
-      iframe.srcdoc = this.previewSrcdoc(previewHtml, previewUrl, dataPlaneUrl);
+      await this.writeInterceptedPreview(iframe, previewHtml, previewUrl, dataPlaneUrl);
     } else {
-      iframe.src = previewUrl;
+      this.showInterceptedPreviewError(
+        iframe,
+        previewUrl,
+        "Tinymist did not return preview HTML, so Typstry cannot install DOM interception."
+      );
     }
     this.evictInactiveSessions();
     return true;
+  }
+
+  private async writeInterceptedPreview(
+    iframe: HTMLIFrameElement,
+    html: string,
+    previewUrl: string,
+    dataPlaneUrl?: string
+  ): Promise<boolean> {
+    try {
+      this.reportDebug(previewUrl, `Writing intercepted preview document (${html.length} chars before sanitization).`);
+      const proxiedDataPlaneUrl = await this.startPreviewWebSocketProxy(previewUrl, dataPlaneUrl);
+      const bootstrapScriptUrl = URL.createObjectURL(new Blob([this.previewBootstrapScript(previewUrl, proxiedDataPlaneUrl)], {
+        type: "text/javascript"
+      }));
+      const wasmBlobUrl = await this.fetchPreviewWasmBlobUrl(previewUrl);
+      const prepared = this.preparePreviewHtml(html, previewUrl, proxiedDataPlaneUrl, wasmBlobUrl);
+      const scriptBlobUrls = [bootstrapScriptUrl, ...prepared.scriptBlobUrls, ...(wasmBlobUrl ? [wasmBlobUrl] : [])];
+      const blob = new Blob([this.previewSrcdoc(prepared.html, previewUrl, bootstrapScriptUrl)], {
+        type: "text/html"
+      });
+      const blobUrl = URL.createObjectURL(blob);
+      const session = this.sessions.get(this.activeSessionKey);
+      if (session?.blobUrl) URL.revokeObjectURL(session.blobUrl);
+      for (const url of session?.scriptBlobUrls ?? []) URL.revokeObjectURL(url);
+      if (session?.iframe === iframe) {
+        session.blobUrl = blobUrl;
+        session.scriptBlobUrls = scriptBlobUrls;
+      }
+      iframe.src = blobUrl;
+      this.reportDebug(previewUrl, `Intercepted preview blob URL assigned: ${blobUrl}; scripts=${scriptBlobUrls.length}.`);
+      this.scheduleDocumentProbe(iframe, previewUrl, "after-blob-src");
+      return true;
+    } catch (error) {
+      this.reportInteractionStatus({
+        kind: "blocked",
+        url: previewUrl,
+        reason: error instanceof Error ? error.message : String(error)
+      });
+      this.showInterceptedPreviewError(
+        iframe,
+        previewUrl,
+        error instanceof Error ? error.message : String(error)
+      );
+      return false;
+    }
+  }
+
+  private async fetchPreviewWasmBlobUrl(previewUrl: string): Promise<string | null> {
+    try {
+      const wasmUrl = new URL("typst_ts_renderer_bg.wasm", previewUrl.endsWith("/") ? previewUrl : `${previewUrl}/`).href;
+      const bytes = await invoke<number[]>("fetch_loopback_resource", { url: wasmUrl });
+      const blobUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "application/wasm" }));
+      this.reportDebug(previewUrl, `Fetched preview WASM (${bytes.length} bytes) from ${wasmUrl}; blob=${blobUrl}.`);
+      return blobUrl;
+    } catch (error) {
+      this.reportDebug(previewUrl, `Failed to fetch preview WASM through Tauri: ${String(error)}`);
+      return null;
+    }
+  }
+
+  private async startPreviewWebSocketProxy(previewUrl: string, dataPlaneUrl?: string): Promise<string | undefined> {
+    if (!dataPlaneUrl) return undefined;
+    try {
+      const proxyUrl = await invoke<string>("start_preview_ws_proxy", { targetUrl: dataPlaneUrl });
+      this.reportDebug(previewUrl, `Started preview WebSocket proxy: ${proxyUrl} -> ${dataPlaneUrl}.`);
+      return proxyUrl;
+    } catch (error) {
+      this.reportDebug(previewUrl, `Failed to start preview WebSocket proxy for ${dataPlaneUrl}: ${String(error)}`);
+      return dataPlaneUrl;
+    }
+  }
+
+  private showInterceptedPreviewError(iframe: HTMLIFrameElement, previewUrl: string, reason: string): void {
+    this.reportDebug(previewUrl, `Showing intercepted preview error: ${reason}`);
+    const message = escapeHtml(reason);
+    const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+      body{margin:0;padding:24px;font:13px/1.5 system-ui,sans-serif;color:#842029;background:#fff5f5}
+      code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+    </style></head><body>
+      <strong>Typstry live preview interception failed.</strong>
+      <p>${message}</p>
+      <p>The Tinymist preview URL is <code>${escapeHtml(previewUrl)}</code>, but Typstry did not mount it directly because direct mounting disables DOM-based inverse sync.</p>
+    </body></html>`;
+    try {
+      const doc = iframe.contentDocument;
+      if (!doc) {
+        iframe.srcdoc = html;
+        return;
+      }
+      doc.open("text/html", "replace");
+      doc.write(html);
+      doc.close();
+    } catch {
+      iframe.srcdoc = html;
+    }
   }
 
   /**
@@ -112,11 +242,81 @@ export class PreviewFrame {
     await this.mount(previewUrl, getPreviewHtml);
   }
 
-  private previewSrcdoc(html: string, previewUrl: string, dataPlaneUrl?: string): string {
+  private previewSrcdoc(html: string, previewUrl: string, scriptBlobUrl: string): string {
     const injection = `
 <base href="${escapeAttribute(previewUrl.endsWith("/") ? previewUrl : `${previewUrl}/`)}">
-<script>
+<script src="${escapeAttribute(scriptBlobUrl)}"></script>`;
+    if (/<head\b[^>]*>/i.test(html)) {
+      return html.replace(/<head\b([^>]*)>/i, `<head$1>${injection}`);
+    }
+    return `<!doctype html><html><head>${injection}</head><body>${html}</body></html>`;
+  }
+
+  private previewBootstrapScript(previewUrl: string, dataPlaneUrl?: string): string {
+    return `
 (() => {
+  const postStatus = (kind, message, extra) => {
+    try {
+      parent.postMessage({
+        typstryPreviewStatus: kind,
+        message: String(message || ""),
+        ...(extra || {})
+      }, "*");
+    } catch {}
+  };
+  const reportDebug = message => postStatus("debug", message);
+  window.__typstryPreviewDebug = reportDebug;
+  const reportRuntimeError = (message, source, lineno, colno) => {
+    postStatus("runtime-error", String(message || "unknown error"), {
+      source: source ? String(source) : "",
+      lineno: typeof lineno === "number" ? lineno : undefined,
+      colno: typeof colno === "number" ? colno : undefined
+    });
+  };
+  window.addEventListener("error", event => {
+    reportRuntimeError(event.message || (event.error && (event.error.stack || event.error.message)), event.filename, event.lineno, event.colno);
+  });
+  window.addEventListener("unhandledrejection", event => {
+    const reason = event.reason;
+    reportRuntimeError(reason && (reason.stack || reason.message) || reason);
+  });
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (...args) => {
+    const target = args[0] && typeof args[0] === "object" && "url" in args[0] ? args[0].url : args[0];
+    const targetText = String(target);
+    const displayTarget = targetText.startsWith("data:application/wasm;base64,")
+      ? "data:application/wasm;base64,...(" + targetText.length + " chars)"
+      : targetText;
+    reportDebug("fetch requested: " + displayTarget);
+    if (targetText.startsWith("data:application/wasm;base64,")) {
+      try {
+        const base64 = targetText.slice("data:application/wasm;base64,".length);
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+          bytes[index] = binary.charCodeAt(index);
+        }
+        reportDebug("fetch synthesized WASM response: " + bytes.length + " bytes");
+        return Promise.resolve(new Response(bytes, {
+          status: 200,
+          headers: { "Content-Type": "application/wasm" }
+        }));
+      } catch (error) {
+        reportDebug("fetch synthesized WASM response failed: " + String(error && (error.stack || error.message) || error));
+        return Promise.reject(error);
+      }
+    }
+    return nativeFetch(...args).then(
+      response => {
+        reportDebug("fetch response: " + displayTarget + " status=" + response.status + " ok=" + response.ok + " type=" + response.type);
+        return response;
+      },
+      error => {
+        reportDebug("fetch failed: " + displayTarget + " error=" + String(error && (error.stack || error.message) || error));
+        throw error;
+      }
+    );
+  };
   const previewBase = ${JSON.stringify(previewUrl)};
   const dataPlane = ${JSON.stringify(dataPlaneUrl ?? "")};
   const NativeWebSocket = window.WebSocket;
@@ -140,24 +340,96 @@ export class PreviewFrame {
         }
       }
     } catch {}
-    return protocols === undefined ? new NativeWebSocket(next) : new NativeWebSocket(next, protocols);
+    reportDebug("WebSocket requested: " + String(url) + " -> " + String(next));
+    const socket = protocols === undefined ? new NativeWebSocket(next) : new NativeWebSocket(next, protocols);
+    socket.addEventListener("open", () => reportDebug("WebSocket open: " + String(next)));
+    socket.addEventListener("error", () => reportDebug("WebSocket error: " + String(next)));
+    socket.addEventListener("close", event => reportDebug("WebSocket close: " + String(next) + " code=" + event.code + " reason=" + event.reason));
+    return socket;
   };
   window.WebSocket.prototype = NativeWebSocket.prototype;
   for (const key of ["CONNECTING", "OPEN", "CLOSING", "CLOSED"]) {
     Object.defineProperty(window.WebSocket, key, { value: NativeWebSocket[key], configurable: true });
   }
-})();
-</script>`;
-    if (/<head\b[^>]*>/i.test(html)) {
-      return html.replace(/<head\b([^>]*)>/i, `<head$1>${injection}`);
+  const summarizeDom = label => {
+    try {
+      const container = document.getElementById("typst-container");
+      const bodyText = (document.body && document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 120);
+      reportDebug(
+        "DOM " + label
+        + ": readyState=" + document.readyState
+        + ", bodyChildren=" + (document.body ? document.body.children.length : -1)
+        + ", containerChildren=" + (container ? container.children.length : -1)
+        + ", svg=" + document.querySelectorAll("svg").length
+        + ", canvas=" + document.querySelectorAll("canvas").length
+        + ", textSample=\\"" + bodyText + "\\""
+      );
+    } catch (error) {
+      reportDebug("DOM " + label + " summary failed: " + String(error));
     }
-    return `<!doctype html><html><head>${injection}</head><body>${html}</body></html>`;
+  };
+  window.addEventListener("load", () => summarizeDom("native-load"));
+  window.setTimeout(() => summarizeDom("250ms"), 250);
+  window.setTimeout(() => {
+    reportDebug("Dispatching synthetic load event for Tinymist preview startup.");
+    window.dispatchEvent(new Event("load"));
+  }, 500);
+  window.setTimeout(() => summarizeDom("1000ms"), 1000);
+  window.setTimeout(() => summarizeDom("3000ms"), 3000);
+})();
+`;
+  }
+
+  private sanitizePreviewHtml(html: string): string {
+    return html.replace(
+      'const escapeImport = new Function("m", "return import(m)");',
+      'const escapeImport = async () => { throw new Error("Node font cache is unavailable in Typstry preview"); };'
+    );
+  }
+
+  private preparePreviewHtml(html: string, previewUrl: string, dataPlaneUrl?: string, wasmBlobUrl?: string | null): { html: string; scriptBlobUrls: string[] } {
+    let prepared = this.sanitizePreviewHtml(html);
+    if (dataPlaneUrl) {
+      prepared = prepared.replace(/ws:\/\/127\.0\.0\.1:\d+/g, dataPlaneUrl);
+    }
+
+    const scriptBlobUrls: string[] = [];
+    prepared = prepared.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (full, attrs: string, body: string) => {
+      if (/\bsrc\s*=/i.test(attrs) || !body.trim()) return full;
+      const index = scriptBlobUrls.length + 1;
+      const patchedBody = this.patchInlinePreviewScript(body, previewUrl, wasmBlobUrl);
+      const scriptUrl = URL.createObjectURL(new Blob([`${patchedBody}\n//# sourceURL=typstry-preview-inline-${index}.js\n`], {
+        type: attrs.includes("type=\"module\"") || attrs.includes("type='module'") ? "text/javascript" : "text/javascript"
+      }));
+      scriptBlobUrls.push(scriptUrl);
+      this.reportDebug(this.mountedUrl, `Externalized Tinymist inline script ${index} (${body.length} chars, patched ${patchedBody.length} chars).`);
+      return `<script${attrs} src="${escapeAttribute(scriptUrl)}"></script>`;
+    });
+
+    return { html: prepared, scriptBlobUrls };
+  }
+
+  private patchInlinePreviewScript(body: string, previewUrl: string, wasmBlobUrl?: string | null): string {
+    const wasmUrl = wasmBlobUrl ?? new URL("typst_ts_renderer_bg.wasm", previewUrl.endsWith("/") ? previewUrl : `${previewUrl}/`).href;
+    return body
+      .replace(
+        /module_or_path\s*=\s*importWasmModule\("typst_ts_renderer_bg\.wasm",\s*import\.meta\.url\);/g,
+        `module_or_path = ${JSON.stringify(wasmUrl)}; window.__typstryPreviewDebug && window.__typstryPreviewDebug("Tinymist WASM module path patched: " + module_or_path);`
+      )
+      .replace(
+        'const escapeImport = new Function("m", "return import(m)");',
+        'const escapeImport = async () => { throw new Error("Node import is unavailable in Typstry preview"); };'
+      );
   }
 
   /**
    * Clear the preview pane and reset state.
    */
   public clear(): void {
+    for (const item of this.sessions.values()) {
+      if (item.blobUrl) URL.revokeObjectURL(item.blobUrl);
+      for (const url of item.scriptBlobUrls ?? []) URL.revokeObjectURL(url);
+    }
     this.pane.innerHTML = "";
     this.sessions.clear();
     this.scrollPositions.clear();
@@ -242,6 +514,8 @@ export class PreviewFrame {
         .filter(([key]) => key !== this.activeSessionKey)
         .sort((left, right) => left[1].usedAt - right[1].usedAt)[0];
       if (!candidate) return;
+      if (candidate[1].blobUrl) URL.revokeObjectURL(candidate[1].blobUrl);
+      for (const url of candidate[1].scriptBlobUrls ?? []) URL.revokeObjectURL(url);
       candidate[1].iframe.remove();
       this.sessions.delete(candidate[0]);
     }
@@ -300,6 +574,25 @@ export class PreviewFrame {
     if (key === this.lastInteractionStatusKey) return;
     this.lastInteractionStatusKey = key;
     this.onInteractionStatus?.(status);
+  }
+
+  private reportDebug(url: string, reason: string): void {
+    this.reportInteractionStatus({ kind: "debug", url, reason });
+  }
+
+  private scheduleDocumentProbe(iframe: HTMLIFrameElement, previewUrl: string, label: string): void {
+    window.setTimeout(() => {
+      try {
+        const doc = iframe.contentDocument;
+        const rect = iframe.getBoundingClientRect();
+        this.reportDebug(
+          previewUrl,
+          `Parent probe ${label}: iframe=${Math.round(rect.width)}x${Math.round(rect.height)}, doc=${doc ? doc.readyState : "missing"}, bodyChildren=${doc?.body?.children.length ?? "n/a"}, text="${(doc?.body?.innerText ?? "").replace(/\s+/g, " ").slice(0, 120)}".`
+        );
+      } catch (error) {
+        this.reportDebug(previewUrl, `Parent probe ${label} failed: ${String(error)}`);
+      }
+    }, 750);
   }
 
   private textPointFromMouseEvent(doc: Document, event: MouseEvent): PreviewTextPoint | null {
@@ -434,6 +727,13 @@ function escapeAttribute(value: string): string {
   return value
     .replace(/&/g, "&amp;")
     .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }

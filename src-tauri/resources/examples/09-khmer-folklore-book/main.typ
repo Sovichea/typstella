@@ -1,4 +1,4 @@
-#import "template.typ": khmer_folklore_book
+#import "template.typ": khmer_folklore_book, khmer_justification_limits
 
 #set document(
   title: "រឿងព្រេងនិទានខ្មែរ",

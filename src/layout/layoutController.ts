@@ -3,12 +3,39 @@ import { open as openUrl } from "@tauri-apps/plugin-shell";
 export class LayoutController {
   constructor(
     private readonly onLayoutChanged: () => void,
-    private readonly onHideLogConsole: () => void
+    private readonly onHideLogConsole: () => void,
+    private readonly getPreviewUrl: () => string,
+    private readonly onDebug: (message: string) => void = () => {}
   ) {}
 
   public initialize(): void {
     this.initializeResizers();
     this.initializePreviewUndocking();
+  }
+
+  public dockPreview(): void {
+    const previewWrapper = document.getElementById("preview-container-wrapper");
+    const resizer = document.getElementById("editor-preview-resizer");
+    const input = document.getElementById("input-container-wrapper");
+    const dock = document.getElementById("dock-preview-status-btn");
+    const before = previewWrapper
+      ? `before class="${previewWrapper.className}", inline="${previewWrapper.style.display}", computed="${getComputedStyle(previewWrapper).display}"`
+      : "before missing preview wrapper";
+    if (previewWrapper) {
+      previewWrapper.classList.remove("hidden");
+      previewWrapper.style.display = "flex";
+    }
+    if (resizer) {
+      resizer.classList.remove("hidden");
+      resizer.style.display = "block";
+    }
+    input?.classList.remove("hidden");
+    if (input && input.style.width === "100%") input.style.width = "50%";
+    dock?.classList.add("hidden");
+    const after = previewWrapper
+      ? `after class="${previewWrapper.className}", inline="${previewWrapper.style.display}", computed="${getComputedStyle(previewWrapper).display}", rect=${Math.round(previewWrapper.getBoundingClientRect().width)}x${Math.round(previewWrapper.getBoundingClientRect().height)}`
+      : "after missing preview wrapper";
+    this.onDebug(`Dock preview requested: ${before}; ${after}.`);
   }
 
   private initializeResizers(): void {
@@ -91,18 +118,13 @@ export class LayoutController {
     const resizer = document.getElementById("editor-preview-resizer");
     const input = document.getElementById("input-container-wrapper");
     const dock = document.getElementById("dock-preview-status-btn");
-    const restoreDock = () => {
-      if (previewWrapper) previewWrapper.style.display = "flex";
-      if (resizer) resizer.style.display = "block";
-      if (input) input.style.width = "50%";
-      dock?.classList.add("hidden");
-    };
+    const restoreDock = () => this.dockPreview();
     dock?.addEventListener("click", restoreDock);
     if (!undock || !preview || !previewWrapper) return;
 
     undock.addEventListener("click", async () => {
-      const iframe = preview.querySelector<HTMLIFrameElement>("iframe");
-      if (!iframe?.src) {
+      const previewUrl = this.getPreviewUrl() || preview.querySelector<HTMLIFrameElement>("iframe")?.src || "";
+      if (!previewUrl) {
         alert("Live preview is not currently active.");
         return;
       }
@@ -111,7 +133,7 @@ export class LayoutController {
       if (input) input.style.width = "100%";
       dock?.classList.remove("hidden");
       try {
-        await openUrl(iframe.src);
+        await openUrl(previewUrl);
       } catch (error) {
         console.error("Shell open failed", error);
         alert("Could not open external preview window.");

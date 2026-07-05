@@ -1,7 +1,16 @@
+use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use tauri::{Emitter, Manager};
+use tokio::net::TcpListener;
+use tokio_tungstenite::{
+    accept_hdr_async, connect_async,
+    tungstenite::{
+        client::IntoClientRequest,
+        handshake::server::{Request as WsServerRequest, Response as WsServerResponse},
+    },
+};
 
 mod examples;
 mod font_store;
@@ -24,9 +33,14 @@ fn list_system_fonts() -> font_store::SystemFontCatalog {
 }
 
 #[tauri::command]
+#[cfg(debug_assertions)]
 fn open_devtools(window: tauri::WebviewWindow) {
     let _ = window.open_devtools();
 }
+
+#[tauri::command]
+#[cfg(not(debug_assertions))]
+fn open_devtools(_window: tauri::WebviewWindow) {}
 
 #[tauri::command]
 async fn install_unicode_font(font_id: String) -> Result<font_store::InstalledFont, String> {
@@ -1154,6 +1168,170 @@ async fn send_lsp_message(
         .map_err(|_| "Tinymist LSP message channel is closed.".to_string())
 }
 
+#[tauri::command]
+async fn fetch_loopback_resource(url: String) -> Result<Vec<u8>, String> {
+    let parsed = reqwest::Url::parse(&url).map_err(|error| format!("Invalid URL: {error}"))?;
+    if parsed.scheme() != "http" {
+        return Err("Only http loopback preview resources can be fetched.".to_string());
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Preview resource URL has no host.".to_string())?;
+    if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+        return Err("Only loopback preview resources can be fetched.".to_string());
+    }
+    if parsed.port().is_none() {
+        return Err("Preview resource URL must include a port.".to_string());
+    }
+
+    let response = reqwest::get(parsed)
+        .await
+        .map_err(|error| format!("Failed to fetch preview resource: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Preview resource request failed with {status}."));
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("Failed to read preview resource: {error}"))?;
+    const MAX_PREVIEW_RESOURCE_BYTES: usize = 32 * 1024 * 1024;
+    if bytes.len() > MAX_PREVIEW_RESOURCE_BYTES {
+        return Err("Preview resource is too large.".to_string());
+    }
+    Ok(bytes.to_vec())
+}
+
+fn parse_loopback_url(url: &str, expected_scheme: &str) -> Result<reqwest::Url, String> {
+    let parsed = reqwest::Url::parse(url).map_err(|error| format!("Invalid URL: {error}"))?;
+    if parsed.scheme() != expected_scheme {
+        return Err(format!(
+            "Only {expected_scheme} loopback preview URLs are supported."
+        ));
+    }
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "Preview URL has no host.".to_string())?;
+    if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+        return Err("Only loopback preview URLs are supported.".to_string());
+    }
+    if parsed.port().is_none() {
+        return Err("Preview URL must include a port.".to_string());
+    }
+    Ok(parsed)
+}
+
+#[tauri::command]
+async fn start_preview_ws_proxy(target_url: String) -> Result<String, String> {
+    let target = parse_loopback_url(&target_url, "ws")?;
+    let target_port = target
+        .port()
+        .ok_or_else(|| "Preview WebSocket URL must include a port.".to_string())?;
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|error| format!("Failed to bind preview WebSocket proxy: {error}"))?;
+    let proxy_port = listener
+        .local_addr()
+        .map_err(|error| format!("Failed to read preview WebSocket proxy port: {error}"))?
+        .port();
+    let target_base = target.to_string();
+
+    tauri::async_runtime::spawn(async move {
+        loop {
+            let Ok((stream, _addr)) = listener.accept().await else {
+                break;
+            };
+            let target_base = target_base.clone();
+            tauri::async_runtime::spawn(async move {
+                let requested_path = std::sync::Arc::new(std::sync::Mutex::new(String::from("/")));
+                let requested_path_for_callback = requested_path.clone();
+                let client_ws = match accept_hdr_async(
+                    stream,
+                    move |request: &WsServerRequest, response: WsServerResponse| {
+                        if let Some(path_and_query) = request.uri().path_and_query() {
+                            if let Ok(mut target) = requested_path_for_callback.lock() {
+                                *target = path_and_query.as_str().to_string();
+                            }
+                        }
+                        Ok(response)
+                    },
+                )
+                .await
+                {
+                    Ok(socket) => socket,
+                    Err(error) => {
+                        eprintln!("Preview WebSocket proxy client handshake failed: {error}");
+                        return;
+                    }
+                };
+
+                let path = requested_path
+                    .lock()
+                    .map(|value| value.clone())
+                    .unwrap_or_else(|_| "/".to_string());
+                let mut outbound = match reqwest::Url::parse(&target_base) {
+                    Ok(url) => url,
+                    Err(error) => {
+                        eprintln!("Preview WebSocket proxy target URL invalid: {error}");
+                        return;
+                    }
+                };
+                outbound.set_path(path.split('?').next().unwrap_or("/"));
+                outbound.set_query(path.split_once('?').map(|(_, query)| query));
+                let outbound_url = outbound.to_string();
+                let mut outbound_request = match outbound_url.clone().into_client_request() {
+                    Ok(request) => request,
+                    Err(error) => {
+                        eprintln!("Preview WebSocket proxy request creation failed: {error}");
+                        return;
+                    }
+                };
+                let origin = format!("http://127.0.0.1:{target_port}");
+                if let Ok(value) = origin.parse() {
+                    outbound_request.headers_mut().insert("Origin", value);
+                }
+
+                let server_ws = match connect_async(outbound_request).await {
+                    Ok((socket, _response)) => socket,
+                    Err(error) => {
+                        eprintln!("Preview WebSocket proxy upstream handshake failed: {error}");
+                        return;
+                    }
+                };
+
+                let (mut client_write, mut client_read) = client_ws.split();
+                let (mut server_write, mut server_read) = server_ws.split();
+                let client_to_server = async {
+                    while let Some(message) = client_read.next().await {
+                        server_write.send(message?).await?;
+                    }
+                    Ok::<(), tokio_tungstenite::tungstenite::Error>(())
+                };
+                let server_to_client = async {
+                    while let Some(message) = server_read.next().await {
+                        client_write.send(message?).await?;
+                    }
+                    Ok::<(), tokio_tungstenite::tungstenite::Error>(())
+                };
+                tokio::select! {
+                    result = client_to_server => {
+                        if let Err(error) = result {
+                            eprintln!("Preview WebSocket proxy client-to-server failed: {error}");
+                        }
+                    }
+                    result = server_to_client => {
+                        if let Err(error) = result {
+                            eprintln!("Preview WebSocket proxy server-to-client failed: {error}");
+                        }
+                    }
+                }
+            });
+        }
+    });
+
+    Ok(format!("ws://127.0.0.1:{proxy_port}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let segmentation_registry =
@@ -1219,7 +1397,9 @@ pub fn run() {
             prepare_render_project,
             prepare_render_file,
             map_generated_to_source,
-            map_source_to_generated
+            map_source_to_generated,
+            fetch_loopback_resource,
+            start_preview_ws_proxy
         ])
         .run(tauri::generate_context!())
         .expect("Error initializing Tauri execution engine");

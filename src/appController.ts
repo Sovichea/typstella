@@ -240,7 +240,9 @@ export class TypstryWorkspaceController {
   private readonly logConsoleController = new LogConsoleController(entry => this.navigateToLogEntry(entry));
   private readonly layoutController = new LayoutController(
     () => this.saveWorkspaceState(),
-    () => this.logConsoleController.setVisible(false)
+    () => this.logConsoleController.setVisible(false),
+    () => this.previewFrame.currentUrl,
+    message => this.appendDeveloperLog({ kind: "info", source: "preview layout", message })
   );
   private readonly workspaceStateStore = new WorkspaceStateStore();
   private readonly recentProjectsController = new RecentProjectsController(path => this.openWorkspace(path));
@@ -384,6 +386,7 @@ export class TypstryWorkspaceController {
       inputWrapper?.classList.remove("hidden");
       previewWrapper?.classList.remove("hidden");
       resizer?.classList.remove("hidden");
+      this.layoutController.dockPreview();
     } else {
       inputWrapper?.classList.add("hidden");
       previewWrapper?.classList.add("hidden");
@@ -1541,7 +1544,20 @@ export class TypstryWorkspaceController {
 
   private async activatePreviewSession(activeContents: string): Promise<boolean> {
     if (!this.previewRootPath || !this.previewTaskId || !this.previewSessionKey) return false;
-    if (this.previewFrame.activateSession(this.previewSessionKey)) return true;
+    this.appendDeveloperLog({
+      kind: "info",
+      source: "preview activation",
+      message: `Activating preview root="${this.previewRootPath}", main="${this.previewMainPath ?? ""}", task="${this.previewTaskId}", session="${this.previewSessionKey}", live=${this.previewLiveUpdates}.`
+    });
+    this.layoutController.dockPreview();
+    if (this.previewFrame.activateSession(this.previewSessionKey)) {
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "preview activation",
+        message: `Reused mounted preview session "${this.previewSessionKey}".`
+      });
+      return true;
+    }
     const style: PreviewRefreshStyle = this.previewLiveUpdates ? "on-type" : "on-save";
     const previewUrl = await this.startPreviewWithRestart(
       this.previewRootPath,
@@ -1549,6 +1565,11 @@ export class TypstryWorkspaceController {
       this.previewTaskId,
       style
     );
+    this.appendDeveloperLog({
+      kind: previewUrl ? "info" : "error",
+      source: "preview activation",
+      message: previewUrl ? `Tinymist preview URL: ${previewUrl}` : "Tinymist did not return a preview URL."
+    });
     if (!previewUrl || !this.previewSessionKey) return false;
     const pinChanged = await this.updatePinnedMain(this.previewMainPath, true);
     if (pinChanged) {
@@ -1802,6 +1823,15 @@ export class TypstryWorkspaceController {
 
 
   private async handleInverseSync(uri: string | undefined, position: LspSourcePosition): Promise<number> {
+    if (!this.previewSyncController.hasRecentTextClick()) {
+      this.appendDeveloperLog({
+        kind: "warning",
+        source: "inverse sync",
+        message: "Ignored inverse sync because it did not originate from Typstry's docked DOM-intercepted preview."
+      });
+      return this.editorInstance.state.selection.main.head;
+    }
+
     let targetPath = uri ? filePathFromUri(uri) : null;
     if (this.settingsController.value.preview.khmerRenderPreparation && targetPath) {
       targetPath = this.mapToOriginalPath(targetPath);
@@ -1840,6 +1870,14 @@ export class TypstryWorkspaceController {
 
   private reportPreviewInteractionStatus(status: PreviewInteractionStatus): void {
     if (!this.settingsController.value.developerMode) return;
+    if (status.kind === "debug") {
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "preview iframe",
+        message: status.reason ?? `Debug event for ${status.url}`
+      });
+      return;
+    }
     if (status.kind === "installed") {
       this.setLspStatus({ kind: "preview-ready", message: "Inverse sync refinement active" });
       this.appendDeveloperLog({
