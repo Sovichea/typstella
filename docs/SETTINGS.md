@@ -1,0 +1,96 @@
+# Settings
+
+Open Settings from **File → Settings**, the status bar, or `Ctrl + ,`. Changes apply immediately and are persisted to `settings.json`; the panel displays the exact platform-specific file path and can reveal it in the system file manager.
+
+```json
+{
+  "version": 1,
+  "appearance": {
+    "theme": "default",
+    "editorFontSize": 14,
+    "editorLineHeight": 1.7
+  },
+  "editor": {
+    "codeFont": "Fira Mono",
+    "unicodeFont": "auto",
+    "spellcheck": true,
+    "wordCompletion": true,
+    "languageProviders": null,
+    "userDictionary": [],
+    "wordWrap": true,
+    "tabSize": 2,
+    "lineNumbers": true,
+    "highlightActiveLine": true,
+    "autoCloseBrackets": true,
+    "indentationGuides": true,
+    "formatOnSave": false
+  },
+  "preview": {
+    "cursorSync": true,
+    "syncDebounceMs": 120,
+    "highlightDurationMs": 2200,
+    "khmerRenderPreparation": false
+  },
+  "toolchain": {
+    "tinymistVersion": null
+  }
+}
+```
+
+Invalid or missing fields fall back to bounded defaults. Existing theme and word-wrap values from older releases are migrated from `localStorage` the first time the settings file is created.
+
+## Toolchain
+
+The Toolchain panel installs stable Tinymist releases and shows each release's embedded Typst version. Tinymist is the only toolchain download: its embedded compiler handles diagnostics, fallback SVG compilation, and PDF export, so a separate Typst installation is not required.
+
+## Fonts and typography
+
+Only MiSans Latin and Fira Mono are bundled. Typstry installs them in the current user's font directory on first launch, avoiding administrator access on Windows, Linux, and macOS.
+
+Settings enumerates the operating system's fonts:
+
+- The code-font selector contains monospace families.
+- The Unicode fallback selector accepts any installed family.
+- Automatic detection recommends the matching MiSans family when one exists and a script-specific Noto Sans family otherwise.
+
+Typstry never downloads fonts without confirmation and does not repeat a recommendation the user declines. MiSans downloads and use are subject to Xiaomi's [MiSans license agreement](https://hyperos.mi.com/font/en/download/); Noto fonts use the [SIL Open Font License](https://openfontlicense.org/).
+
+The selected Unicode fallback is also included in Typstry's own UI font stack for app-rendered text such as search controls, hover popups, and preview status messages.
+
+The typography toolbar controls the fonts used by the compiled document, separately from the editor font settings. Enable either the Latin rule, the complex-script rule, or both. **Apply to document** writes a managed `typstry:typography` block into the active file. **Apply as template** updates the local function used by the main document's `#show: ...with(...)` rule, or creates `typstry-template.typ` when no editable local template can be identified.
+
+## Language tools
+
+Language spellcheck and typing word suggestions can be controlled independently in Editor settings.
+
+The **Language tools** setting chooses which installed providers participate:
+
+- `languageProviders: null` means all available providers are enabled.
+- An explicit array stores the selected provider IDs.
+
+**Add language...** downloads additional Hunspell dictionaries from a starter catalog that includes several complex-script languages as well as common Latin-script dictionaries.
+
+Bundled providers include:
+
+- Khmer through the custom Khmer segmenter.
+- English (US) through Hunspell-format dictionary resources.
+
+Provider architecture is documented in [../LANGUAGE_TOOLS.md](../LANGUAGE_TOOLS.md), and modern Khmer encoding policy is documented in [../KHMER_SPELLCHECK.md](../KHMER_SPELLCHECK.md).
+
+Khmer render preparation leaves source files unchanged and, when explicitly enabled, generates preview/export input with zero-width word-break opportunities. This renderer path is experimental, defaults off, and its Settings row is shown only in dev builds.
+
+## Formatting
+
+Typst formatting is available from **Edit → Format Document** or `Ctrl+Shift+F`. **Format on save** is an Editor setting and defaults off.
+
+## Keyboard shortcuts
+
+- `Ctrl + N`: New File
+- `Ctrl + K`, `Ctrl + O`: Open Workspace
+- `Ctrl + B`: Toggle Explorer Sidebar
+- `Ctrl + ,`: Open Settings
+- `Ctrl + Shift + F`: Format Document
+- `Alt + Z`: Toggle Word Wrap
+- `Ctrl + ~`: Toggle Log Console
+
+Shortcuts are matched by physical key position, so they continue to work under Khmer and other non-Latin keyboard layouts.
