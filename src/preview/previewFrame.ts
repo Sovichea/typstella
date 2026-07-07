@@ -15,8 +15,10 @@ export class PreviewFrame {
   private activeSessionKey = "";
   private readonly sessions = new Map<string, { iframe: HTMLIFrameElement; url: string; usedAt: number; scrollKey: string; blobUrl?: string; scriptBlobUrls?: string[] }>();
   private readonly scrollPositions = new Map<string, { top: number; left: number }>();
+  private readonly zoomBySession = new Map<string, number>();
   private readonly maxSessions = 5;
   private lastInteractionStatusKey = "";
+  private previewZoomPercent = 100;
 
   constructor(
     private readonly pane: HTMLElement,
@@ -55,6 +57,18 @@ export class PreviewFrame {
     return this.mountedUrl;
   }
 
+  public get currentZoomPercent(): number {
+    return this.previewZoomPercent;
+  }
+
+  public zoomIn(): number {
+    return this.zoomPreview("in");
+  }
+
+  public zoomOut(): number {
+    return this.zoomPreview("out");
+  }
+
   /**
    * Mount a preview iframe. If the URL matches the currently mounted preview,
    * skip remounting — Tinymist updates existing previews via WebSocket.
@@ -85,6 +99,7 @@ export class PreviewFrame {
     this.activeSessionKey = sessionKey;
     this.iframe = session.iframe;
     this.mountedUrl = session.url;
+    this.previewZoomPercent = this.zoomBySession.get(sessionKey) ?? 100;
     this.restoreScroll(session);
     return true;
   }
@@ -448,10 +463,12 @@ export class PreviewFrame {
     this.pane.innerHTML = "";
     this.sessions.clear();
     this.scrollPositions.clear();
+    this.zoomBySession.clear();
     this.iframe = null;
     this.svgIframe = null;
     this.mountedUrl = "";
     this.activeSessionKey = "";
+    this.previewZoomPercent = 100;
   }
 
   public mountSvgPages(pages: readonly string[]): void {
@@ -520,6 +537,51 @@ export class PreviewFrame {
       this.svgIframe.remove();
       this.svgIframe = null;
     }
+  }
+
+  private zoomPreview(direction: "in" | "out"): number {
+    if (!this.mountedUrl) {
+      this.reportDebug(this.mountedUrl, `Preview zoom ${direction} ignored because live preview is not active.`);
+      return this.previewZoomPercent;
+    }
+
+    const factors = [
+      10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 130, 150, 170, 190, 210,
+      240, 270, 300, 330, 370, 410, 460, 510, 570, 630, 700, 770, 850, 940, 1000
+    ];
+    const current = this.previewZoomPercent;
+    const next = direction === "in"
+      ? factors.find(factor => factor > current) ?? current
+      : [...factors].reverse().find(factor => factor < current) ?? current;
+    if (next === current) return current;
+
+    const iframe = this.iframe;
+    const doc = iframe?.contentDocument;
+    const target = doc?.body ?? doc?.documentElement;
+    if (!iframe?.contentWindow || !doc || !target) {
+      this.reportDebug(this.mountedUrl, `Preview zoom ${direction} ignored because the preview document is unavailable.`);
+      return current;
+    }
+
+    const isMac = navigator.userAgent.toLowerCase().includes("mac");
+    const event = new KeyboardEvent("keydown", {
+      key: direction === "in" ? "=" : "-",
+      code: direction === "in" ? "Equal" : "Minus",
+      bubbles: true,
+      cancelable: true,
+      ctrlKey: !isMac,
+      metaKey: isMac
+    });
+    const handled = !target.dispatchEvent(event) || event.defaultPrevented;
+    if (!handled) {
+      this.reportDebug(this.mountedUrl, `Preview zoom ${direction} key event was not handled by Tinymist.`);
+      return current;
+    }
+
+    this.previewZoomPercent = next;
+    if (this.activeSessionKey) this.zoomBySession.set(this.activeSessionKey, next);
+    this.reportDebug(this.mountedUrl, `Preview zoom ${direction}: estimated ${next}%.`);
+    return next;
   }
 
 

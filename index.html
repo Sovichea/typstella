@@ -1733,8 +1733,30 @@
                             class="preview-actions"
                             style="display: flex; gap: 8px"
                         >
+                            <div class="preview-zoom-controls" aria-label="Preview zoom">
+                                <button
+                                    id="preview-zoom-out-btn"
+                                    class="preview-action-button preview-zoom-button"
+                                    type="button"
+                                    title="Zoom Out"
+                                    aria-label="Zoom out"
+                                >
+                                    −
+                                </button>
+                                <span id="preview-zoom-label" class="preview-zoom-label">100%</span>
+                                <button
+                                    id="preview-zoom-in-btn"
+                                    class="preview-action-button preview-zoom-button"
+                                    type="button"
+                                    title="Zoom In"
+                                    aria-label="Zoom in"
+                                >
+                                    +
+                                </button>
+                            </div>
                             <button
                                 id="preview-menu-btn"
+                                class="preview-action-button"
                                 title="Preview Options"
                                 style="
                                     padding: 4px 8px;
@@ -1762,6 +1784,7 @@
                             </button>
                             <button
                                 id="undock-preview-btn"
+                                class="preview-action-button"
                                 title="Undock Preview"
                                 style="
                                     padding: 4px 8px;

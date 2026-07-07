@@ -1893,6 +1893,11 @@ export class TypstryWorkspaceController {
     }
   }
 
+  private updatePreviewZoomLabel() {
+    const label = document.getElementById("preview-zoom-label");
+    if (label) label.textContent = `${this.previewFrame.currentZoomPercent}%`;
+  }
+
   private reportPreviewInteractionStatus(status: PreviewInteractionStatus): void {
     if (!this.settingsController.value.developerMode) return;
     if (status.kind === "debug") {
@@ -2673,6 +2678,18 @@ export class TypstryWorkspaceController {
         await this.openWorkspace(selected);
       }
     });
+
+    document.getElementById("preview-zoom-out-btn")?.addEventListener("click", () => {
+      this.previewFrame.zoomOut();
+      this.updatePreviewZoomLabel();
+    });
+
+    document.getElementById("preview-zoom-in-btn")?.addEventListener("click", () => {
+      this.previewFrame.zoomIn();
+      this.updatePreviewZoomLabel();
+    });
+
+    this.updatePreviewZoomLabel();
 
     document.getElementById("action-open-folder")?.addEventListener("click", async () => {
       const selected = await open({ directory: true, multiple: false });

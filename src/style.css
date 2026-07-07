@@ -805,6 +805,26 @@ body.typstry-resizing iframe {
   pointer-events: none !important;
 }
 
+body.typstry-resizing #preview-render-pane {
+  position: relative;
+}
+
+body.typstry-resizing #preview-render-pane iframe {
+  visibility: hidden;
+}
+
+body.typstry-resizing #preview-render-pane::after {
+  content: "Resizing preview…";
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: var(--ui-bg);
+  color: var(--ui-header-text);
+  font: 12px var(--font-family-sans);
+}
+
 .hidden {
   display: none !important;
 }
@@ -1077,6 +1097,59 @@ body.typstry-resizing iframe {
   top: 10px;
   right: 20px;
   z-index: 10;
+  align-items: center;
+}
+
+.preview-action-button,
+.preview-zoom-controls {
+  border: 1px solid var(--ui-border);
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.preview-action-button {
+  min-width: 30px;
+  height: 30px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-action-button:hover {
+  background: var(--ui-hover);
+}
+
+.preview-zoom-controls {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 4px;
+}
+
+.preview-zoom-button {
+  min-width: 30px;
+  height: 28px;
+  padding: 0;
+  border-width: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.preview-zoom-label {
+  min-width: 48px;
+  padding: 0 8px;
+  color: var(--ui-header-text);
+  font: 11px var(--font-family-sans);
+  text-align: center;
+  user-select: none;
 }
 
 #preview-render-pane {
