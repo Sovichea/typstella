@@ -8,7 +8,7 @@ import { EditorState } from "@codemirror/state";
 import { EditorView, highlightActiveLine, highlightActiveLineGutter, lineNumbers } from "@codemirror/view";
 import { undo, redo } from "@codemirror/commands";
 import { foldEffect, foldedRanges, indentUnit, unfoldEffect } from "@codemirror/language";
-import { closeBrackets } from "@codemirror/autocomplete";
+import { closeBrackets, completionStatus } from "@codemirror/autocomplete";
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
 import { getEditorExtensions, themeCompartment, getThemeExtension, applyUIThemeVariables, wrapCompartment, lineNumbersCompartment, activeLineCompartment, closeBracketsCompartment, indentationGuidesCompartment, tabSizeCompartment, completionCompartment, showZwsCompartment, showZeroWidthSpaces } from "./editor/extensions";
 import { createTypstAutocomplete } from "./editor/autocomplete";
@@ -39,7 +39,7 @@ import { ContextMenuController } from "./components/contextMenuController";
 import { ToolchainController, type ToolchainStatus } from "./toolchain/toolchainController";
 import { DocumentOutlineController, type DocumentHeading } from "./outline/documentOutline";
 import { typographyEdit, type DocumentTypography } from "./editor/documentTypography";
-import { SpellcheckController, type ProviderCapabilities } from "./editor/spellcheck";
+import { SpellcheckController, type ProviderCapabilities, type SpellingIssue } from "./editor/spellcheck";
 
 import {
   ensureTypographyTemplateApplication,
@@ -166,7 +166,10 @@ export class TypstryWorkspaceController {
 
   private editorInstance!: EditorView;
   private readonly editorFontManager = new EditorFontManager(() => this.editorInstance);
-  private readonly spellcheckController = new SpellcheckController(() => this.editorInstance);
+  private readonly spellcheckController = new SpellcheckController(
+    () => this.editorInstance,
+    issues => this.updateSpellcheckLog(issues)
+  );
   private explorer!: WorkspaceExplorer;
   private lspClient!: TinymistLspClient;
 
@@ -306,7 +309,7 @@ export class TypstryWorkspaceController {
     restartWorkspace: () => this.restartWorkspace(),
     getSpellingIssue: (x, y, target) => {
       if (target) {
-        const spellingSpan = target.closest(".cm-spelling-unknown");
+        const spellingSpan = target.closest(".cm-spelling-unknown, .cm-spelling-ignored");
         if (spellingSpan) {
           try {
             let pos = spellingSpan.firstChild ? this.editorInstance.posAtDOM(spellingSpan.firstChild) : null;
@@ -341,6 +344,11 @@ export class TypstryWorkspaceController {
       if (!settings.editor.userDictionary.includes(issue.word)) {
         settings.editor.userDictionary.push(issue.word);
       }
+    }),
+    setSpellingIgnored: (issue, ignored) => this.settingsController.update(settings => {
+      settings.editor.ignoredWords = ignored
+        ? [...new Set([...settings.editor.ignoredWords, issue.word])]
+        : settings.editor.ignoredWords.filter(word => word !== issue.word);
     })
   });
   private readonly documentOutlineController = new DocumentOutlineController(
@@ -504,6 +512,7 @@ export class TypstryWorkspaceController {
     this.spellcheckController.setEnabledProviders(editor.languageProviders);
     this.spellcheckController.setEnabled(editor.spellcheck);
     this.spellcheckController.setUserDictionary(editor.userDictionary);
+    this.spellcheckController.setIgnoredWords(editor.ignoredWords);
 
     void applyUIThemeVariables(appearance.theme);
 
@@ -727,6 +736,7 @@ export class TypstryWorkspaceController {
           ),
           this.spellcheckController.extension(),
           EditorView.updateListener.of((update) => {
+            this.spellcheckController.completionStateChanged(completionStatus(update.state) !== null);
             if (update.docChanged) {
               const currentText = update.state.doc.toString();
               this.previewSyncController.clearForward();
@@ -2205,13 +2215,45 @@ export class TypstryWorkspaceController {
     this.logConsoleController.appendLog({
       kind: entry.kind,
       source: entry.source ?? "tinymist",
-      message: entry.message
+      message: entry.message,
+      channel: "lsp"
     });
   }
 
   private appendDeveloperLog(entry: LspLogEntry) {
     if (!this.settingsController.value.developerMode) return;
-    this.appendLspLog(entry);
+    this.logConsoleController.appendLog({
+      kind: entry.kind,
+      source: entry.source ?? "developer",
+      message: entry.message,
+      channel: "dev"
+    });
+  }
+
+  private updateSpellcheckLog(issues: readonly SpellingIssue[]): void {
+    const filePath = this.activeFilePath;
+    if (!filePath || !this.editorInstance) {
+      this.logConsoleController.setSpellcheckIssues([]);
+      return;
+    }
+    const doc = this.editorInstance.state.doc;
+    this.logConsoleController.setSpellcheckIssues(issues.map(issue => {
+      const offset = Math.max(0, Math.min(issue.from, doc.length));
+      const line = doc.lineAt(offset);
+      return {
+        kind: issue.ignored ? "info" : "warning",
+        channel: "spellcheck",
+        counted: !issue.ignored,
+        source: issue.provider,
+        filePath,
+        fileName: fileNameFromPath(filePath),
+        message: `${issue.ignored ? "Ignored unknown word" : "Unknown word"}: “${issue.sourceText}”`,
+        line: line.number,
+        column: offset - line.from + 1,
+        offset,
+        toOffset: Math.max(offset, Math.min(issue.to, doc.length))
+      };
+    }));
   }
 
   private recordLspSync(uri: string, path: string, editorText: string, version: number) {
@@ -2281,11 +2323,18 @@ export class TypstryWorkspaceController {
   }
 
   private async navigateToLogEntry(entry: LogConsoleEntryInput) {
-    if (!entry.line) return;
-    if (entry.filePath && entry.filePath !== this.activeFilePath) await this.loadFile(entry.filePath);
-    const cursor = this.editorPositionFromSourceLocation(entry.line, entry.column ?? 1);
+    if (!entry.line && entry.offset === undefined) return;
+    if (entry.filePath && filePathKey(entry.filePath) !== filePathKey(this.activeFilePath ?? "")) {
+      await this.loadFile(entry.filePath);
+    }
+    const cursor = entry.offset === undefined
+      ? this.editorPositionFromSourceLocation(entry.line ?? 1, entry.column ?? 1)
+      : Math.max(0, Math.min(entry.offset, this.editorInstance.state.doc.length));
+    const selectionEnd = entry.toOffset === undefined
+      ? cursor
+      : Math.max(cursor, Math.min(entry.toOffset, this.editorInstance.state.doc.length));
     this.editorInstance.dispatch({
-      selection: { anchor: cursor },
+      selection: { anchor: cursor, head: selectionEnd },
       effects: EditorView.scrollIntoView(cursor, { y: "center" })
     });
     this.editorInstance.focus();

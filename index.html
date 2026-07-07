@@ -1848,6 +1848,20 @@
             <section id="log-console" class="hidden" aria-label="Log console">
                 <div class="log-console-toolbar">
                     <span class="log-console-title">Problems</span>
+                    <div class="log-console-tabs" role="tablist" aria-label="Problem filters">
+                        <button class="log-console-tab active" type="button" role="tab" aria-selected="true" data-log-console-tab="all">
+                            All <span data-log-console-count="all">0</span>
+                        </button>
+                        <button class="log-console-tab" type="button" role="tab" aria-selected="false" data-log-console-tab="lsp">
+                            LSP <span data-log-console-count="lsp">0</span>
+                        </button>
+                        <button class="log-console-tab" type="button" role="tab" aria-selected="false" data-log-console-tab="spellcheck">
+                            Spellcheck <span data-log-console-count="spellcheck">0</span>
+                        </button>
+                        <button class="log-console-tab" type="button" role="tab" aria-selected="false" data-log-console-tab="dev">
+                            Dev <span data-log-console-count="dev">0</span>
+                        </button>
+                    </div>
                     <div class="log-console-actions">
                         <button
                             id="log-console-close"

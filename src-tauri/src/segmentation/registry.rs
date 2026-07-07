@@ -401,6 +401,12 @@ impl LanguageSegmenter for KhmerProvider {
         "custom-segmenter"
     }
 
+    fn supports_corrections(&self) -> bool {
+        // TODO: Re-enable when Khmer analysis can return reliable intended-word
+        // spans instead of unknown fragments inside an unspaced run.
+        false
+    }
+
     fn pattern(&self) -> &'static str {
         "[\u{1780}-\u{17ff}]+"
     }
@@ -1351,6 +1357,7 @@ impl SegmentationRegistry {
                 engine: provider.engine().to_owned(),
                 support_level: provider.support_level().to_owned(),
                 boundary_mode: provider.boundary_mode().to_owned(),
+                supports_corrections: provider.supports_corrections(),
             })
             .collect())
     }

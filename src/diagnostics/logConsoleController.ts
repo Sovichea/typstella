@@ -1,6 +1,8 @@
 import { createAppIcon } from "../ui/icons";
 
 export type LogEntryKind = "error" | "warning" | "info" | "log" | "hint";
+export type LogEntryChannel = "lsp" | "spellcheck" | "dev";
+type LogConsoleTab = "all" | LogEntryChannel;
 
 export type LogConsoleEntryInput = {
   kind: LogEntryKind;
@@ -10,6 +12,10 @@ export type LogConsoleEntryInput = {
   fileName?: string;
   line?: number;
   column?: number;
+  offset?: number;
+  toOffset?: number;
+  channel?: LogEntryChannel;
+  counted?: boolean;
 };
 
 type LogConsoleEntry = LogConsoleEntryInput & {
@@ -20,30 +26,44 @@ type LogConsoleEntry = LogConsoleEntryInput & {
 export class LogConsoleController {
   private nextEntryId = 1;
   private diagnostics: LogConsoleEntry[] = [];
+  private spellcheckIssues: LogConsoleEntry[] = [];
   private logs: LogConsoleEntry[] = [];
+  private activeTab: LogConsoleTab = "all";
   private visible = false;
   private readonly console = document.getElementById("log-console")!;
   private readonly body = document.getElementById("log-console-body")!;
   private readonly toggleButton = document.getElementById("log-console-toggle") as HTMLButtonElement;
   private readonly closeButton = document.getElementById("log-console-close") as HTMLButtonElement;
   private readonly count = document.getElementById("diagnostic-count")!;
+  private readonly tabs = [...document.querySelectorAll<HTMLButtonElement>("[data-log-console-tab]")];
 
   constructor(private readonly onNavigate: (entry: LogConsoleEntryInput) => void | Promise<void>) {}
 
   public initialize(): void {
     this.toggleButton.addEventListener("click", () => this.toggle());
     this.closeButton.addEventListener("click", () => this.setVisible(false));
+    for (const tab of this.tabs) {
+      tab.addEventListener("click", () => {
+        this.activeTab = tab.dataset.logConsoleTab as LogConsoleTab;
+        this.render();
+      });
+    }
     this.render();
     this.setVisible(false);
   }
 
   public setDiagnostics(entries: LogConsoleEntryInput[]): void {
-    this.diagnostics = entries.map(entry => this.createEntry(entry));
+    this.diagnostics = entries.map(entry => this.createEntry({ ...entry, channel: "lsp" }));
+    this.render();
+  }
+
+  public setSpellcheckIssues(entries: LogConsoleEntryInput[]): void {
+    this.spellcheckIssues = entries.map(entry => this.createEntry({ ...entry, channel: "spellcheck" }));
     this.render();
   }
 
   public appendLog(entry: LogConsoleEntryInput): void {
-    this.logs.unshift(this.createEntry(entry));
+    this.logs.unshift(this.createEntry({ ...entry, channel: entry.channel ?? "lsp" }));
     this.logs = this.logs.slice(0, 100);
     this.render();
   }
@@ -76,7 +96,12 @@ export class LogConsoleController {
   private render(): void {
     this.updateCount();
     this.body.replaceChildren();
-    const entries = [...this.diagnostics, ...this.logs];
+    for (const tab of this.tabs) {
+      const selected = tab.dataset.logConsoleTab === this.activeTab;
+      tab.classList.toggle("active", selected);
+      tab.setAttribute("aria-selected", String(selected));
+    }
+    const entries = this.filteredEntries();
     if (!entries.length) {
       const empty = document.createElement("div");
       empty.className = "log-console-empty";
@@ -93,6 +118,12 @@ export class LogConsoleController {
       groups.set(key, group);
     }
     for (const [key, group] of groups) this.body.appendChild(this.createGroup(key, group));
+  }
+
+  private filteredEntries(): LogConsoleEntry[] {
+    const all = [...this.diagnostics, ...this.spellcheckIssues, ...this.logs];
+    if (this.activeTab === "all") return all;
+    return all.filter(entry => entry.channel === this.activeTab);
   }
 
   private createGroup(groupKey: string, entries: LogConsoleEntry[]): HTMLElement {
@@ -152,10 +183,21 @@ export class LogConsoleController {
     const errors = this.diagnostics.filter(entry => entry.kind === "error").length;
     const warnings = this.diagnostics.filter(entry => entry.kind === "warning").length;
     const total = this.diagnostics.length;
-    this.count.textContent = total > 99 ? "99+" : String(total);
-    this.toggleButton.dataset.state = errors ? "error" : warnings ? "warning" : "ok";
+    const spellcheck = this.spellcheckIssues.filter(entry => entry.counted !== false).length;
+    const problems = total + spellcheck;
+    this.count.textContent = problems > 99 ? "99+" : String(problems);
+    this.setTabCount("all", problems);
+    this.setTabCount("lsp", total);
+    this.setTabCount("spellcheck", spellcheck);
+    this.setTabCount("dev", this.logs.filter(entry => entry.channel === "dev").length);
+    this.toggleButton.dataset.state = errors ? "error" : (warnings || spellcheck) ? "warning" : "ok";
     this.toggleButton.setAttribute("aria-expanded", String(this.visible));
-    this.toggleButton.setAttribute("aria-label", `${this.visible ? "Hide" : "Show"} log console, ${total} problem${total === 1 ? "" : "s"}`);
+    this.toggleButton.setAttribute("aria-label", `${this.visible ? "Hide" : "Show"} log console, ${problems} problem${problems === 1 ? "" : "s"}`);
+  }
+
+  private setTabCount(tab: LogConsoleTab, value: number): void {
+    const count = document.querySelector<HTMLElement>(`[data-log-console-count="${tab}"]`);
+    if (count) count.textContent = value > 99 ? "99+" : String(value);
   }
 
   private dirname(path: string): string {

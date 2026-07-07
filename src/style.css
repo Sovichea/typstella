@@ -1317,6 +1317,47 @@ body.typstry-resizing #preview-render-pane::after {
   font-weight: 700;
 }
 
+.log-console-tabs {
+  align-self: stretch;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
+  margin-right: auto;
+}
+
+.log-console-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--ui-header-text);
+  font: 11px var(--font-family-sans);
+  cursor: pointer;
+}
+
+.log-console-tab:hover {
+  color: var(--ui-text);
+  background: var(--ui-bg);
+}
+
+.log-console-tab.active {
+  color: var(--ui-text);
+  border-bottom-color: var(--editor-cursor-color, #007fd4);
+}
+
+.log-console-tab span {
+  min-width: 17px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--ui-border);
+  text-align: center;
+  line-height: 16px;
+}
+
 .log-console-actions {
   display: inline-flex;
   align-items: center;
@@ -2221,5 +2262,13 @@ button.welcome-item:disabled {
 
 .cm-tooltip-autocomplete {
   font-family: var(--font-family-sans);
+}
+
+.cm-spelling-ignored {
+  text-decoration-line: underline;
+  text-decoration-style: wavy;
+  text-decoration-color: #3794ff;
+  text-decoration-thickness: 1.2px;
+  text-underline-offset: 3px;
 }
 

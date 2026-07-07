@@ -14,6 +14,7 @@ describe("application settings", () => {
     expect(settings.editor.wordCompletion).toBe(true);
     expect(settings.editor.showZws).toBe(true);
     expect(settings.editor.userDictionary).toEqual([]);
+    expect(settings.editor.ignoredWords).toEqual([]);
     expect(settings.editor.formatOnSave).toBe(false);
     expect(settings.preview.renderMode).toBe("on-type");
     expect(settings.preview.syncDebounceMs).toBe(defaultAppSettings.preview.syncDebounceMs);
@@ -72,5 +73,12 @@ describe("application settings", () => {
     });
     expect(settings.editor.wordCompletion).toBe(false);
     expect(settings.editor.userDictionary).toEqual(["សាលា"]);
+  });
+
+  test("normalizes and deduplicates ignored words", () => {
+    const settings = normalizeAppSettings({
+      editor: { ignoredWords: [" ខ្មេ ", "ខ្មេ", "", 42] }
+    });
+    expect(settings.editor.ignoredWords).toEqual(["ខ្មេ"]);
   });
 });

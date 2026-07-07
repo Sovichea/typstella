@@ -34,6 +34,7 @@ export type AppSettings = {
     languageProviders: string[] | null;
     showZws: boolean;
     userDictionary: string[];
+    ignoredWords: string[];
     formatOnSave: boolean;
   };
   preview: {
@@ -70,6 +71,7 @@ export const defaultAppSettings: AppSettings = {
     languageProviders: null,
     showZws: true,
     userDictionary: [],
+    ignoredWords: [],
     formatOnSave: false
   },
   preview: {
@@ -148,6 +150,9 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       showZws: booleanValue(editor.showZws, defaultAppSettings.editor.showZws),
       userDictionary: Array.isArray(editor.userDictionary)
         ? [...new Set(editor.userDictionary.filter((word): word is string => typeof word === "string" && word.trim().length > 0).map(word => word.trim()))].sort()
+        : [],
+      ignoredWords: Array.isArray(editor.ignoredWords)
+        ? [...new Set(editor.ignoredWords.filter((word): word is string => typeof word === "string" && word.trim().length > 0).map(word => word.trim()))].sort()
         : [],
       formatOnSave: booleanValue(editor.formatOnSave, defaultAppSettings.editor.formatOnSave)
     },

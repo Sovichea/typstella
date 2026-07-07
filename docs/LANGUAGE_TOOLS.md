@@ -2,11 +2,15 @@
 
 Typstry's editor spellcheck, correction suggestions, and typing word suggestions are routed through a provider registry in `src-tauri/src/segmentation/registry.rs`.
 
+Unknown words can be handled from the editor context menu in two distinct ways. **Add to dictionary** treats the word as correct and removes it from spellcheck. **Ignore** keeps the word visible with a blue informational underline and keeps it in the Spellcheck log for navigation, but excludes it from problem counters. Both word lists persist in application settings; **Stop ignoring** restores the normal unknown-word warning.
+
 The frontend remains provider-neutral:
 
 - CodeMirror asks Rust for provider capabilities.
 - Incremental editor ranges are sent to `analyze_language_ranges`.
 - Right-click correction menus call `language_suggestions` with the provider ID stored on the issue. Corrections never open automatically while typing.
+- Providers advertise whether correction menus are reliable. Khmer corrections are currently disabled because deterministic segmentation can expose only an unknown fragment inside the intended word; the implementation remains available for a future reliable word-span strategy.
+- Visible unknown-word issues are published to the log console with exact editor offsets. The Spellcheck tab shows their live count, and selecting an entry centers the corresponding source range. The All, LSP, Spellcheck, and Dev tabs keep language issues separate from compiler and developer output.
 - Typing suggestions call `complete_language_word` with the active provider ID.
 - Replacements are still guarded by document key, revision, document identity, and source text.
 

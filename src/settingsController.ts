@@ -15,6 +15,7 @@ type LanguageProviderOption = {
   engine?: string;
   supportLevel?: string;
   boundaryMode?: string;
+  supportsCorrections?: boolean;
 };
 type HunspellCatalogEntry = {
   id: string;

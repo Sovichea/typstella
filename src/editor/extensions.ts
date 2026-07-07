@@ -86,6 +86,20 @@ const preventEscapedBracketAutoClose = EditorView.inputHandler.of((view, from, t
 const ctrlClickForceUpdateEffect = StateEffect.define<null>();
 const linkDecoration = Decoration.mark({ class: "cm-ctrl-link", attributes: { style: "text-decoration: underline; cursor: pointer;" } });
 
+export function typstImportPathRange(state: EditorState, position: number): { from: number; to: number } | null {
+  const line = state.doc.lineAt(position);
+  const pathPattern = /#(?:include|import)\s+"((?:\\.|[^"\\])*)"/g;
+  for (const match of line.text.matchAll(pathPattern)) {
+    if (match.index === undefined) continue;
+    const quotedPath = match[1];
+    const openingQuote = match[0].indexOf('"');
+    const from = line.from + match.index + openingQuote + 1;
+    const to = from + quotedPath.length;
+    if (position >= from && position < to) return { from, to };
+  }
+  return null;
+}
+
 export const ctrlClickLinkPlugin = ViewPlugin.fromClass(class {
   decorations: DecorationSet;
   hoveredPos: number | null = null;
@@ -105,6 +119,10 @@ export const ctrlClickLinkPlugin = ViewPlugin.fromClass(class {
 
   computeDecorations(): DecorationSet {
     if (!this.isCtrlDown || this.hoveredPos === null) return Decoration.none;
+    const importPath = typstImportPathRange(this.view.state, this.hoveredPos);
+    if (importPath) {
+      return Decoration.set([linkDecoration.range(importPath.from, importPath.to)]);
+    }
     const word = this.view.state.wordAt(this.hoveredPos);
     if (word) {
       return Decoration.set([linkDecoration.range(word.from, word.to)]);

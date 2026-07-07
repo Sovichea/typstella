@@ -93,6 +93,7 @@ pub struct ProviderCapabilities {
     pub engine: String,
     pub support_level: String,
     pub boundary_mode: String,
+    pub supports_corrections: bool,
 }
 
 pub trait LanguageSegmenter: Send + Sync {
@@ -111,6 +112,9 @@ pub trait LanguageSegmenter: Send + Sync {
     }
     fn boundary_mode(&self) -> &'static str {
         "custom"
+    }
+    fn supports_corrections(&self) -> bool {
+        true
     }
     fn pattern(&self) -> &'static str;
     fn supports(&self, text: &str) -> bool;

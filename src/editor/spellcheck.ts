@@ -25,6 +25,7 @@ export type ProviderCapabilities = {
   engine?: string;
   supportLevel?: string;
   boundaryMode?: string;
+  supportsCorrections?: boolean;
 };
 
 export type SpellingIssue = {
@@ -37,6 +38,7 @@ export type SpellingIssue = {
   sourceText: string;
   word: string;
   knownPrefix: boolean;
+  ignored: boolean;
 };
 
 const setSpellingIssues = StateEffect.define<SpellingIssue[]>();
@@ -47,8 +49,10 @@ const spellingField = StateField.define<DecorationSet>({
     for (const effect of transaction.effects) {
       if (!effect.is(setSpellingIssues)) continue;
       const decorations = effect.value.map(issue => Decoration.mark({
-        class: "cm-spelling-unknown",
-        attributes: { title: `${issue.word} is not in the selected language dictionary` }
+        class: issue.ignored ? "cm-spelling-ignored" : "cm-spelling-unknown",
+        attributes: { title: issue.ignored
+          ? `${issue.word} is ignored but is not in the selected language dictionary`
+          : `${issue.word} is not in the selected language dictionary` }
       }).range(issue.from, issue.to));
       return Decoration.set(decorations, true);
     }
@@ -115,8 +119,11 @@ export class SpellcheckController {
   private revision = 0;
   private documentKey = "";
   private suggestionRequestGeneration = 0;
+  private visibilityRefreshGeneration = 0;
+  private completionActive = false;
   private readonly warnedFailures = new Set<string>();
   private userDictionary = new Set<string>();
+  private ignoredWords = new Set<string>();
   public issues: SpellingIssue[] = [];
   private suggestionCache = new Map<string, string[]>();
   private providers: ProviderCapabilities[] = [];
@@ -126,7 +133,10 @@ export class SpellcheckController {
   private activeRequest: { documentKey: string; revision: number; docIdentity: Text } | null = null;
   private queuedRequest: { ranges: { from: number; to: number }[] } | null = null;
 
-  constructor(private readonly getEditor: () => EditorView) {}
+  constructor(
+    private readonly getEditor: () => EditorView,
+    private readonly onIssuesChanged?: (issues: readonly SpellingIssue[]) => void
+  ) {}
 
   public async initialize(): Promise<void> {
     try {
@@ -189,6 +199,15 @@ export class SpellcheckController {
     }
   }
 
+  public setIgnoredWords(words: readonly string[]): void {
+    const next = new Set(words.map(word => word.trim()).filter(Boolean));
+    if (next.size === this.ignoredWords.size
+      && [...next].every(word => this.ignoredWords.has(word))) return;
+    this.ignoredWords = next;
+    this.issues = this.issues.map(issue => ({ ...issue, ignored: next.has(issue.word) }));
+    this.queueVisibilityRefresh();
+  }
+
   public setEnabledProviders(providerIds: readonly string[] | null): void {
     const next = providerIds === null ? null : new Set(providerIds);
     const unchanged = next === null
@@ -236,6 +255,7 @@ export class SpellcheckController {
         docIdentity: update.state.doc
       };
     });
+    this.emitVisibleIssues(update.state.selection.main.head);
 
     // Map existing pending ranges through the changes
     this.pendingRanges = this.pendingRanges.map(r => ({
@@ -258,6 +278,20 @@ export class SpellcheckController {
 
   public selectionChanged(): void {
     this.suggestionRequestGeneration++;
+    this.queueVisibilityRefresh();
+  }
+
+  public completionStateChanged(active: boolean): void {
+    if (this.completionActive === active) return;
+    this.completionActive = active;
+    this.queueVisibilityRefresh();
+  }
+
+  private queueVisibilityRefresh(): void {
+    const generation = ++this.visibilityRefreshGeneration;
+    queueMicrotask(() => {
+      if (generation === this.visibilityRefreshGeneration) this.applyVisibleIssues();
+    });
   }
 
   public schedule(): void {
@@ -277,6 +311,10 @@ export class SpellcheckController {
 
   public async suggestions(issue: SpellingIssue): Promise<string[]> {
     if (!this.isCurrentIssue(issue)) return [];
+    // TODO: Re-enable correction menus for segmented scripts when providers can
+    // identify the user's complete intended word instead of an unknown fragment.
+    const provider = this.providers.find(candidate => candidate.id === issue.provider);
+    if (provider?.supportsCorrections === false) return [];
     const request = ++this.suggestionRequestGeneration;
     const cached = this.suggestionCache.get(issue.word);
     if (cached) return this.suggestionRequestIsCurrent(request, issue) ? cached : [];
@@ -325,6 +363,7 @@ export class SpellcheckController {
     this.queuedRequest = null;
     if (!clearIssues) return;
     this.issues = [];
+    this.onIssuesChanged?.([]);
     const editor = this.getEditor();
     if (editor) editor.dispatch({ effects: setSpellingIssues.of([]) });
   }
@@ -434,16 +473,39 @@ export class SpellcheckController {
         to: token.sourceToUtf16,
         sourceText: token.sourceText,
         word: token.normalizedText,
-        knownPrefix: token.knownPrefix
+        knownPrefix: token.knownPrefix,
+        ignored: this.ignoredWords.has(token.normalizedText)
       }));
 
     nextIssues = [...nextIssues, ...newIssues];
     nextIssues.sort((a, b) => a.from - b.from);
     this.issues = nextIssues;
 
-    const visible = this.issues.filter(issue => !(issue.knownPrefix && cursor === issue.to));
+    const visible = this.issues.filter(issue => !this.shouldHideKnownPrefix(issue, cursor));
     editor.dispatch({ effects: setSpellingIssues.of(visible) });
+    this.onIssuesChanged?.(visible);
 
+  }
+
+  private emitVisibleIssues(cursor = this.getEditor().state.selection.main.head): void {
+    const editor = this.getEditor();
+    const visible = this.issues.filter(issue => issue.revision === this.revision
+      && issue.docIdentity === editor.state.doc
+      && !this.shouldHideKnownPrefix(issue, cursor));
+    this.onIssuesChanged?.(visible);
+  }
+
+  private applyVisibleIssues(cursor = this.getEditor().state.selection.main.head): void {
+    const editor = this.getEditor();
+    const visible = this.issues.filter(issue => issue.revision === this.revision
+      && issue.docIdentity === editor.state.doc
+      && !this.shouldHideKnownPrefix(issue, cursor));
+    editor.dispatch({ effects: setSpellingIssues.of(visible) });
+    this.onIssuesChanged?.(visible);
+  }
+
+  private shouldHideKnownPrefix(issue: SpellingIssue, cursor: number): boolean {
+    return issue.knownPrefix && cursor === issue.to && this.completionActive;
   }
 
   private analysisIsCurrent(documentKey: string, revision: number, docIdentity: Text): boolean {

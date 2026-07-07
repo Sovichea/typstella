@@ -7,7 +7,10 @@ const invocations: Invocation[] = [];
 mock.module("@tauri-apps/api/core", () => ({
   invoke: (command: string, args?: any) => {
     if (command === "get_provider_capabilities") {
-      return Promise.resolve([{ id: "khmer-segmenter", pattern: "[\\u1780-\\u17ff]+" }]);
+      return Promise.resolve([
+        { id: "khmer-segmenter", pattern: "[\\u1780-\\u17ff]+", supportsCorrections: false },
+        { id: "test-corrections", pattern: "[A-Za-z]+", supportsCorrections: true }
+      ]);
     }
     return new Promise((resolve, reject) => invocations.push({ command, resolve, reject, args }));
   }
@@ -37,7 +40,7 @@ afterAll(() => {
 });
 
 const wait = (milliseconds: number) => new Promise(resolve => setTimeout(resolve, milliseconds));
-const analysis = (text: string) => ({
+const analysis = (text: string, knownPrefix = false) => ({
   tokens: [{
     provider: "khmer-segmenter",
     sourceFromUtf16: 0,
@@ -45,7 +48,7 @@ const analysis = (text: string) => ({
     sourceText: text,
     normalizedText: text,
     known: false,
-    knownPrefix: false
+    knownPrefix
   }]
 });
 
@@ -54,6 +57,7 @@ let activeController: any = null;
 async function controllerFor(text: string) {
   const state = { doc: Text.of([text]), selection: { main: { head: text.length } } };
   let replacementCount = 0;
+  const visibleIssueSnapshots: unknown[][] = [];
   const editor = {
     state,
     dispatch(spec: { changes?: { from: number; to: number; insert: string } }) {
@@ -66,11 +70,14 @@ async function controllerFor(text: string) {
     coordsAtPos() { return null; }
   };
   const { SpellcheckController } = await import("../src/editor/spellcheck");
-  const controller = new SpellcheckController(() => editor as never);
+  const controller = new SpellcheckController(
+    () => editor as never,
+    issues => visibleIssueSnapshots.push([...issues])
+  );
   await controller.initialize();
   controller.activateDocument("a.typ");
   activeController = controller;
-  return { controller, state, get replacementCount() { return replacementCount; } };
+  return { controller, state, visibleIssueSnapshots, get replacementCount() { return replacementCount; } };
 }
 
 async function startAnalysis(controller: { schedule(): void }): Promise<Invocation> {
@@ -154,13 +161,62 @@ describe("spellcheck request safety", () => {
     const analyzeRequest = await startAnalysis(fixture.controller);
     analyzeRequest.resolve(analysis("ខុស"));
     await wait(20);
-    const suggestions = fixture.controller.suggestions(fixture.controller.issues[0]);
+    const issue = { ...fixture.controller.issues[0], provider: "test-corrections" };
+    const suggestions = fixture.controller.suggestions(issue);
     const suggestionRequest = invocations.shift();
     if (!suggestionRequest) throw new Error("suggestion request was not started");
     expect(suggestionRequest.command).toBe("language_suggestions");
     fixture.controller.selectionChanged();
     suggestionRequest.resolve({ suggestions: ["ត្រូវ"] });
     expect(await suggestions).toEqual([]);
+  });
+
+  test("keeps Khmer corrections disabled until reliable word spans are available", async () => {
+    const fixture = await controllerFor("ខុស");
+    const analyzeRequest = await startAnalysis(fixture.controller);
+    analyzeRequest.resolve(analysis("ខុស"));
+    await wait(20);
+
+    expect(await fixture.controller.suggestions(fixture.controller.issues[0])).toEqual([]);
+    expect(invocations).toEqual([]);
+  });
+
+  test("shows a known-prefix squiggle after the cursor moves away", async () => {
+    const fixture = await controllerFor("ខ្មេ");
+    fixture.controller.completionStateChanged(true);
+    const analyzeRequest = await startAnalysis(fixture.controller);
+    analyzeRequest.resolve(analysis("ខ្មេ", true));
+    await wait(20);
+    expect(fixture.visibleIssueSnapshots.at(-1)).toEqual([]);
+
+    fixture.state.selection.main.head = 0;
+    fixture.controller.selectionChanged();
+    await Promise.resolve();
+    expect(fixture.visibleIssueSnapshots.at(-1)).toHaveLength(1);
+  });
+
+  test("shows a known-prefix squiggle when completion is dismissed", async () => {
+    const fixture = await controllerFor("ខ្មេ");
+    fixture.controller.completionStateChanged(true);
+    const analyzeRequest = await startAnalysis(fixture.controller);
+    analyzeRequest.resolve(analysis("ខ្មេ", true));
+    await wait(20);
+    expect(fixture.visibleIssueSnapshots.at(-1)).toEqual([]);
+
+    fixture.controller.completionStateChanged(false);
+    await Promise.resolve();
+    expect(fixture.visibleIssueSnapshots.at(-1)).toHaveLength(1);
+  });
+
+  test("keeps ignored words visible as informational issues", async () => {
+    const fixture = await controllerFor("ខ្មេ");
+    fixture.controller.setIgnoredWords(["ខ្មេ"]);
+    const analyzeRequest = await startAnalysis(fixture.controller);
+    analyzeRequest.resolve(analysis("ខ្មេ"));
+    await wait(20);
+
+    expect(fixture.controller.issues[0].ignored).toBe(true);
+    expect((fixture.visibleIssueSnapshots.at(-1) as any[])[0].ignored).toBe(true);
   });
 
   test("turns rejected native analysis into controlled state", async () => {

@@ -291,6 +291,7 @@ export type ProviderCapabilities = {
   engine?: string;
   supportLevel?: string;
   boundaryMode?: string;
+  supportsCorrections?: boolean;
 };
 
 export function createTypstAutocomplete(
