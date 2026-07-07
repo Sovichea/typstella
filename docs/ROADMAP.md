@@ -30,4 +30,4 @@
 
 ## Current release status
 
-Typstry is beta software. The latest public release is v0.2.0.
+Typstry is beta software. The latest public release is v0.2.1.
