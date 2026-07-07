@@ -9,6 +9,13 @@ export const baseEditorLayoutTheme = EditorView.theme({
       fontSize: "var(--editor-font-size, 14px)",
       lineHeight: "var(--editor-line-height, 1.7)"
   },
+  ".cm-content, .cm-gutters": {
+      fontSize: "var(--editor-font-size, 14px) !important",
+      lineHeight: "var(--editor-line-height, 1.7) !important"
+  },
+  ".cm-gutterElement": {
+      lineHeight: "var(--editor-line-height, 1.7) !important"
+  },
   ".cm-line": { padding: "0 12px", overflow: "visible !important" },
   ".cm-gutters": { borderRight: "1px solid var(--ui-border)" },
   ".cm-cursor, .cm-dropCursor": {

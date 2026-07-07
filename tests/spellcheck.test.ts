@@ -13,7 +13,7 @@ mock.module("@tauri-apps/api/core", () => ({
   }
 }));
 
-const popup = () => ({
+const elementStub = () => ({
   className: "",
   classList: { add() {}, remove() {} },
   style: {},
@@ -25,7 +25,7 @@ const originalDocument = globalThis.document;
 beforeAll(() => {
   Object.assign(globalThis, {
     document: {
-      createElement: popup,
+      createElement: elementStub,
       body: { appendChild() {}, style: {} },
       documentElement: { style: {} }
     },
@@ -149,17 +149,17 @@ describe("spellcheck request safety", () => {
     expect(fixture.replacementCount).toBe(0);
   });
 
-  test("discards a popup response after cursor movement", async () => {
+  test("discards a correction response after cursor movement", async () => {
     const fixture = await controllerFor("ខុស");
     const analyzeRequest = await startAnalysis(fixture.controller);
     analyzeRequest.resolve(analysis("ខុស"));
     await wait(20);
     const suggestions = fixture.controller.suggestions(fixture.controller.issues[0]);
-    const popupRequest = invocations.shift();
-    if (!popupRequest) throw new Error("suggestion request was not started");
-    expect(popupRequest.command).toBe("language_suggestions");
+    const suggestionRequest = invocations.shift();
+    if (!suggestionRequest) throw new Error("suggestion request was not started");
+    expect(suggestionRequest.command).toBe("language_suggestions");
     fixture.controller.selectionChanged();
-    popupRequest.resolve({ suggestions: ["ត្រូវ"] });
+    suggestionRequest.resolve({ suggestions: ["ត្រូវ"] });
     expect(await suggestions).toEqual([]);
   });
 

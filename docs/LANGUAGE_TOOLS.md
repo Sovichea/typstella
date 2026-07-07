@@ -6,7 +6,7 @@ The frontend remains provider-neutral:
 
 - CodeMirror asks Rust for provider capabilities.
 - Incremental editor ranges are sent to `analyze_language_ranges`.
-- Correction popups call `language_suggestions` with the provider ID stored on the issue.
+- Right-click correction menus call `language_suggestions` with the provider ID stored on the issue. Corrections never open automatically while typing.
 - Typing suggestions call `complete_language_word` with the active provider ID.
 - Replacements are still guarded by document key, revision, document identity, and source text.
 

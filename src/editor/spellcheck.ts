@@ -114,12 +114,11 @@ export class SpellcheckController {
   private timer: number | null = null;
   private revision = 0;
   private documentKey = "";
-  private popupGeneration = 0;
+  private suggestionRequestGeneration = 0;
   private readonly warnedFailures = new Set<string>();
   private userDictionary = new Set<string>();
   public issues: SpellingIssue[] = [];
   private suggestionCache = new Map<string, string[]>();
-  private readonly popup = document.createElement("div");
   private providers: ProviderCapabilities[] = [];
   private enabledProviderIds: Set<string> | null = null;
   
@@ -127,10 +126,7 @@ export class SpellcheckController {
   private activeRequest: { documentKey: string; revision: number; docIdentity: Text } | null = null;
   private queuedRequest: { ranges: { from: number; to: number }[] } | null = null;
 
-  constructor(private readonly getEditor: () => EditorView) {
-    this.popup.className = "spellcheck-suggestions hidden";
-    document.body.appendChild(this.popup);
-  }
+  constructor(private readonly getEditor: () => EditorView) {}
 
   public async initialize(): Promise<void> {
     try {
@@ -225,8 +221,7 @@ export class SpellcheckController {
   public documentChanged(update: ViewUpdate): void {
     if (!this.enabled || !this.documentKey) return;
     this.revision++;
-    this.popupGeneration++;
-    this.hidePopup();
+    this.suggestionRequestGeneration++;
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.timer = null;
 
@@ -262,8 +257,7 @@ export class SpellcheckController {
   }
 
   public selectionChanged(): void {
-    this.popupGeneration++;
-    this.hidePopup();
+    this.suggestionRequestGeneration++;
   }
 
   public schedule(): void {
@@ -283,9 +277,9 @@ export class SpellcheckController {
 
   public async suggestions(issue: SpellingIssue): Promise<string[]> {
     if (!this.isCurrentIssue(issue)) return [];
-    const request = ++this.popupGeneration;
+    const request = ++this.suggestionRequestGeneration;
     const cached = this.suggestionCache.get(issue.word);
-    if (cached) return this.popupRequestIsCurrent(request, issue) ? cached : [];
+    if (cached) return this.suggestionRequestIsCurrent(request, issue) ? cached : [];
     try {
       const response = await invoke<{ suggestions: string[] }>("language_suggestions", {
         request: {
@@ -295,11 +289,10 @@ export class SpellcheckController {
         }
       });
       const suggestions = response.suggestions;
-      if (!this.popupRequestIsCurrent(request, issue)) return [];
+      if (!this.suggestionRequestIsCurrent(request, issue)) return [];
       this.suggestionCache.set(issue.word, suggestions);
       return suggestions;
     } catch (error) {
-      if (request === this.popupGeneration) this.hidePopup();
       this.warnOnce("language_suggestions", error);
       return [];
     }
@@ -307,7 +300,6 @@ export class SpellcheckController {
 
   public replace(issue: SpellingIssue, replacement: string): void {
     if (!this.isCurrentIssue(issue)) {
-      this.hidePopup();
       this.schedule();
       return;
     }
@@ -318,7 +310,6 @@ export class SpellcheckController {
       userEvent: "input.complete"
     });
     editor.focus();
-    this.hidePopup();
   }
 
   public clear(): void {
@@ -327,12 +318,11 @@ export class SpellcheckController {
 
   private invalidate(clearIssues: boolean): void {
     this.revision++;
-    this.popupGeneration++;
+    this.suggestionRequestGeneration++;
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.timer = null;
     this.pendingRanges = [];
     this.queuedRequest = null;
-    this.hidePopup();
     if (!clearIssues) return;
     this.issues = [];
     const editor = this.getEditor();
@@ -454,31 +444,6 @@ export class SpellcheckController {
     const visible = this.issues.filter(issue => !(issue.knownPrefix && cursor === issue.to));
     editor.dispatch({ effects: setSpellingIssues.of(visible) });
 
-    const current = visible.find(issue => cursor >= issue.from && cursor < issue.to);
-    if (current) {
-      void this.showSuggestions(current);
-    } else {
-      this.hidePopup();
-    }
-  }
-
-  private async showSuggestions(issue: SpellingIssue): Promise<void> {
-    const suggestions = await this.suggestions(issue);
-    if (!suggestions.length || !this.enabled || !this.isCurrentIssue(issue)) return;
-    const editor = this.getEditor();
-    const coordinates = editor.coordsAtPos(issue.to);
-    if (!coordinates) return;
-    this.popup.replaceChildren(...suggestions.map(suggestion => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.textContent = suggestion;
-      button.addEventListener("mousedown", event => event.preventDefault());
-      button.addEventListener("click", () => this.replace(issue, suggestion));
-      return button;
-    }));
-    this.popup.style.left = `${Math.min(coordinates.left, window.innerWidth - 260)}px`;
-    this.popup.style.top = `${Math.min(coordinates.bottom + 4, window.innerHeight - 180)}px`;
-    this.popup.classList.remove("hidden");
   }
 
   private analysisIsCurrent(documentKey: string, revision: number, docIdentity: Text): boolean {
@@ -487,8 +452,8 @@ export class SpellcheckController {
       && editor.state.doc === docIdentity;
   }
 
-  private popupRequestIsCurrent(request: number, issue: SpellingIssue): boolean {
-    return request === this.popupGeneration && this.isCurrentIssue(issue);
+  private suggestionRequestIsCurrent(request: number, issue: SpellingIssue): boolean {
+    return request === this.suggestionRequestGeneration && this.isCurrentIssue(issue);
   }
 
   private isCurrentIssue(issue: SpellingIssue, verifyText = true): boolean {
@@ -504,10 +469,5 @@ export class SpellcheckController {
     if (this.warnedFailures.has(key)) return;
     this.warnedFailures.add(key);
     console.warn(`Spellcheck ${command} failed:`, error);
-  }
-
-  private hidePopup(): void {
-    this.popup.classList.add("hidden");
-    this.popup.replaceChildren();
   }
 }

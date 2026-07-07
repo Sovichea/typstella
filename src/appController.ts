@@ -528,8 +528,9 @@ export class TypstryWorkspaceController {
     }
 
     if (this.editorInstance) {
+      const editorView = this.editorInstance;
       const indentation = " ".repeat(editor.tabSize);
-      this.editorInstance.dispatch({
+      editorView.dispatch({
         effects: [
           themeCompartment.reconfigure(getThemeExtension(appearance.theme)),
           wrapCompartment.reconfigure(editor.wordWrap ? EditorView.lineWrapping : []),
@@ -545,8 +546,11 @@ export class TypstryWorkspaceController {
               () => this.flushPendingLspSync(),
               editor.wordCompletion,
               () => this.spellcheckController.getProviders()
-            ))
+          ))
         ]
+      });
+      window.requestAnimationFrame(() => {
+        if (this.editorInstance === editorView) editorView.requestMeasure();
       });
     }
 
