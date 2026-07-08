@@ -19,8 +19,8 @@ export class PreviewFrame {
   private readonly scrollPositions = new Map<string, { top: number; left: number }>();
   private readonly zoomBySession = new Map<string, number>();
   // Each Tinymist iframe owns a WASM renderer, SVG DOM, raster cache and
-  // WebSocket. Keep only one warm fallback in addition to the active preview.
-  private readonly maxSessions = 2;
+  // WebSocket. Long documents are too expensive to retain in the background.
+  private readonly maxSessions = 1;
   private lastInteractionStatusKey = "";
   private previewZoomPercent = 100;
   private errorOverlay: HTMLDivElement | null = null;

@@ -4,7 +4,7 @@ import { TauriLspTransport } from "./lspTransport";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { asRecord, isRecord, type JsonRpcId, type JsonRpcMessage } from "./jsonRpc";
 import { filePathToUri } from "../platform/paths";
-import { tinymistPreviewArguments } from "../preview/previewPolicy";
+import { supportsResponsivePartialRendering, tinymistPreviewArguments } from "../preview/previewPolicy";
 
 type TinymistPreviewResult = {
   staticServerAddr?: string;
@@ -430,7 +430,12 @@ export class TinymistLspClient {
     try {
       const result = await this.request<string | TinymistPreviewResult | null>("workspace/executeCommand", {
         command: "tinymist.doStartPreview",
-        arguments: [tinymistPreviewArguments(path, taskId, refreshStyle)]
+        arguments: [tinymistPreviewArguments(
+          path,
+          taskId,
+          refreshStyle,
+          supportsResponsivePartialRendering(navigator.userAgent)
+        )]
       }, 5000);
       const previewUrl = this.normalizePreviewUrl(result);
       this.setStatus(previewUrl ? "preview-ready" : "error", previewUrl ? "Preview ready" : "Preview URL unavailable");

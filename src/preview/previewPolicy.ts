@@ -32,14 +32,21 @@ export function previewSessionIdentity(rootPath: string, style: PreviewRefreshSt
 export function tinymistPreviewArguments(
   path: string,
   taskId: string,
-  refreshStyle: PreviewRefreshStyle
+  refreshStyle: PreviewRefreshStyle,
+  partialRendering = true
 ): string[] {
-  return [
+  const args = [
     "--task-id", taskId,
     "--not-primary",
     "--data-plane-host=127.0.0.1:0",
-    "--partial-rendering", "true",
-    "--refresh-style", refreshStyle,
-    path
   ];
+  if (partialRendering) args.push("--partial-rendering", "true");
+  args.push("--refresh-style", refreshStyle, path);
+  return args;
+}
+
+export function supportsResponsivePartialRendering(userAgent: string): boolean {
+  // Tinymist viewport patches are currently expensive in WebKitGTK and cause
+  // visible multi-second redraws while scrolling long documents.
+  return !/Linux/i.test(userAgent);
 }

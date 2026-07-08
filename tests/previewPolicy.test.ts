@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, tinymistPreviewArguments } from "../src/preview/previewPolicy";
+import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, supportsResponsivePartialRendering, tinymistPreviewArguments } from "../src/preview/previewPolicy";
 
 describe("preview policy", () => {
   test("only accepts the directive on the first line", () => {
@@ -26,5 +26,12 @@ describe("preview policy", () => {
     const args = tinymistPreviewArguments("C:\\docs\\main.typ", "preview-1", "on-type");
     expect(args).toContain("--partial-rendering");
     expect(args[args.indexOf("--partial-rendering") + 1]).toBe("true");
+  });
+
+  test("disables expensive partial rendering under Linux WebKitGTK", () => {
+    expect(supportsResponsivePartialRendering("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1")).toBe(false);
+    expect(supportsResponsivePartialRendering("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")).toBe(true);
+    expect(tinymistPreviewArguments("/docs/main.typ", "preview-1", "on-type", false))
+      .not.toContain("--partial-rendering");
   });
 });
