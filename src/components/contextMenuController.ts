@@ -304,6 +304,11 @@ export class ContextMenuController {
 
   private async showForTarget(event: MouseEvent): Promise<void> {
     const target = event.target as HTMLElement;
+    if (target.closest("#preview-container-wrapper")) {
+      event.preventDefault();
+      this.hide();
+      return;
+    }
     this.textControl = this.textControlFor(target);
     const selection = window.getSelection();
     this.selectedText = selection?.toString() ?? "";
@@ -340,7 +345,6 @@ export class ContextMenuController {
         : [];
       items = this.editorItems();
     }
-    else if (target.closest("#preview-container-wrapper")) items = previewItems;
     else if (target.closest(".editor-tab")) {
       this.targetPath = target.closest<HTMLElement>(".editor-tab")?.dataset.path || "";
       this.targetIsDirectory = false;
@@ -375,10 +379,9 @@ export class ContextMenuController {
 
   private handlePreviewMessage(event: MessageEvent): void {
     const data = event.data as { type?: unknown; x?: unknown; y?: unknown } | null;
-    if (data?.type === "HIDE_CONTEXT_MENU") this.hide();
-    if (data?.type !== "SHOW_PREVIEW_CONTEXT_MENU" || typeof data.x !== "number" || typeof data.y !== "number") return;
-    const rect = this.dependencies.getPreviewFrame()?.getBoundingClientRect();
-    if (rect) this.show(previewItems, rect.left + data.x, rect.top + data.y);
+    if (data?.type === "HIDE_CONTEXT_MENU" || data?.type === "SHOW_PREVIEW_CONTEXT_MENU") {
+      this.hide();
+    }
   }
 
   private explorerItems(): string {
