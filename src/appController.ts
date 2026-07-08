@@ -2831,6 +2831,18 @@ export class TypstryWorkspaceController {
       this.settingsController.flush();
     });
 
+    document.addEventListener("focusin", (e) => {
+      const target = e.target as HTMLInputElement | null;
+      if (target && target.tagName === "INPUT") {
+        if (target.classList.contains("cm-textfield") || target.closest(".cm-search") || target.closest(".cm-panel")) {
+          target.setAttribute("autocomplete", "off");
+          target.setAttribute("autocorrect", "off");
+          target.setAttribute("autocapitalize", "off");
+          target.setAttribute("spellcheck", "false");
+        }
+      }
+    });
+
     document.addEventListener("keydown", (e) => {
       const isMac = navigator.userAgent.toLowerCase().includes("mac");
       const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
