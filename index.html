@@ -45,6 +45,12 @@
                                 >
                                     Export PDF
                                 </div>
+                                <div
+                                    class="dropdown-item"
+                                    id="action-export-zip"
+                                >
+                                    Export Workspace as ZIP...
+                                </div>
                                 <div class="dropdown-separator"></div>
                                 <div
                                     class="dropdown-item"
@@ -1875,14 +1881,6 @@
                 <div id="log-console-body"></div>
             </section>
             <div id="status-bar" role="status" aria-live="polite">
-                <div id="lsp-status" class="status-item" data-state="starting">
-                    <span
-                        class="status-dot"
-                        aria-label="Preparing toolchain"
-                    ></span>
-                    <span class="status-label">LSP</span>
-                    <span class="status-text">Preparing toolchain</span>
-                </div>
                 <button
                     id="log-console-toggle"
                     class="status-button"
@@ -1900,6 +1898,14 @@
                         <span id="diagnostic-warning-count" class="status-count">0</span>
                     </span>
                 </button>
+                <div id="lsp-status" class="status-item" data-state="starting">
+                    <span
+                        class="status-dot"
+                        aria-label="Preparing toolchain"
+                    ></span>
+                    <span class="status-label">LSP</span>
+                    <span class="status-text">Preparing toolchain</span>
+                </div>
                 <button
                     id="dock-preview-status-btn"
                     class="status-button hidden"

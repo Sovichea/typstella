@@ -3022,6 +3022,36 @@ export class TypstryWorkspaceController {
       }
     });
 
+    document.getElementById("action-export-zip")?.addEventListener("click", async () => {
+      if (!this.workspaceRootPath) {
+        alert("Please open a project workspace first.");
+        return;
+      }
+
+      try {
+        const folderName = this.workspaceRootPath.split(/[/\\]/).pop() || "workspace";
+        const selected = await save({
+          filters: [{
+            name: "ZIP Archive",
+            extensions: ["zip"]
+          }],
+          defaultPath: `${folderName}.zip`
+        });
+
+        if (selected) {
+          this.setLspStatus({ kind: "running", message: "Exporting Workspace..." });
+          await invoke("export_workspace_as_zip", {
+            workspacePath: this.workspaceRootPath,
+            zipPath: selected
+          });
+          this.setLspStatus({ kind: "preview-ready", message: `Workspace exported to ${selected}` });
+        }
+      } catch (error) {
+        this.setLspStatus({ kind: "error", message: `Export failed: ${error}` });
+        await message(String(error), { title: "ZIP Export Failed", kind: "error" });
+      }
+    });
+
     document.getElementById("action-exit")?.addEventListener("click", () => {
       getCurrentWindow().close();
     });
