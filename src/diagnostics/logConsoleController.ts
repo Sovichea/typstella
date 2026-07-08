@@ -73,6 +73,7 @@ function canonicalDiagnosticMessage(message: string): string {
 export class LogConsoleController {
   private nextEntryId = 1;
   private diagnostics: LogConsoleEntry[] = [];
+  private diagnosticsByFile = new Map<string, LogConsoleEntry[]>();
   private spellcheckIssues: LogConsoleEntry[] = [];
   private logs: LogConsoleEntry[] = [];
   private activeTab: LogConsoleTab = "all";
@@ -100,7 +101,11 @@ export class LogConsoleController {
     this.setVisible(false);
   }
 
-  public setDiagnostics(entries: LogConsoleEntryInput[]): void {
+  public getErrorCount(): number {
+    return this.diagnostics.filter(entry => entry.kind === "error").length;
+  }
+
+  public setDiagnostics(filePath: string, entries: LogConsoleEntryInput[]): void {
     const filtered = entries.filter(entry => entry.source !== "preview" && entry.source !== "preview iframe" && entry.source !== "inverse sync");
     // Filter out duplicates in incoming diagnostics
     const seen = new Set<string>();
@@ -113,7 +118,15 @@ export class LogConsoleController {
       }
     }
 
-    this.diagnostics = uniqueEntries.map(entry => this.createEntry({ ...entry, channel: "lsp" }));
+    const mappedEntries = uniqueEntries.map(entry => this.createEntry({ ...entry, channel: "lsp" }));
+    const fileKey = filePath.toLowerCase();
+    if (mappedEntries.length > 0) {
+      this.diagnosticsByFile.set(fileKey, mappedEntries);
+    } else {
+      this.diagnosticsByFile.delete(fileKey);
+    }
+
+    this.diagnostics = Array.from(this.diagnosticsByFile.values()).flat();
     this.logs = this.logs.filter(log => !duplicatesStructuredDiagnostic(log, this.diagnostics));
     this.render();
   }
@@ -140,6 +153,7 @@ export class LogConsoleController {
   }
 
   public clearDiagnostics(): void {
+    this.diagnosticsByFile.clear();
     this.diagnostics = [];
     this.render();
   }

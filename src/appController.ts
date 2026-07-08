@@ -1953,7 +1953,7 @@ export class TypstryWorkspaceController {
         effects: setEditorDiagnosticsEffect.of(editorDiagnostics)
       });
 
-      this.logConsoleController.setDiagnostics(filteredDiagnostics.map((diagnostic) => ({
+      this.logConsoleController.setDiagnostics(path, filteredDiagnostics.map((diagnostic) => ({
         kind: diagnostic.severity,
         source: "typst check",
         filePath: path,
@@ -2157,80 +2157,85 @@ export class TypstryWorkspaceController {
 
   private async handleLspDiagnostics(uri: string, diagnostics: LspDiagnostic[], version?: number) {
     const originalPath = this.mapToOriginalPath(filePathFromUri(uri));
-    if (!this.activeFilePath || filePathKey(originalPath) !== filePathKey(this.activeFilePath)) {
-      return;
-    }
-    if (!this.shouldAcceptLspDiagnostics(uri, originalPath, version)) return;
+    const isActive = this.activeFilePath && filePathKey(originalPath) === filePathKey(this.activeFilePath);
 
     const isPackageFile = originalPath.toLowerCase().includes("typst/packages") || 
                           originalPath.toLowerCase().includes("typst\\packages") ||
                           originalPath.toLowerCase().includes("packages/preview") ||
                           originalPath.toLowerCase().includes("packages\\preview");
     if (isPackageFile) {
-      this.editorInstance.dispatch({
-        effects: setEditorDiagnosticsEffect.of([])
-      });
+      if (isActive) {
+        this.editorInstance.dispatch({
+          effects: setEditorDiagnosticsEffect.of([])
+        });
+      }
       return;
     }
 
-    const externalLabels = this.previewImported && this.previewStandalone
-      ? new Set(externalReferenceLabels(this.editorInstance.state.doc.toString()))
-      : new Set<string>();
     const filteredDiagnostics = diagnostics.filter(diagnostic => {
       if (diagnostic.message.includes("cannot export multiple images without a page number template")) return false;
+      if (!isActive) return true;
       if (!/label.*does not exist|unknown label/i.test(diagnostic.message)) return true;
+      const externalLabels = this.previewImported && this.previewStandalone
+        ? new Set(externalReferenceLabels(this.editorInstance.state.doc.toString()))
+        : new Set<string>();
       return ![...externalLabels].some(label =>
         diagnostic.message.includes(label) || this.diagnosticSourceText(diagnostic).includes(`@${label}`)
       );
     });
 
-    const editorDiagnostics: EditorDiagnostic[] = [];
-    const staleDiagnostics = new Set<LspDiagnostic>();
-    const relPath = originalPath.startsWith(this.workspaceRootPath!)
-      ? originalPath.substring(this.workspaceRootPath!.length).replace(/^[/\\]+/, "")
-      : originalPath;
-    const cacheContent = this.preparedContentsCache.get(filePathKey(originalPath))?.preparedText || "";
+    if (isActive) {
+      if (!this.shouldAcceptLspDiagnostics(uri, originalPath, version)) return;
 
-    for (const diagnostic of filteredDiagnostics) {
-      let from: number | null = null;
-      let to: number | null = null;
-      if (this.settingsController.value.preview.khmerRenderPreparation) {
-        from = await this.mapCacheLspPositionToOriginalEditorOffset(relPath, diagnostic.range.start, cacheContent);
-        to = await this.mapCacheLspPositionToOriginalEditorOffset(relPath, diagnostic.range.end, cacheContent);
-      } else {
-        from = this.editorPositionFromLspPosition(diagnostic.range.start);
-        to = this.editorPositionFromLspPosition(diagnostic.range.end);
-      }
-      if (from !== null && to !== null) {
-        if (looksLikeStalePrefixDiagnostic(this.editorInstance.state.doc, from, Math.max(from, to), diagnostic.message)) {
-          staleDiagnostics.add(diagnostic);
-          continue;
+      const editorDiagnostics: EditorDiagnostic[] = [];
+      const staleDiagnostics = new Set<LspDiagnostic>();
+      const relPath = originalPath.startsWith(this.workspaceRootPath!)
+        ? originalPath.substring(this.workspaceRootPath!.length).replace(/^[/\\]+/, "")
+        : originalPath;
+      const cacheContent = this.preparedContentsCache.get(filePathKey(originalPath))?.preparedText || "";
+
+      for (const diagnostic of filteredDiagnostics) {
+        let from: number | null = null;
+        let to: number | null = null;
+        if (this.settingsController.value.preview.khmerRenderPreparation) {
+          from = await this.mapCacheLspPositionToOriginalEditorOffset(relPath, diagnostic.range.start, cacheContent);
+          to = await this.mapCacheLspPositionToOriginalEditorOffset(relPath, diagnostic.range.end, cacheContent);
+        } else {
+          from = this.editorPositionFromLspPosition(diagnostic.range.start);
+          to = this.editorPositionFromLspPosition(diagnostic.range.end);
         }
-        editorDiagnostics.push({
-          from,
-          to: Math.max(from, to),
-          severity: this.diagnosticSeverityFromLsp(diagnostic.severity),
-          message: diagnostic.message
-        });
+        if (from !== null && to !== null) {
+          if (looksLikeStalePrefixDiagnostic(this.editorInstance.state.doc, from, Math.max(from, to), diagnostic.message)) {
+            staleDiagnostics.add(diagnostic);
+            continue;
+          }
+          editorDiagnostics.push({
+            from,
+            to: Math.max(from, to),
+            severity: this.diagnosticSeverityFromLsp(diagnostic.severity),
+            message: diagnostic.message
+          });
+        }
       }
+
+      if (!this.shouldAcceptLspDiagnostics(uri, originalPath, version)) return;
+
+      this.editorInstance.dispatch({
+        effects: setEditorDiagnosticsEffect.of(editorDiagnostics)
+      });
+
+      this.logConsoleController.setDiagnostics(originalPath, filteredDiagnostics
+        .filter(diagnostic => !staleDiagnostics.has(diagnostic))
+        .map((diagnostic) => this.logEntryFromDiagnostic(uri, diagnostic)));
+    } else {
+      this.logConsoleController.setDiagnostics(originalPath, filteredDiagnostics.map((diagnostic) => this.logEntryFromDiagnostic(uri, diagnostic)));
     }
 
-    if (!this.shouldAcceptLspDiagnostics(uri, originalPath, version)) return;
-
-    this.editorInstance.dispatch({
-      effects: setEditorDiagnosticsEffect.of(editorDiagnostics)
-    });
-
-    const activeErrors = editorDiagnostics.filter(d => d.severity === "error");
-    if (activeErrors.length > 0) {
+    if (this.logConsoleController.getErrorCount() > 0) {
       this.previewFrame.setError("Preview Render Failed", "The live preview cannot be updated because of compile errors.\nPlease check the Problems panel or Log Console for details.");
     } else {
       this.previewFrame.clearErrorOverlay();
     }
-
-    this.logConsoleController.setDiagnostics(filteredDiagnostics
-      .filter(diagnostic => !staleDiagnostics.has(diagnostic))
-      .map((diagnostic) => this.logEntryFromDiagnostic(uri, diagnostic)));
   }
 
 
