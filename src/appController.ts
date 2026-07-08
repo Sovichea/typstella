@@ -2920,6 +2920,8 @@ export class TypstryWorkspaceController {
       void this.lspClient.restart();
     }
     await this.restoreWorkspaceState(selected);
+    // Reload explorer tree to make sure the restored pinned main file color/format is rendered
+    await this.explorer.loadWorkspace(selected);
   }
 
   private async closeOtherTabs(pathToKeep: string) {
@@ -2972,8 +2974,8 @@ export class TypstryWorkspaceController {
   }
 
   private closeProject() {
-    this.pinnedMainFilePath = null;
     this.saveWorkspaceState();
+    this.pinnedMainFilePath = null;
     void this.updatePinnedMain(null, true);
     this.workspaceWatcher.stop();
     if (this.workspaceRootPath) {
