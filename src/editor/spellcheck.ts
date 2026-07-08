@@ -271,6 +271,7 @@ export class SpellcheckController {
       const to = update.changes.mapPos(issue.to, 1);
       return {
         ...issue,
+        revision: this.revision,
         from,
         to,
         docIdentity: update.state.doc

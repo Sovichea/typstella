@@ -126,6 +126,40 @@ describe("spellcheck request safety", () => {
     expect(fixture.controller.issues).toEqual([]);
   });
 
+  test("keeps existing issues visible while an unrelated edit is reanalyzed", async () => {
+    const fixture = await controllerFor("wrong text");
+    const request = await startAnalysis(fixture.controller);
+    request.resolve({
+      tokens: [{
+        provider: "test-corrections",
+        sourceFromUtf16: 0,
+        sourceToUtf16: 5,
+        sourceText: "wrong",
+        normalizedText: "wrong",
+        known: false,
+        knownPrefix: false
+      }]
+    });
+    await wait(20);
+    expect(fixture.controller.issues).toHaveLength(1);
+
+    fixture.state.doc = Text.of(["wrong text!"]);
+    fixture.state.selection.main.head = fixture.state.doc.length;
+    const update = {
+      state: fixture.state,
+      docChanged: true,
+      transactions: [],
+      changes: {
+        mapPos: (position: number) => position,
+        iterChanges: (callback: any) => callback(10, 10, 10, 11)
+      }
+    };
+    fixture.controller.documentChanged(update as any);
+
+    expect(fixture.controller.issues).toHaveLength(1);
+    expect(fixture.visibleIssueSnapshots.at(-1)).toHaveLength(1);
+  });
+
   test("discards a response after tab activation", async () => {
     const fixture = await controllerFor("ខុស");
     const request = await startAnalysis(fixture.controller);
