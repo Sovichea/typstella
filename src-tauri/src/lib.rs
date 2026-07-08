@@ -113,22 +113,43 @@ fn workspace_path_exists(path: String) -> bool {
     std::path::Path::new(&path).exists()
 }
 
+struct TempFileGuard {
+    path: std::path::PathBuf,
+}
+
+impl Drop for TempFileGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn cleanup_dir_previews(dir: &std::path::Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name != ".git" && name != ".typstry" && name != "node_modules" && name != "target" {
+                    cleanup_dir_previews(&path);
+                }
+            } else if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with('.') && (name.contains("typstry-preview") || name.contains("typstry-check")) {
+                        let _ = std::fs::remove_file(path);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[tauri::command]
 fn cleanup_workspace_preview_files(workspace_root_path: String) -> Result<(), String> {
     let root = std::path::PathBuf::from(workspace_root_path);
     if !root.is_dir() {
         return Ok(());
     }
-    for entry in std::fs::read_dir(&root)
-        .map_err(|error| format!("Failed to inspect workspace preview files: {error}"))?
-        .flatten()
-    {
-        let path = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        if path.is_file() && name.starts_with('.') && name.ends_with(".typstry-preview.typ") {
-            let _ = std::fs::remove_file(path);
-        }
-    }
+    cleanup_dir_previews(&root);
     Ok(())
 }
 
@@ -636,6 +657,8 @@ async fn check_typst_document(
         .ok_or_else(|| "No managed Tinymist toolchain is installed.".to_string())?;
 
     std::fs::write(&input_path, source_code).map_err(|e| format!("Check write failed: {}", e))?;
+    let _input_guard = TempFileGuard { path: input_path.clone() };
+    let _output_guard = TempFileGuard { path: output_path.clone() };
 
     let mut command = std::process::Command::new(&tinymist_cmd);
     command.current_dir(parent);
@@ -652,9 +675,6 @@ async fn check_typst_document(
         .arg(&output_path)
         .output()
         .map_err(|e| format!("Tinymist check failed to start: {}", e));
-
-    let _ = std::fs::remove_file(&input_path);
-    let _ = std::fs::remove_file(&output_path);
 
     let output = output?;
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -807,6 +827,7 @@ async fn compile_typst_preview(
 
     std::fs::write(&input_path, preview_source)
         .map_err(|error| format!("Preview source write failed: {}", error))?;
+    let _input_guard = TempFileGuard { path: input_path.clone() };
     let mut command = std::process::Command::new(&tinymist_cmd);
     command.current_dir(parent);
     #[cfg(windows)]
@@ -824,7 +845,6 @@ async fn compile_typst_preview(
             .arg(&output_pattern)
             .output()
             .map_err(|error| format!("Tinymist preview failed to start: {}", error));
-    let _ = std::fs::remove_file(&input_path);
     let output = output?;
 
     let mut page_paths: Vec<_> = std::fs::read_dir(&temp_dir)
