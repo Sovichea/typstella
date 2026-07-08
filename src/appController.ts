@@ -1153,6 +1153,14 @@ export class TypstryWorkspaceController {
   private async initLsp(shouldConnect = true) {
     if (!this.lspClient) {
       this.lspClient = new TinymistLspClient(
+        () => {
+          if (!this.workspaceRootPath) return null;
+          if (this.settingsController.value.preview.khmerRenderPreparation) {
+            const cacheRoot = this.getCacheRootPath();
+            return cacheRoot ? `${cacheRoot}/render` : this.workspaceRootPath;
+          }
+          return this.workspaceRootPath;
+        },
         () => {},
         (status) => this.setLspStatus(status),
         (uri, position) => this.handleInverseSync(uri, position),
@@ -2700,6 +2708,10 @@ export class TypstryWorkspaceController {
     await this.workspaceWatcher.start(selected);
     this.updateWorkspaceViewportVisibility();
     this.recentProjectsController.add(selected);
+    if (this.lspClient) {
+      this.setLspStatus({ kind: "starting", message: "Connecting to new workspace root..." });
+      void this.lspClient.restart();
+    }
     await this.restoreWorkspaceState(selected);
   }
 

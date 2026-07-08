@@ -35,12 +35,39 @@ export function duplicatesStructuredDiagnostic(
 }
 
 function canonicalDiagnosticMessage(message: string): string {
-  return message
+  let msg = message
     .normalize("NFKC")
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "") // strip ANSI escape codes
     .replace(/\s+/g, " ")
     .replace(/[\p{Cc}\p{Cf}]/gu, "")
     .trim();
+
+  // Normalize path-like components to just their last components (basenames)
+  // to avoid duplication due to absolute cache path vs original workspace path mismatches
+  msg = msg.split(" ").map(word => {
+    if (word.includes("/") || word.includes("\\")) {
+      const lastSlash = Math.max(word.lastIndexOf("/"), word.lastIndexOf("\\"));
+      return word.slice(lastSlash + 1);
+    }
+    return word;
+  }).join(" ");
+
+  msg = msg.toLowerCase();
+
+  // Strip prefixes
+  let oldMsg;
+  do {
+    oldMsg = msg;
+    msg = msg
+      .replace(/^(?:error|warning|info|hint|typst|tinymist|problem|log)[:\s\-]+/g, "")
+      .replace(/^\[(?:error|warning|info|hint|typst|tinymist|problem|log)\][:\s\-]*/g, "")
+      .trim();
+  } while (msg !== oldMsg);
+
+  // Strip trailing period/colon/brackets/whitespaces
+  msg = msg.replace(/[.:\s\-\]\[]+$/, "");
+
+  return msg;
 }
 
 export class LogConsoleController {
@@ -73,7 +100,18 @@ export class LogConsoleController {
   }
 
   public setDiagnostics(entries: LogConsoleEntryInput[]): void {
-    this.diagnostics = entries.map(entry => this.createEntry({ ...entry, channel: "lsp" }));
+    // Filter out duplicates in incoming diagnostics
+    const seen = new Set<string>();
+    const uniqueEntries: LogConsoleEntryInput[] = [];
+    for (const entry of entries) {
+      const key = `${entry.filePath}:${entry.line}:${entry.column}:${canonicalDiagnosticMessage(entry.message)}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        uniqueEntries.push(entry);
+      }
+    }
+
+    this.diagnostics = uniqueEntries.map(entry => this.createEntry({ ...entry, channel: "lsp" }));
     this.logs = this.logs.filter(log => !duplicatesStructuredDiagnostic(log, this.diagnostics));
     this.render();
   }
@@ -86,6 +124,13 @@ export class LogConsoleController {
   public appendLog(entry: LogConsoleEntryInput): void {
     const log = this.createEntry({ ...entry, channel: entry.channel ?? "lsp" });
     if (duplicatesStructuredDiagnostic(log, this.diagnostics)) return;
+
+    // Filter duplicates within current log entries
+    const canonical = canonicalDiagnosticMessage(log.message);
+    if (this.logs.some(existing => canonicalDiagnosticMessage(existing.message) === canonical)) {
+      return;
+    }
+
     this.logs.unshift(log);
     this.logs = this.logs.slice(0, 100);
     this.render();

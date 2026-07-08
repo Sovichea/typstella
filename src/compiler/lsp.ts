@@ -3,6 +3,7 @@ import type { Text } from "@codemirror/state";
 import { TauriLspTransport } from "./lspTransport";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import { asRecord, isRecord, type JsonRpcId, type JsonRpcMessage } from "./jsonRpc";
+import { filePathToUri } from "../platform/paths";
 
 type TinymistPreviewResult = {
   staticServerAddr?: string;
@@ -138,6 +139,7 @@ export class TinymistLspClient {
   private pendingRequests = new Map<number, { resolve: (result: unknown) => void; reject: (error: unknown) => void; timeout?: number }>();
 
   constructor(
+    private getWorkspaceRoot: () => string | null,
     private onSvgPreviewStream: (svgContent: string) => void,
     private onStatus: (status: LspStatus) => void = () => {},
     private onInverseSync: (uri: string | undefined, position: LspSourcePosition) => number | LspEditorSelection | void | Promise<number | LspEditorSelection | void> = () => {},
@@ -352,6 +354,13 @@ export class TinymistLspClient {
   }
 
   private async initializeLsp() {
+    const workspaceRoot = this.getWorkspaceRoot();
+    const rootUri = workspaceRoot ? filePathToUri(workspaceRoot) : null;
+    const workspaceFolders = workspaceRoot ? [{
+      uri: rootUri!,
+      name: "Workspace"
+    }] : null;
+
     const result = await this.request<unknown>("initialize", {
         processId: null,
         capabilities: {
@@ -396,7 +405,9 @@ export class TinymistLspClient {
             preview: { background: { enabled: false } }
           }
         },
-        workspaceFolders: null
+        rootPath: workspaceRoot,
+        rootUri,
+        workspaceFolders
       }, 15000);
     const capabilities = asRecord(asRecord(result)?.capabilities);
     this.positionEncoding = this.normalizePositionEncoding(capabilities?.positionEncoding);
