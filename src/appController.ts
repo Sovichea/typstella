@@ -18,7 +18,7 @@ import { looksLikeStalePrefixDiagnostic, setEditorDiagnosticsEffect } from "./ed
 import type { EditorDiagnostic, EditorDiagnosticSeverity } from "./editor/diagnostics";
 import { WorkspaceExplorer } from "./components/explorer";
 import { TinymistLspClient } from "./compiler/lsp";
-import type { EditorTextEdit, LspDiagnostic, LspInverseSyncResult, LspLogEntry, LspSourcePosition, LspStatus } from "./compiler/lsp";
+import type { EditorTextEdit, LspDiagnostic, LspInverseSyncResult, LspLogEntry, LspSourcePosition, LspStatus, PreviewDocumentPosition } from "./compiler/lsp";
 import type { AppSettings } from "./settings";
 import { SettingsController } from "./settingsController";
 import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri, relativeFilePath } from "./platform/paths";
@@ -159,6 +159,8 @@ export class TypstryWorkspaceController {
   private pdfSyncPreviewTaskKey: string | null = null;
   private pdfSyncSocket: WebSocket | null = null;
   private pdfSyncSocketUrl = "";
+  private pdfForwardSyncGeneration = 0;
+  private pendingPdfForwardSync: { generation: number; requestedAt: number } | null = null;
   private pdfPreviewTimer: number | null = null;
   private pdfPreviewRunning = false;
   private queuedPdfPreviewContents: string | null = null;
@@ -212,13 +214,7 @@ export class TypstryWorkspaceController {
     getPreviewTaskId: () => this.previewTaskId,
     isReady: () => this.lspReady,
     isEnabled: () => this.settingsController.value.preview.cursorSync,
-    handleForwardPosition: async (_path, cursor) => {
-      const editor = this.editorInstance;
-      if (!editor || !this.previewFrame.currentUrl) return false;
-      const position = Math.max(0, Math.min(cursor, editor.state.doc.length));
-      const line = editor.state.doc.lineAt(position);
-      return this.previewFrame.scrollToSourceText(line.text);
-    },
+    handleForwardPosition: (path, cursor) => this.handlePdfForwardSync(path, cursor),
     mapForwardPosition: async () => null
   });
   private readonly logConsoleController = new LogConsoleController(entry => this.navigateToLogEntry(entry));
@@ -1730,20 +1726,20 @@ export class TypstryWorkspaceController {
     if (!this.activeFilePath || !this.lspReady || !this.lspClient) return;
     if (this.pdfPreviewRunning) {
       this.queuedPdfPreviewContents = contents;
-      this.pdfPreviewGeneration += 1;
       return;
     }
     this.pdfPreviewRunning = true;
     const generation = ++this.pdfPreviewGeneration;
     this.setLspStatus({ kind: "syncing", message: "Compiling PDF preview..." });
-    this.previewFrame.setLoading("Compiling PDF preview...");
+    if (this.settingsController.value.preview.renderMode !== "on-type" || !this.previewFrame.currentUrl) {
+      this.previewFrame.setLoading("Compiling PDF preview...");
+    }
     try {
       await this.flushPendingLspSync();
-      const previewPath = this.settingsController.value.preview.khmerRenderPreparation
-        ? this.mapToCachePath(this.previewMainPath ?? this.previewRootPath ?? this.activeFilePath)
-        : this.previewMainPath ?? this.previewRootPath ?? this.activeFilePath;
+      const previewPath = await this.preparePdfPreviewExportPath(contents);
       if (!previewPath) throw new Error("No PDF preview root is available.");
       const pdf = await this.lspClient.exportPdfToMemory(previewPath);
+      if (this.queuedPdfPreviewContents !== null && this.queuedPdfPreviewContents !== contents) return;
       if (generation !== this.pdfPreviewGeneration) return;
       this.setLspStatus({ kind: "preview-ready", message: "PDF Preview Ready" });
       await this.previewFrame.loadPdfData(pdf.data!, previewPath);
@@ -1761,6 +1757,42 @@ export class TypstryWorkspaceController {
       this.queuedPdfPreviewContents = null;
       if (queued !== null && queued !== contents) void this.renderPdfPreview(queued);
     }
+  }
+
+  private async preparePdfPreviewExportPath(contents: string): Promise<string | null> {
+    if (!this.activeFilePath) return null;
+    const rootPath = this.previewMainPath ?? this.previewRootPath ?? this.activeFilePath;
+    if (!rootPath) return null;
+
+    const shouldMirror = this.settingsController.value.preview.renderMode === "on-type"
+      || this.settingsController.value.preview.khmerRenderPreparation;
+    if (!shouldMirror || !this.workspaceRootPath) {
+      return this.settingsController.value.preview.khmerRenderPreparation
+        ? this.mapToCachePath(rootPath)
+        : rootPath;
+    }
+
+    const cacheRoot = this.getCacheRootPath();
+    if (!cacheRoot) return rootPath;
+    const originalRootPath = this.mapToOriginalPath(rootPath);
+    const originalActivePath = this.mapToOriginalPath(this.activeFilePath);
+    const options = {
+      enableKhmerZws: this.settingsController.value.preview.khmerRenderPreparation,
+      projectRoot: this.workspaceRootPath,
+      entryFile: originalRootPath,
+      cacheRoot,
+      generateSourceMap: true
+    };
+    const result = await invoke<{ generatedEntryFile: string }>("prepare_render_project", { options });
+    const activeGenerated = await invoke<{ generatedPath: string; preparedText: string }>("prepare_render_file", {
+      options,
+      filePath: originalActivePath,
+      sourceCode: contents
+    });
+    const version = ++this.currentVersion;
+    await this.openDocumentIfNeeded(filePathToUri(activeGenerated.generatedPath), activeGenerated.preparedText, version);
+    await this.lspClient.notifyTextChange(filePathToUri(activeGenerated.generatedPath), activeGenerated.preparedText, version);
+    return result.generatedEntryFile;
   }
 
   private schedulePdfPreview(contents: string) {
@@ -1970,6 +2002,122 @@ export class TypstryWorkspaceController {
     });
   }
 
+  private async handlePdfForwardSync(path: string, cursor: number): Promise<boolean> {
+    const client = this.lspClient;
+    const rootPath = this.previewRootPath;
+    const taskId = this.previewTaskId;
+    if (!client || !rootPath || !taskId || !this.lspReady || !this.previewFrame.currentUrl) {
+      return false;
+    }
+
+    const target = await this.forwardSyncTarget(path, cursor);
+    if (!target) return false;
+
+    const socket = await this.ensurePdfSourceMapSocket(client, rootPath, taskId, "forward sync");
+    if (!socket) return true;
+
+    const generation = ++this.pdfForwardSyncGeneration;
+    this.pendingPdfForwardSync = { generation, requestedAt: Date.now() };
+    window.setTimeout(() => {
+      if (this.pendingPdfForwardSync?.generation === generation) {
+        this.pendingPdfForwardSync = null;
+      }
+    }, 5000);
+
+    await client.scrollPreview(taskId, {
+      event: "panelScrollTo",
+      filepath: target.filepath,
+      line: target.line,
+      character: target.character
+    });
+    this.appendDeveloperLog({
+      kind: "info",
+      source: "forward sync",
+      message: `Requested compiler preview position: ${target.filepath}:${target.line + 1}:${target.character}.`
+    });
+    return true;
+  }
+
+  private async forwardSyncTarget(path: string, cursor: number): Promise<{ filepath: string; line: number; character: number } | null> {
+    const editor = this.editorInstance;
+    const position = Math.max(0, Math.min(cursor, editor.state.doc.length));
+    if (!this.settingsController.value.preview.khmerRenderPreparation) {
+      const line = editor.state.doc.lineAt(position);
+      return {
+        filepath: path,
+        line: line.number - 1,
+        character: this.lspClient?.lspCharacterFromStringOffset(line.text, position - line.from) ?? position - line.from
+      };
+    }
+
+    const cached = this.preparedContentsCache.get(filePathKey(path));
+    const cacheRoot = this.getCacheRootPath();
+    if (!cached || !cacheRoot || !this.workspaceRootPath) return null;
+
+    const originalContent = editor.state.doc.toString();
+    const sourceByteOffset = new TextEncoder().encode(originalContent.slice(0, position)).length;
+    const relativePath = path.startsWith(this.workspaceRootPath)
+      ? path.substring(this.workspaceRootPath.length).replace(/^[/\\]+/, "")
+      : path;
+    const generatedByteOffset = await invoke<number | null>("map_source_to_generated", {
+      cacheRoot,
+      relativePath,
+      sourceOffset: sourceByteOffset
+    }).catch(() => null);
+    if (generatedByteOffset === null || generatedByteOffset === undefined) return null;
+
+    const generatedOffset = this.utf8ByteOffsetToStringOffset(cached.preparedText, generatedByteOffset);
+    const generatedDoc = EditorState.create({ doc: cached.preparedText }).doc;
+    const line = generatedDoc.lineAt(Math.max(0, Math.min(generatedOffset, generatedDoc.length)));
+    return {
+      filepath: cached.generatedPath,
+      line: line.number - 1,
+      character: this.lspClient?.lspCharacterFromStringOffset(line.text, generatedOffset - line.from) ?? generatedOffset - line.from
+    };
+  }
+
+  private async ensurePdfSourceMapSocket(
+    client: TinymistLspClient,
+    rootPath: string,
+    taskId: string,
+    source: "forward sync" | "inverse sync"
+  ): Promise<WebSocket | null> {
+    const taskKey = `${filePathKey(rootPath)}\u0000${taskId}`;
+    if (this.pdfSyncPreviewTaskKey !== taskKey) {
+      this.appendDeveloperLog({
+        kind: "info",
+        source,
+        message: `Starting hidden Tinymist source-map session for ${rootPath}.`
+      });
+      const url = await client.startPreview(
+        rootPath,
+        taskId,
+        previewRefreshStyle(this.settingsController.value.preview.renderMode),
+        false
+      );
+      if (!url) {
+        this.appendDeveloperLog({
+          kind: "warning",
+          source,
+          message: "Tinymist source-map session failed to start."
+        });
+        return null;
+      }
+      this.pdfSyncPreviewTaskKey = taskKey;
+    }
+
+    const dataPlaneUrl = client.getLatestPreviewDataPlaneUrl();
+    const socket = await this.ensurePdfSyncSocket(dataPlaneUrl);
+    if (!socket) {
+      this.appendDeveloperLog({
+        kind: "warning",
+        source,
+        message: `Tinymist data-plane connection failed: ${dataPlaneUrl || "URL unavailable"}.`
+      });
+    }
+    return socket;
+  }
+
   private async handlePdfPreviewClick(point: PreviewTextPoint): Promise<void> {
     const position = point.documentPosition;
     const client = this.lspClient;
@@ -2057,8 +2205,8 @@ export class TypstryWorkspaceController {
         });
         resolve(socket);
       }, { once: true });
-      socket.addEventListener("message", () => {
-        // The hidden session's SVG stream is intentionally discarded. Only its source map is used.
+      socket.addEventListener("message", event => {
+        this.handlePdfSyncSocketMessage(event.data);
       });
       socket.addEventListener("close", () => {
         if (this.pdfSyncSocket === socket) this.pdfSyncSocket = null;
@@ -2069,6 +2217,33 @@ export class TypstryWorkspaceController {
         resolve(null);
       }, { once: true });
     });
+  }
+
+  private handlePdfSyncSocketMessage(data: unknown): void {
+    if (typeof data !== "string") return;
+    const positions = parseTinymistPreviewPositions(data);
+    if (positions.length === 0) {
+      if (this.pendingPdfForwardSync) {
+        this.appendDeveloperLog({
+          kind: "info",
+          source: "forward sync",
+          message: `Ignored source-map payload without PDF position: ${data.slice(0, 120)}`
+        });
+      }
+      return;
+    }
+
+    const pending = this.pendingPdfForwardSync;
+    if (!pending || Date.now() - pending.requestedAt > 5000) return;
+    this.pendingPdfForwardSync = null;
+
+    const position = positions[0];
+    this.appendDeveloperLog({
+      kind: "info",
+      source: "forward sync",
+      message: `Compiler document position: candidates=${positions.length}, page=${position.page_no}, x=${position.x.toFixed(2)}, y=${position.y.toFixed(2)}.`
+    });
+    void this.previewFrame.revealDocumentPosition(position);
   }
 
   private async navigateFromPdfText(point: PreviewTextPoint): Promise<void> {
@@ -3747,4 +3922,49 @@ export class TypstryWorkspaceController {
 
 function nextAnimationFrame(): Promise<void> {
   return new Promise(resolve => requestAnimationFrame(() => resolve()));
+}
+
+function parseTinymistPreviewPositions(data: string): PreviewDocumentPosition[] {
+  const candidates = jsonPayloadCandidates(data);
+  const positions: PreviewDocumentPosition[] = [];
+  for (const candidate of candidates) {
+    try {
+      collectPreviewPositions(JSON.parse(candidate), positions);
+    } catch {
+      // Keep trying the remaining payload shapes.
+    }
+  }
+  return positions;
+}
+
+function jsonPayloadCandidates(data: string): string[] {
+  const trimmed = data.trim();
+  const candidates = [trimmed];
+  const comma = trimmed.indexOf(",");
+  if (comma >= 0) candidates.push(trimmed.slice(comma + 1).trim());
+  const firstObject = trimmed.indexOf("{");
+  if (firstObject >= 0) candidates.push(trimmed.slice(firstObject));
+  const firstArray = trimmed.indexOf("[");
+  if (firstArray >= 0) candidates.push(trimmed.slice(firstArray));
+  return [...new Set(candidates.filter(Boolean))];
+}
+
+function collectPreviewPositions(value: unknown, output: PreviewDocumentPosition[]): void {
+  if (Array.isArray(value)) {
+    for (const item of value) collectPreviewPositions(item, output);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const record = value as Record<string, unknown>;
+  const pageNo = typeof record.page_no === "number"
+    ? record.page_no
+    : typeof record.page === "number"
+      ? record.page
+      : undefined;
+  if (typeof pageNo === "number" && typeof record.x === "number" && typeof record.y === "number") {
+    output.push({ page_no: pageNo, x: record.x, y: record.y });
+  }
+  for (const item of Object.values(record)) {
+    collectPreviewPositions(item, output);
+  }
 }

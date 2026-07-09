@@ -33,7 +33,7 @@ pub struct RenderPrepareResult {
 
 pub fn mirror_project(
     options: &RenderPrepareOptions,
-    segmenter: &KhmerTextSegmenter,
+    segmenter: Option<&KhmerTextSegmenter>,
 ) -> Result<RenderPrepareResult, String> {
     let project_root = &options.project_root;
     let cache_root = &options.cache_root;
@@ -180,7 +180,7 @@ fn walk_for_stale(
 
 pub fn prepare_single_in_memory_file(
     options: &RenderPrepareOptions,
-    segmenter: &KhmerTextSegmenter,
+    segmenter: Option<&KhmerTextSegmenter>,
     file_path: &Path,
     source_code: &str,
 ) -> Result<PathBuf, String> {
@@ -207,7 +207,9 @@ pub fn prepare_single_in_memory_file(
 
     for (state, start, end, scope) in chunks {
         let chunk_text = &source_code[start..end];
-        if state == ScanState::MarkupText {
+        if options.enable_khmer_zws && state == ScanState::MarkupText {
+            let segmenter =
+                segmenter.ok_or_else(|| "Khmer segmenter is unavailable.".to_string())?;
             let prepared = prepare_khmer_text_for_rendering(
                 chunk_text,
                 &segmenter.segmenter,
@@ -337,7 +339,7 @@ fn process_typ_file(
     rel_path: &Path,
     maps_dir: &Path,
     options: &RenderPrepareOptions,
-    segmenter: &KhmerTextSegmenter,
+    segmenter: Option<&KhmerTextSegmenter>,
 ) -> Result<bool, String> {
     if dest.exists() {
         if let (Ok(src_meta), Ok(dest_meta)) = (fs::metadata(src), fs::metadata(dest)) {
@@ -374,7 +376,9 @@ fn process_typ_file(
 
     for (state, start, end, scope) in chunks {
         let chunk_text = &source_content[start..end];
-        if state == ScanState::MarkupText {
+        if options.enable_khmer_zws && state == ScanState::MarkupText {
+            let segmenter =
+                segmenter.ok_or_else(|| "Khmer segmenter is unavailable.".to_string())?;
             let prepared = prepare_khmer_text_for_rendering(
                 chunk_text,
                 &segmenter.segmenter,

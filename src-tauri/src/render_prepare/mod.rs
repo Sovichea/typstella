@@ -17,8 +17,12 @@ pub async fn prepare_render_project(
     options: RenderPrepareOptions,
 ) -> Result<RenderPrepareResult, String> {
     tokio::task::spawn_blocking(move || -> Result<RenderPrepareResult, String> {
-        let segmenter = KhmerTextSegmenter::new()?;
-        mirror_project(&options, &segmenter)
+        let segmenter = if options.enable_khmer_zws {
+            Some(KhmerTextSegmenter::new()?)
+        } else {
+            None
+        };
+        mirror_project(&options, segmenter.as_ref())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -38,9 +42,13 @@ pub async fn prepare_render_file(
     source_code: String,
 ) -> Result<RenderPrepareFileResult, String> {
     tokio::task::spawn_blocking(move || -> Result<RenderPrepareFileResult, String> {
-        let segmenter = KhmerTextSegmenter::new()?;
+        let segmenter = if options.enable_khmer_zws {
+            Some(KhmerTextSegmenter::new()?)
+        } else {
+            None
+        };
         let path = std::path::Path::new(&file_path);
-        let dest = prepare_single_in_memory_file(&options, &segmenter, path, &source_code)?;
+        let dest = prepare_single_in_memory_file(&options, segmenter.as_ref(), path, &source_code)?;
         let prepared_text = std::fs::read_to_string(&dest).map_err(|e| e.to_string())?;
         Ok(RenderPrepareFileResult {
             generated_path: dest.to_string_lossy().to_string(),

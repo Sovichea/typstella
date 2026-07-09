@@ -32,9 +32,14 @@ type PdfClickItem = {
   height: number;
 };
 
+type SourceTextScrollOptions = {
+  ripple?: boolean;
+};
+
 const ZOOM_LEVELS = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500];
 const DEFAULT_ZOOM_PERCENT = 90;
 const MAX_OUTPUT_SCALE = 2;
+const FORWARD_SYNC_GREEN = "#3db489";
 
 export class PreviewFrame {
   private iframe: HTMLIFrameElement | null = null;
@@ -52,6 +57,7 @@ export class PreviewFrame {
   private pageTextCache = new Map<number, string>();
   private pageClickItems = new Map<number, PdfClickItem[]>();
   private pdfGeneration = 0;
+  private forwardRippleGeneration = 0;
 
   constructor(
     private readonly pane: HTMLElement,
@@ -97,14 +103,14 @@ export class PreviewFrame {
     const previousScroll = this.captureScrollAnchor();
     this.clearErrorOverlay();
     this.clearMessageHost();
-    await this.disposePdfDocument();
-    if (generation !== this.pdfGeneration) return;
 
     const iframe = await this.ensureIframe();
     if (generation !== this.pdfGeneration) return;
     const iframeDoc = iframe.contentDocument;
     if (!iframeDoc) throw new Error("PDF preview document is unavailable.");
 
+    let nextPdfDoc: any = null;
+    let nextLoadingTask: { destroy(): Promise<void> } | null = null;
     try {
       const pdfjs = await this.pdfJs();
       if (generation !== this.pdfGeneration) return;
@@ -116,24 +122,47 @@ export class PreviewFrame {
         cMapPacked: true,
         standardFontDataUrl: "/standard_fonts/"
       });
-      this.pdfLoadingTask = loadingTask as unknown as { destroy(): Promise<void> };
+      nextLoadingTask = loadingTask as unknown as { destroy(): Promise<void> };
       const pdfDoc = await loadingTask.promise;
+      nextPdfDoc = pdfDoc;
       if (generation !== this.pdfGeneration) {
         await (pdfDoc as any).destroy();
         return;
       }
+      const nextDimensions = await readPdfPageDimensions(pdfDoc, generation, () => this.pdfGeneration);
+      if (generation !== this.pdfGeneration) {
+        await (pdfDoc as any).destroy();
+        return;
+      }
+
+      const oldPdfDoc = this.pdfDoc;
+      const oldLoadingTask = this.pdfLoadingTask;
+      this.observer?.disconnect();
+      this.observer = null;
+      this.cancelAllPageRenders();
+      this.pageTextCache.clear();
+      this.pageClickItems.clear();
+      nextPdfDoc = null;
       this.pdfDoc = pdfDoc;
+      this.pdfLoadingTask = nextLoadingTask;
+      nextLoadingTask = null;
+      this.pageDimensions = nextDimensions;
       this.mountedUrl = identity;
-      await this.readPageDimensions(generation);
-      if (generation !== this.pdfGeneration) return;
-      this.createPageSlots(iframeDoc);
+      this.createPageSlots(iframeDoc, true);
       this.setupIframeInteractions();
       this.installPageObserver(iframe);
       this.restoreScrollAnchor(previousScroll);
       this.reportInteractionStatus({ kind: "installed", url: identity });
+      void cleanupPdfResources(oldPdfDoc, oldLoadingTask);
     } catch (error) {
       if (generation !== this.pdfGeneration) return;
       this.setError("PDF Loading Failed", String(error));
+    } finally {
+      if (nextPdfDoc) {
+        try { await nextPdfDoc.destroy(); } catch {}
+      } else if (nextLoadingTask) {
+        try { await nextLoadingTask.destroy(); } catch {}
+      }
     }
   }
 
@@ -163,6 +192,8 @@ export class PreviewFrame {
       .pdf-page-canvas{position:absolute;inset:0;display:block;width:100%;height:100%}
       .textLayer{position:absolute;inset:0;overflow:hidden;line-height:1;opacity:1;--scale-factor:1;pointer-events:none;user-select:none}
       .textLayer span,.textLayer br{position:absolute;color:transparent;white-space:pre;transform-origin:0 0}
+      .forward-sync-ripple{position:fixed;z-index:2147483647;box-sizing:border-box;width:18px;height:18px;margin:-9px 0 0 -9px;border:2px solid ${FORWARD_SYNC_GREEN};border-radius:999px;background:rgba(61,180,137,.16);box-shadow:0 0 0 0 rgba(61,180,137,.34);pointer-events:none;animation:typstry-forward-ripple 900ms ease-out forwards}
+      @keyframes typstry-forward-ripple{0%{opacity:0;transform:scale(.55);box-shadow:0 0 0 0 rgba(61,180,137,.38)}12%{opacity:1}100%{opacity:0;transform:scale(3.1);box-shadow:0 0 0 14px rgba(61,180,137,0)}}
       .annotation-link{position:absolute;display:block}
       ::selection{background:rgba(0,120,215,.35)}
     </style></head><body><div id="viewer-container"></div></body></html>`;
@@ -175,32 +206,29 @@ export class PreviewFrame {
     return iframe;
   }
 
-  private async readPageDimensions(generation: number): Promise<void> {
-    this.pageDimensions.clear();
-    if (!this.pdfDoc) return;
-    for (let pageNo = 1; pageNo <= this.pdfDoc.numPages; pageNo += 1) {
-      if (generation !== this.pdfGeneration) return;
-      const page = await this.pdfDoc.getPage(pageNo);
-      const viewport = page.getViewport({ scale: 1 });
-      this.pageDimensions.set(pageNo, { width: viewport.width, height: viewport.height });
-      page.cleanup();
-    }
-  }
-
-  private createPageSlots(doc: Document): void {
+  private createPageSlots(doc: Document, preserveExistingPages = false): void {
     const viewer = doc.getElementById("viewer-container");
     if (!viewer || !this.pdfDoc) return;
-    viewer.replaceChildren();
-    for (let pageNo = 1; pageNo <= this.pdfDoc.numPages; pageNo += 1) {
-      const slot = doc.createElement("div");
-      slot.className = "pdf-page-container";
-      slot.dataset.pageNo = String(pageNo);
-      viewer.appendChild(slot);
+    if (!preserveExistingPages) {
+      viewer.replaceChildren();
     }
-    this.layoutPageSlots();
+    for (let pageNo = 1; pageNo <= this.pdfDoc.numPages; pageNo += 1) {
+      let slot = viewer.querySelector<HTMLElement>(`:scope > .pdf-page-container[data-page-no="${pageNo}"]`);
+      if (!slot) {
+        slot = doc.createElement("div");
+        slot.className = "pdf-page-container";
+        slot.dataset.pageNo = String(pageNo);
+        viewer.appendChild(slot);
+      }
+    }
+    for (const slot of [...viewer.querySelectorAll<HTMLElement>(":scope > .pdf-page-container")]) {
+      const pageNo = Number(slot.dataset.pageNo);
+      if (pageNo > this.pdfDoc.numPages) slot.remove();
+    }
+    this.layoutPageSlots({ preserveExistingPages });
   }
 
-  private layoutPageSlots(): void {
+  private layoutPageSlots(options: { preserveExistingPages?: boolean } = {}): void {
     const doc = this.iframe?.contentDocument;
     if (!doc) return;
     const zoom = this.previewZoomPercent / 100;
@@ -211,7 +239,10 @@ export class PreviewFrame {
       if (!dimensions) continue;
       slot.style.width = `${dimensions.width * zoom}px`;
       slot.style.height = `${dimensions.height * zoom}px`;
-      slot.replaceChildren();
+      if (!options.preserveExistingPages) {
+        slot.replaceChildren();
+        delete slot.dataset.renderGeneration;
+      }
     }
   }
 
@@ -246,7 +277,8 @@ export class PreviewFrame {
     if (!this.pdfDoc || generation !== this.pdfGeneration || this.activeRenders.has(pageNo)) return;
     const doc = this.iframe?.contentDocument;
     const slot = doc?.querySelector<HTMLElement>(`.pdf-page-container[data-page-no="${pageNo}"]`);
-    if (!doc || !slot || slot.firstElementChild) return;
+    if (!doc || !slot || slot.dataset.renderGeneration === String(generation)) return;
+    const replacingExistingPage = slot.firstElementChild !== null;
 
     const active: ActivePageRender = { generation, task: null, page: null };
     this.activeRenders.set(pageNo, active);
@@ -266,7 +298,7 @@ export class PreviewFrame {
       canvas.height = Math.max(1, Math.floor(renderViewport.height));
       canvas.style.width = `${cssViewport.width}px`;
       canvas.style.height = `${cssViewport.height}px`;
-      slot.appendChild(canvas);
+      if (!replacingExistingPage) slot.appendChild(canvas);
 
       const context = canvas.getContext("2d", { alpha: false });
       if (!context) throw new Error("Canvas rendering is unavailable.");
@@ -281,7 +313,7 @@ export class PreviewFrame {
       const textLayerElement = doc.createElement("div");
       textLayerElement.className = "textLayer";
       textLayerElement.style.setProperty("--scale-factor", String(cssViewport.scale));
-      slot.appendChild(textLayerElement);
+      if (!replacingExistingPage) slot.appendChild(textLayerElement);
       const textLayer = new pdfjs.TextLayer({
         textContentSource: textContent,
         container: textLayerElement,
@@ -291,6 +323,7 @@ export class PreviewFrame {
       attachPdfTextMetadata(textLayerElement, textContent.items);
       if (!this.renderIsCurrent(pageNo, active, slot)) return;
 
+      const annotationLinks: HTMLElement[] = [];
       for (const annotation of await page.getAnnotations()) {
         if (annotation.subtype !== "Link" || !annotation.url) continue;
         const rect = cssViewport.convertToViewportRectangle(annotation.rect);
@@ -301,8 +334,14 @@ export class PreviewFrame {
         link.style.top = `${Math.min(rect[1], rect[3])}px`;
         link.style.width = `${Math.abs(rect[2] - rect[0])}px`;
         link.style.height = `${Math.abs(rect[3] - rect[1])}px`;
-        slot.appendChild(link);
+        annotationLinks.push(link);
       }
+      if (replacingExistingPage) {
+        slot.replaceChildren(canvas, textLayerElement, ...annotationLinks);
+      } else {
+        slot.append(...annotationLinks);
+      }
+      slot.dataset.renderGeneration = String(generation);
     } catch (error) {
       if (!(error instanceof Error && error.name === "RenderingCancelledException")) {
         console.error(`Failed to render PDF page ${pageNo}:`, error);
@@ -362,7 +401,7 @@ export class PreviewFrame {
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
-  public async scrollToText(pageNo: number, text: string): Promise<void> {
+  public async scrollToText(pageNo: number, text: string, options: SourceTextScrollOptions = {}): Promise<void> {
     const slot = this.iframe?.contentDocument
       ?.querySelector<HTMLElement>(`.pdf-page-container[data-page-no="${pageNo}"]`);
     if (!slot) return;
@@ -375,9 +414,12 @@ export class PreviewFrame {
         return candidate.length > 0 && (candidate.includes(normalized) || normalized.includes(candidate));
       });
     match?.scrollIntoView({ behavior: "smooth", block: "center" });
+    if (match && options.ripple) {
+      void this.showForwardSyncRipple(match);
+    }
   }
 
-  public async scrollToSourceText(text: string, preferredPage?: number): Promise<boolean> {
+  public async scrollToSourceText(text: string, preferredPage?: number, options: SourceTextScrollOptions = {}): Promise<boolean> {
     if (!this.pdfDoc) return false;
     const probes = sourceTextProbes(text);
     if (probes.length === 0) return false;
@@ -391,10 +433,71 @@ export class PreviewFrame {
         return pageText.includes(normalized) || compactPageText.includes(normalized.replace(/\s+/gu, ""));
       });
       if (!probe) continue;
-      await this.scrollToText(pageNo, firstSearchToken(probe));
+      await this.scrollToText(pageNo, firstSearchToken(probe), options);
       return true;
     }
     return false;
+  }
+
+  public async revealDocumentPosition(position: { page_no: number; x: number; y: number }): Promise<void> {
+    const slot = this.iframe?.contentDocument
+      ?.querySelector<HTMLElement>(`.pdf-page-container[data-page-no="${position.page_no}"]`);
+    if (!slot) return;
+    const view = this.iframe?.contentWindow;
+    if (!view) return;
+
+    const zoom = this.previewZoomPercent / 100;
+    const targetY = slot.offsetTop + (position.y * zoom) - (view.innerHeight * 0.45);
+    view.scrollTo({
+      top: Math.max(0, targetY),
+      behavior: "smooth"
+    });
+    await this.showForwardSyncRippleAtDocumentPosition(position);
+  }
+
+  private async showForwardSyncRipple(target: HTMLElement): Promise<void> {
+    const generation = ++this.forwardRippleGeneration;
+    const view = this.iframe?.contentWindow;
+    const doc = this.iframe?.contentDocument;
+    if (!view || !doc) return;
+
+    await waitForPreviewScrollToSettle(view, 100, 100);
+    if (generation !== this.forwardRippleGeneration || !target.isConnected) return;
+
+    const rect = target.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    this.renderForwardSyncRipple(doc, x, y);
+  }
+
+  private async showForwardSyncRippleAtDocumentPosition(position: { page_no: number; x: number; y: number }): Promise<void> {
+    const generation = ++this.forwardRippleGeneration;
+    const view = this.iframe?.contentWindow;
+    const doc = this.iframe?.contentDocument;
+    if (!view || !doc) return;
+
+    await waitForPreviewScrollToSettle(view, 100, 100);
+    const slot = doc.querySelector<HTMLElement>(`.pdf-page-container[data-page-no="${position.page_no}"]`);
+    if (generation !== this.forwardRippleGeneration || !slot) return;
+
+    const zoom = this.previewZoomPercent / 100;
+    const slotRect = slot.getBoundingClientRect();
+    const x = slotRect.left + (position.x * zoom);
+    const y = slotRect.top + (position.y * zoom);
+    this.renderForwardSyncRipple(doc, x, y);
+  }
+
+  private renderForwardSyncRipple(doc: Document, x: number, y: number): void {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    doc.querySelectorAll(".forward-sync-ripple").forEach(element => element.remove());
+    const ripple = doc.createElement("div");
+    ripple.className = "forward-sync-ripple";
+    ripple.style.left = `${x}px`;
+    ripple.style.top = `${y}px`;
+    doc.body.appendChild(ripple);
+    window.setTimeout(() => {
+      if (ripple.isConnected) ripple.remove();
+    }, 1000);
   }
 
   private async getPageText(pageNo: number): Promise<string> {
@@ -615,6 +718,33 @@ function decodeBase64(value: string): Uint8Array {
   return bytes;
 }
 
+async function readPdfPageDimensions(
+  pdfDoc: any,
+  generation: number,
+  currentGeneration: () => number
+): Promise<Map<number, PageDimensions>> {
+  const dimensions = new Map<number, PageDimensions>();
+  for (let pageNo = 1; pageNo <= pdfDoc.numPages; pageNo += 1) {
+    if (generation !== currentGeneration()) return dimensions;
+    const page = await pdfDoc.getPage(pageNo);
+    const viewport = page.getViewport({ scale: 1 });
+    dimensions.set(pageNo, { width: viewport.width, height: viewport.height });
+    page.cleanup();
+  }
+  return dimensions;
+}
+
+async function cleanupPdfResources(
+  pdfDoc: any,
+  loadingTask: { destroy(): Promise<void> } | null
+): Promise<void> {
+  if (pdfDoc) {
+    try { await pdfDoc.destroy(); } catch {}
+  } else if (loadingTask) {
+    try { await loadingTask.destroy(); } catch {}
+  }
+}
+
 function escapeHtml(value: string): string {
   return value.replace(/[&<>]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[character] ?? character);
 }
@@ -766,4 +896,49 @@ function pdfClickItems(rawItems: readonly any[], viewport: any): PdfClickItem[] 
 
 function pdfItemGap(left: PdfClickItem, right: PdfClickItem): number {
   return Math.max(0, right.left - left.right);
+}
+
+async function waitForPreviewScrollToSettle(
+  view: Window,
+  initialDelayMs: number,
+  afterScrollStopDelayMs: number
+): Promise<void> {
+  let sawScroll = false;
+  const startedAt = performance.now();
+  let lastScrollAt = performance.now();
+  let lastX = view.scrollX;
+  let lastY = view.scrollY;
+  const onScroll = () => {
+    sawScroll = true;
+    lastScrollAt = performance.now();
+    lastX = view.scrollX;
+    lastY = view.scrollY;
+  };
+
+  view.addEventListener("scroll", onScroll, { passive: true });
+  await delay(initialDelayMs);
+  if (view.scrollX !== lastX || view.scrollY !== lastY) {
+    onScroll();
+  }
+  if (!sawScroll) {
+    view.removeEventListener("scroll", onScroll);
+    return;
+  }
+
+  await new Promise<void>(resolve => {
+    const check = () => {
+      const now = performance.now();
+      if (now - lastScrollAt >= afterScrollStopDelayMs || now - startedAt >= 5000) {
+        window.setTimeout(resolve, afterScrollStopDelayMs);
+        return;
+      }
+      view.requestAnimationFrame(check);
+    };
+    view.requestAnimationFrame(check);
+  });
+  view.removeEventListener("scroll", onScroll);
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, ms));
 }
