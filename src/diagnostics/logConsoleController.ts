@@ -82,6 +82,7 @@ export class LogConsoleController {
   private readonly body = document.getElementById("log-console-body")!;
   private readonly toggleButton = document.getElementById("log-console-toggle") as HTMLButtonElement;
   private readonly closeButton = document.getElementById("log-console-close") as HTMLButtonElement;
+  private readonly clearButton = document.getElementById("log-console-clear") as HTMLButtonElement;
   private readonly errorCount = document.getElementById("diagnostic-error-count")!;
   private readonly warningCount = document.getElementById("diagnostic-warning-count")!;
   private readonly tabs = [...document.querySelectorAll<HTMLButtonElement>("[data-log-console-tab]")];
@@ -91,6 +92,7 @@ export class LogConsoleController {
   public initialize(): void {
     this.toggleButton.addEventListener("click", () => this.toggle());
     this.closeButton.addEventListener("click", () => this.setVisible(false));
+    this.clearButton.addEventListener("click", () => this.clearLogs());
     for (const tab of this.tabs) {
       tab.addEventListener("click", () => {
         this.activeTab = tab.dataset.logConsoleTab as LogConsoleTab;

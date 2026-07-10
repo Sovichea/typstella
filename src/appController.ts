@@ -1424,6 +1424,7 @@ export class TypstryWorkspaceController {
     try {
       if (this.activeMode === "CODE" && this.settingsController.value.editor.formatOnSave) {
         await this.formatActiveDocument({ silent: true });
+        this.removeTrailingSpaces();
       }
 
       const content = this.activeMode === "WYSIWYM"
@@ -1492,6 +1493,29 @@ export class TypstryWorkspaceController {
       });
       if (!options.silent) this.setLspStatus({ kind: "error", message: `Format failed: ${String(error)}` });
       return false;
+    }
+  }
+
+  private removeTrailingSpaces(): void {
+    if (this.activeMode !== "CODE" || !this.editorInstance) return;
+    const doc = this.editorInstance.state.doc;
+    const changes: { from: number; to: number; insert: string }[] = [];
+    for (let i = 1; i <= doc.lines; i++) {
+      const line = doc.line(i);
+      const match = /[ \t]+$/u.exec(line.text);
+      if (match) {
+        changes.push({
+          from: line.from + match.index,
+          to: line.to,
+          insert: ""
+        });
+      }
+    }
+    if (changes.length > 0) {
+      this.editorInstance.dispatch({
+        changes,
+        userEvent: "input.format"
+      });
     }
   }
 

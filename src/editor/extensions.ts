@@ -1,7 +1,7 @@
 import { Extension, Compartment, EditorState, StateEffect, RangeSetBuilder, Prec } from "@codemirror/state";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { lineNumbers, highlightActiveLineGutter, highlightActiveLine, drawSelection, dropCursor, keymap, EditorView, ViewPlugin, Decoration, DecorationSet, ViewUpdate, WidgetType } from "@codemirror/view";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap, insertTab } from "@codemirror/commands";
 import { search, searchKeymap } from "@codemirror/search";
 import { baseEditorLayoutTheme, editorFontTheme, typstColorHighlighting, typstFontHighlighting, typstFunctionHighlighting, typstSemanticHighlighting, typstVariableHighlighting } from "./themes";
 import { codeFolding, foldGutter, foldKeymap, foldService, indentUnit, syntaxHighlighting } from "@codemirror/language";
@@ -183,18 +183,18 @@ const zwsDecoration = Decoration.widget({
   side: -1
 });
 
-class SHYWidget extends WidgetType {
+class InvisibleBlockWidget extends WidgetType {
   toDOM() {
     const span = document.createElement("span");
-    span.className = "cm-shy-widget";
+    span.className = "cm-invisible-block-widget";
     return span;
   }
-  eq(_other: SHYWidget) { return true; }
+  eq(_other: InvisibleBlockWidget) { return true; }
   ignoreEvent() { return false; }
 }
 
-const shyDecoration = Decoration.widget({
-  widget: new SHYWidget(),
+const invisibleBlockDecoration = Decoration.widget({
+  widget: new InvisibleBlockWidget(),
   side: -1
 });
 
@@ -213,30 +213,37 @@ const showZeroWidthSpacesPlugin = ViewPlugin.fromClass(class {
 
   getDeco(view: EditorView) {
     const builder = new RangeSetBuilder<Decoration>();
+    const ranges: { from: number; to: number; deco: Decoration }[] = [];
     for (const { from, to } of view.visibleRanges) {
       const text = view.state.doc.sliceString(from, to);
-      const matches: { index: number; deco: Decoration }[] = [];
 
-      let index = 0;
-      while (true) {
-        const next = text.indexOf("\u200b", index);
-        if (next === -1) break;
-        matches.push({ index: next, deco: zwsDecoration });
-        index = next + 1;
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        if (char === "\u200b" || char === "\u200c") {
+          ranges.push({ from: from + i, to: from + i + 1, deco: zwsDecoration });
+        } else if (char === "\u00ad" || char === "\u200d" || char === "\u200e" || char === "\u200f" || char === "\u2060") {
+          ranges.push({ from: from + i, to: from + i + 1, deco: invisibleBlockDecoration });
+        }
       }
 
-      index = 0;
-      while (true) {
-        const next = text.indexOf("\u00ad", index);
-        if (next === -1) break;
-        matches.push({ index: next, deco: shyDecoration });
-        index = next + 1;
+      for (let line = view.state.doc.lineAt(from); line.from <= to; line = view.state.doc.line(line.number + 1)) {
+        const lineText = line.text;
+        const match = /[ \t]+$/u.exec(lineText);
+        if (match) {
+          const trailingFrom = line.from + match.index;
+          const trailingTo = line.to;
+          const start = Math.max(trailingFrom, from);
+          const end = Math.min(trailingTo, to);
+          for (let pos = start; pos < end; pos++) {
+            ranges.push({ from: pos, to: pos + 1, deco: invisibleBlockDecoration });
+          }
+        }
+        if (line.to >= to || line.number >= view.state.doc.lines) break;
       }
-
-      matches.sort((a, b) => a.index - b.index);
-      for (const m of matches) {
-        builder.add(from + m.index, from + m.index + 1, m.deco);
-      }
+    }
+    ranges.sort((a, b) => a.from - b.from || a.to - b.to);
+    for (const range of ranges) {
+      builder.add(range.from, range.to, range.deco);
     }
     return builder.finish();
   }
@@ -339,7 +346,7 @@ export function getEditorExtensions(
       { key: "Shift-ArrowLeft", run: selectPreviousGrapheme },
       { key: "Shift-ArrowRight", run: selectNextGrapheme },
       ...completionKeymap,
-      indentWithTab, 
+      { key: "Tab", run: insertTab }, 
       ...closeBracketsKeymap, 
       ...defaultKeymap, 
       ...historyKeymap, 

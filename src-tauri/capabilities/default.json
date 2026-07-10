@@ -15,6 +15,7 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
     "core:window:allow-show",
+    "core:window:allow-set-theme",
     "core:webview:default",
     "dialog:default",
     "clipboard-manager:allow-read-text",
