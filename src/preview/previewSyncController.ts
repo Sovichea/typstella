@@ -30,6 +30,7 @@ export type InverseSyncResult = {
 export class PreviewSyncController {
   private forwardTimer: number | null = null;
   private forwardGeneration = 0;
+  private forwardSuppressedUntil = 0;
   private lastForwardTarget: { key: string; timestamp: number } | null = null;
   private pendingTextClick: (PreviewTextPoint & { timestamp: number }) | null = null;
 
@@ -62,12 +63,12 @@ export class PreviewSyncController {
   }
 
   public schedule(delayMs: number): void {
-    if (!this.canSync()) return;
+    if (!this.canSync() || this.isForwardSuppressed()) return;
     this.clearForward();
     const generation = ++this.forwardGeneration;
     this.forwardTimer = window.setTimeout(() => {
       this.forwardTimer = null;
-      if (generation !== this.forwardGeneration) return;
+      if (generation !== this.forwardGeneration || this.isForwardSuppressed()) return;
       const cursor = this.dependencies.getEditor()?.state.selection.main.head;
       if (cursor !== undefined) void this.renderAtCursor(cursor);
     }, delayMs);
@@ -76,7 +77,7 @@ export class PreviewSyncController {
   public async renderAtCursor(cursor: number): Promise<void> {
     const editor = this.dependencies.getEditor();
     const path = this.dependencies.getActiveFilePath();
-    if (!editor || !path || !this.dependencies.isReady() || !this.dependencies.isEnabled()) return;
+    if (!editor || !path || !this.dependencies.isReady() || !this.dependencies.isEnabled() || this.isForwardSuppressed()) return;
 
     this.clearForward();
     await this.navigateToCursor(cursor, ++this.forwardGeneration);
@@ -85,7 +86,7 @@ export class PreviewSyncController {
   public async navigateToCursor(cursor: number, generation = ++this.forwardGeneration): Promise<void> {
     const editor = this.dependencies.getEditor();
     const path = this.dependencies.getActiveFilePath();
-    if (!editor || !path || !this.dependencies.isReady() || !this.dependencies.isEnabled()) return;
+    if (!editor || !path || !this.dependencies.isReady() || !this.dependencies.isEnabled() || this.isForwardSuppressed()) return;
 
     if (this.dependencies.handleForwardPosition) {
       const handled = await this.dependencies.handleForwardPosition(path, cursor);
@@ -145,11 +146,22 @@ export class PreviewSyncController {
     this.forwardTimer = null;
   }
 
+  public suppressForwardFor(durationMs: number): void {
+    this.forwardSuppressedUntil = Math.max(this.forwardSuppressedUntil, Date.now() + durationMs);
+    this.clearForward();
+    this.forwardGeneration++;
+  }
+
   public reset(): void {
     this.clearForward();
     this.forwardGeneration++;
+    this.forwardSuppressedUntil = 0;
     this.lastForwardTarget = null;
     this.pendingTextClick = null;
+  }
+
+  private isForwardSuppressed(): boolean {
+    return Date.now() < this.forwardSuppressedUntil;
   }
 
   public mapInversePosition(position: LspSourcePosition, fallback: number): InverseSyncResult {

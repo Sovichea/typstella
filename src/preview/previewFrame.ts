@@ -326,7 +326,8 @@ export class PreviewFrame {
       const annotationLinks: HTMLElement[] = [];
       for (const annotation of await page.getAnnotations()) {
         if (annotation.subtype !== "Link" || !annotation.url) continue;
-        const rect = cssViewport.convertToViewportRectangle(annotation.rect);
+        const rect = viewportRectangle(cssViewport, annotation.rect);
+        if (!rect) continue;
         const link = doc.createElement("a");
         link.className = "annotation-link";
         link.href = annotation.url;
@@ -364,9 +365,11 @@ export class PreviewFrame {
     active?.page?.cleanup();
     this.activeRenders.delete(pageNo);
     this.pageClickItems.delete(pageNo);
-    this.iframe?.contentDocument
+    const slot = this.iframe?.contentDocument
       ?.querySelector<HTMLElement>(`.pdf-page-container[data-page-no="${pageNo}"]`)
-      ?.replaceChildren();
+    if (!slot) return;
+    slot.replaceChildren();
+    delete slot.dataset.renderGeneration;
   }
 
   private cancelAllPageRenders(): void {
@@ -439,7 +442,7 @@ export class PreviewFrame {
     return false;
   }
 
-  public async revealDocumentPosition(position: { page_no: number; x: number; y: number }): Promise<void> {
+  public async revealDocumentPosition(position: { page_no: number; x: number; y: number }, options: { ripple?: boolean } = {}): Promise<void> {
     const slot = this.iframe?.contentDocument
       ?.querySelector<HTMLElement>(`.pdf-page-container[data-page-no="${position.page_no}"]`);
     if (!slot) return;
@@ -452,7 +455,9 @@ export class PreviewFrame {
       top: Math.max(0, targetY),
       behavior: "smooth"
     });
-    await this.showForwardSyncRippleAtDocumentPosition(position);
+    if (options.ripple) {
+      await this.showForwardSyncRippleAtDocumentPosition(position);
+    }
   }
 
   private async showForwardSyncRipple(target: HTMLElement): Promise<void> {
@@ -892,6 +897,21 @@ function pdfClickItems(rawItems: readonly any[], viewport: any): PdfClickItem[] 
     items.push({ text: item.str, left, right: left + width, baseline, height });
   }
   return items;
+}
+
+function viewportRectangle(viewport: any, rect: unknown): [number, number, number, number] | null {
+  if (!Array.isArray(rect) || rect.length < 4 || typeof viewport?.convertToViewportPoint !== "function") {
+    return null;
+  }
+  const x1 = Number(rect[0]);
+  const y1 = Number(rect[1]);
+  const x2 = Number(rect[2]);
+  const y2 = Number(rect[3]);
+  if (![x1, y1, x2, y2].every(Number.isFinite)) return null;
+  const first = viewport.convertToViewportPoint(x1, y1);
+  const second = viewport.convertToViewportPoint(x2, y2);
+  if (!Array.isArray(first) || !Array.isArray(second)) return null;
+  return [first[0], first[1], second[0], second[1]];
 }
 
 function pdfItemGap(left: PdfClickItem, right: PdfClickItem): number {

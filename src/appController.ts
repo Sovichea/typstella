@@ -65,6 +65,7 @@ type StartupTimingEntry = {
 const DEFAULT_INPUT_WIDTH_PCT = 50;
 const DEFAULT_PREVIEW_WIDTH_PCT = 100 - DEFAULT_INPUT_WIDTH_PCT;
 const DEFAULT_EXPLORER_WIDTH_PX = 250;
+const SYNC_RIPPLE_GREEN = "#3db489";
 
 type ExamplesWorkspace = {
   workspacePath: string;
@@ -100,6 +101,7 @@ type PreviewSessionState = Pick<
 
 type ActivateEditorTabOptions = {
   preservePreviewSession?: PreviewSessionState;
+  skipPreviewActivation?: boolean;
 };
 
 type LoadFileOptions = {
@@ -118,6 +120,35 @@ function inverseDebugText(text: string, offset: number): string {
     .map(character => `U+${character.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`)
     .join(" ");
   return `text=${JSON.stringify(sample)}, codePoints=[${codePoints}]`;
+}
+
+function isScrollbarPointerEvent(element: HTMLElement, event: PointerEvent): boolean {
+  const rect = element.getBoundingClientRect();
+  const canScrollVertically = element.scrollHeight > element.clientHeight;
+  const canScrollHorizontally = element.scrollWidth > element.clientWidth;
+  const verticalScrollbarWidth = canScrollVertically
+    ? Math.max(12, element.offsetWidth - element.clientWidth)
+    : 0;
+  const horizontalScrollbarHeight = canScrollHorizontally
+    ? Math.max(12, element.offsetHeight - element.clientHeight)
+    : 0;
+  const inVerticalScrollbar = canScrollVertically && event.clientX >= rect.right - verticalScrollbarWidth;
+  const inHorizontalScrollbar = canScrollHorizontally && event.clientY >= rect.bottom - horizontalScrollbarHeight;
+  return inVerticalScrollbar || inHorizontalScrollbar;
+}
+
+function ensureEditorCaretRippleStyle(): void {
+  if (document.getElementById("typstry-editor-caret-ripple-style")) return;
+  const style = document.createElement("style");
+  style.id = "typstry-editor-caret-ripple-style";
+  style.textContent = `
+    @keyframes typstry-editor-caret-ripple {
+      0% { opacity: 0; transform: scale(.55); box-shadow: 0 0 0 0 rgba(61,180,137,.38); }
+      12% { opacity: 1; }
+      100% { opacity: 0; transform: scale(3.1); box-shadow: 0 0 0 14px rgba(61,180,137,0); }
+    }
+  `;
+  document.head.appendChild(style);
 }
 
 export class TypstryWorkspaceController {
@@ -161,9 +192,13 @@ export class TypstryWorkspaceController {
   private pdfSyncSocketUrl = "";
   private pdfForwardSyncGeneration = 0;
   private pendingPdfForwardSync: { generation: number; requestedAt: number } | null = null;
+  private pdfPreviewSourceMapRootPath: string | null = null;
+  private pdfPreviewSourceMapTaskId: string | null = null;
+  private pdfPreviewGeneratedFiles = new Map<string, { generatedPath: string; preparedText: string }>();
   private pdfPreviewTimer: number | null = null;
   private pdfPreviewRunning = false;
   private queuedPdfPreviewContents: string | null = null;
+  private editorScrollbarPointerActive = false;
   private readonly externalConflictPaths = new Set<string>();
   private readonly settingsController = new SettingsController(
     settings => this.applySettingsToRuntime(settings),
@@ -711,6 +746,33 @@ export class TypstryWorkspaceController {
       }),
       parent: this.codeRenderPane
     });
+    this.editorInstance.dom.addEventListener("pointerup", event => {
+      if (!(event instanceof PointerEvent) || event.button !== 0) return;
+      if (this.editorScrollbarPointerActive) {
+        this.editorScrollbarPointerActive = false;
+        this.previewSyncController.suppressForwardFor(250);
+        return;
+      }
+      window.setTimeout(() => {
+        const cursor = this.editorInstance.state.selection.main.head;
+        void this.previewSyncController.renderAtCursor(cursor);
+      }, 0);
+    }, true);
+    this.editorInstance.scrollDOM.addEventListener("pointerdown", event => {
+      if (!(event instanceof PointerEvent) || event.button !== 0) return;
+      if (!isScrollbarPointerEvent(this.editorInstance.scrollDOM, event)) return;
+      this.editorScrollbarPointerActive = true;
+      this.previewSyncController.suppressForwardFor(1000);
+    }, true);
+    window.addEventListener("pointerup", () => {
+      if (!this.editorScrollbarPointerActive) return;
+      window.setTimeout(() => {
+        this.editorScrollbarPointerActive = false;
+      }, 0);
+    }, true);
+    this.editorInstance.scrollDOM.addEventListener("scroll", () => {
+      this.previewSyncController.suppressForwardFor(500);
+    }, { passive: true });
     this.editorFontManager.updateDocument(initialDocument);
   }
 
@@ -978,7 +1040,13 @@ export class TypstryWorkspaceController {
   }
 
   private async activateEditorTab(path: string, persistCurrent = true, options: ActivateEditorTabOptions = {}) {
-    if (this.activeFilePath === path) {
+    const tab = this.openTabs.find((candidate) => filePathKey(candidate.path) === filePathKey(path));
+    const sameActivePath = this.activeFilePath !== null && filePathKey(this.activeFilePath) === filePathKey(path);
+    const activeEditorMatchesTab = tab !== undefined && (
+      isBinaryImagePath(tab.path) ||
+      this.editorInstance.state.doc.toString() === tab.content
+    );
+    if (sameActivePath && tab && activeEditorMatchesTab) {
       if (persistCurrent) {
         this.persistActiveTabState();
         this.renderEditorTabs();
@@ -995,13 +1063,18 @@ export class TypstryWorkspaceController {
       return;
     }
 
-    if (persistCurrent) {
+    if (persistCurrent && !sameActivePath) {
       this.persistActiveTabState();
     }
 
-    const tab = this.openTabs.find((candidate) => candidate.path === path);
-    if (!tab) return;
+    if (!tab) {
+      if (sameActivePath) {
+        this.activeFilePath = null;
+      }
+      return;
+    }
 
+    path = tab.path;
     this.spellcheckController.activateDocument(filePathKey(path));
 
     this.currentVersion = tab.version;
@@ -1091,9 +1164,14 @@ export class TypstryWorkspaceController {
     }
 
     this.activeFilePath = path;
-    await this.prepareRenderProjectIfNeeded();
+    if (!options.skipPreviewActivation) {
+      await this.prepareRenderProjectIfNeeded();
+    }
     let previewTarget: PreviewTarget | null = null;
-    if (options.preservePreviewSession) {
+    if (options.skipPreviewActivation) {
+      // Restore editor/tab state first. Preview and LSP setup will run when the
+      // toolchain reports readiness, avoiding startup-time restore failures.
+    } else if (options.preservePreviewSession) {
       this.applyPreviewSessionToTab(tab, options.preservePreviewSession);
       if (options.preservePreviewSession.previewSessionKey) {
         this.previewFrame.activateSession(options.preservePreviewSession.previewSessionKey);
@@ -1146,7 +1224,7 @@ export class TypstryWorkspaceController {
     }
 
 
-    if (this.lspReady && this.lspClient) {
+    if (!options.skipPreviewActivation && this.lspReady && this.lspClient) {
       const lspRes = await this.getLspUriAndContent(path, tab.content);
       if (lspRes) {
         const { uri: lspUri, content: lspContent } = lspRes;
@@ -1168,7 +1246,7 @@ export class TypstryWorkspaceController {
       } else {
         this.previewFrame.setMessage(`<div style="padding: 20px; color: #5f6368; font-family: var(--font-family-sans);">No preview root found for this library/template file. Diagnostics are still active.</div>`);
       }
-    } else {
+    } else if (!options.skipPreviewActivation) {
       if (!options.preservePreviewSession && this.previewRootPath) {
         void this.renderPdfPreview(tab.content);
       }
@@ -1199,7 +1277,8 @@ export class TypstryWorkspaceController {
         (uri, position) => this.handleInverseSync(uri, position),
         (uri, diagnostics, version) => this.handleLspDiagnostics(uri, diagnostics, version),
         (entry) => this.appendLspLog(entry),
-        (items) => this.documentOutlineController.updatePreviewPositions(items)
+        (items) => this.documentOutlineController.updatePreviewPositions(items),
+        (context) => this.handlePreviewStartupFailure(context)
       );
       this.lspClient.setEditorView(this.editorInstance);
     }
@@ -1219,6 +1298,33 @@ export class TypstryWorkspaceController {
       this.lspReady = false;
       console.warn("Tinymist LSP instance offline.", e);
     }
+  }
+
+  private handlePreviewStartupFailure(context: {
+    path: string;
+    taskId: string;
+    refreshStyle: "on-type" | "on-save";
+    partialRendering: boolean;
+    message: string;
+  }): void {
+    this.pdfSyncPreviewTaskKey = null;
+    this.pdfSyncSocket?.close();
+    this.pdfSyncSocket = null;
+    this.pdfSyncSocketUrl = "";
+    this.appendDeveloperLog({
+      kind: "error",
+      source: "preview startup",
+      message: [
+        `Tinymist preview startup failed: ${context.message}`,
+        `root=${context.path}`,
+        `task=${context.taskId}`,
+        `mode=${context.refreshStyle}`,
+        `partialRendering=${context.partialRendering}`,
+        `active=${this.activeFilePath ?? "n/a"}`,
+        `previewRoot=${this.previewRootPath ?? "n/a"}`,
+        `previewMain=${this.previewMainPath ?? "n/a"}`
+      ].join("; ")
+    });
   }
 
   private async handleToolchainChanged(status: ToolchainStatus) {
@@ -1275,6 +1381,9 @@ export class TypstryWorkspaceController {
         preservePreviewSession: options.preservePreviewSession
       });
       return;
+    }
+    if (this.activeFilePath && filePathKey(this.activeFilePath) === filePathKey(path)) {
+      this.activeFilePath = null;
     }
 
     try {
@@ -1742,6 +1851,11 @@ export class TypstryWorkspaceController {
       if (this.queuedPdfPreviewContents !== null && this.queuedPdfPreviewContents !== contents) return;
       if (generation !== this.pdfPreviewGeneration) return;
       this.setLspStatus({ kind: "preview-ready", message: "PDF Preview Ready" });
+      this.pdfPreviewSourceMapRootPath = previewPath;
+      this.pdfPreviewSourceMapTaskId = previewSessionIdentity(
+        previewPath,
+        previewRefreshStyle(this.settingsController.value.preview.renderMode)
+      ).taskId;
       await this.previewFrame.loadPdfData(pdf.data!, previewPath);
     } catch (error) {
       if (generation !== this.pdfPreviewGeneration) return;
@@ -1755,7 +1869,15 @@ export class TypstryWorkspaceController {
       this.pdfPreviewRunning = false;
       const queued = this.queuedPdfPreviewContents;
       this.queuedPdfPreviewContents = null;
-      if (queued !== null && queued !== contents) void this.renderPdfPreview(queued);
+      if (queued !== null && queued !== contents) {
+        void this.renderPdfPreview(queued);
+      } else if (this.settingsController.value.preview.renderMode === "on-type") {
+        window.setTimeout(() => {
+          if (this.pdfPreviewGeneration !== generation || this.pdfPreviewRunning || this.queuedPdfPreviewContents !== null) return;
+          const cursor = this.editorInstance.state.selection.main.head;
+          void this.previewSyncController.renderAtCursor(cursor);
+        }, 120);
+      }
     }
   }
 
@@ -1767,6 +1889,7 @@ export class TypstryWorkspaceController {
     const shouldMirror = this.settingsController.value.preview.renderMode === "on-type"
       || this.settingsController.value.preview.khmerRenderPreparation;
     if (!shouldMirror || !this.workspaceRootPath) {
+      this.pdfPreviewGeneratedFiles.clear();
       return this.settingsController.value.preview.khmerRenderPreparation
         ? this.mapToCachePath(rootPath)
         : rootPath;
@@ -1774,6 +1897,7 @@ export class TypstryWorkspaceController {
 
     const cacheRoot = this.getCacheRootPath();
     if (!cacheRoot) return rootPath;
+    this.pdfPreviewGeneratedFiles.clear();
     const originalRootPath = this.mapToOriginalPath(rootPath);
     const originalActivePath = this.mapToOriginalPath(this.activeFilePath);
     const options = {
@@ -1789,6 +1913,7 @@ export class TypstryWorkspaceController {
       filePath: originalActivePath,
       sourceCode: contents
     });
+    this.pdfPreviewGeneratedFiles.set(filePathKey(originalActivePath), activeGenerated);
     const version = ++this.currentVersion;
     await this.openDocumentIfNeeded(filePathToUri(activeGenerated.generatedPath), activeGenerated.preparedText, version);
     await this.lspClient.notifyTextChange(filePathToUri(activeGenerated.generatedPath), activeGenerated.preparedText, version);
@@ -1901,8 +2026,10 @@ export class TypstryWorkspaceController {
     }
     const lspRes = await this.getLspUriAndContent(path, text);
     if (!lspRes) return;
+    if (!this.isLspSyncVersionCurrent(path, version)) return;
     const { uri: lspUri, content: lspContent } = lspRes;
     await this.openDocumentIfNeeded(lspUri, lspContent, version);
+    if (!this.isLspSyncVersionCurrent(path, version)) return;
     await this.lspClient.notifyTextChange(lspUri, lspContent, version);
     window.setTimeout(() => {
       if (this.lspReady && !this.pendingLspSyncTimer && this.pendingLspSyncText === null) {
@@ -1923,6 +2050,22 @@ export class TypstryWorkspaceController {
     this.pendingLspSyncPath = null;
     this.pendingLspSyncText = null;
     this.pendingLspSyncVersion = null;
+  }
+
+  private isLspSyncVersionCurrent(path: string, version: number): boolean {
+    const activeTab = this.getActiveTab();
+    if (activeTab && filePathKey(activeTab.path) === filePathKey(path) && activeTab.latestVersion > version) {
+      return false;
+    }
+    if (
+      this.pendingLspSyncPath &&
+      filePathKey(this.pendingLspSyncPath) === filePathKey(path) &&
+      typeof this.pendingLspSyncVersion === "number" &&
+      this.pendingLspSyncVersion > version
+    ) {
+      return false;
+    }
+    return true;
   }
 
 
@@ -1995,6 +2138,7 @@ export class TypstryWorkspaceController {
         effects: EditorView.scrollIntoView(target, { y: "center" })
       });
     }, 60);
+    this.scheduleEditorCaretRipple(editor, target);
     this.appendDeveloperLog({
       kind: "info",
       source: "inverse sync",
@@ -2002,25 +2146,90 @@ export class TypstryWorkspaceController {
     });
   }
 
+  private scheduleEditorCaretRipple(editor: EditorView, cursor: number): void {
+    let shown = false;
+    const show = () => {
+      if (shown) return;
+      if (this.editorInstance !== editor) return;
+      if (editor.state.selection.main.head !== cursor) return;
+      shown = this.showEditorCaretRipple(editor, cursor);
+    };
+    window.setTimeout(show, 90);
+    window.setTimeout(show, 180);
+  }
+
+  private showEditorCaretRipple(editor: EditorView, cursor: number): boolean {
+    const coords = editor.coordsAtPos(cursor);
+    if (!coords) return false;
+    document.querySelectorAll(".typstry-editor-caret-ripple").forEach(element => element.remove());
+    const ripple = document.createElement("div");
+    ripple.className = "typstry-editor-caret-ripple";
+    Object.assign(ripple.style, {
+      position: "fixed",
+      left: `${coords.left}px`,
+      top: `${(coords.top + coords.bottom) / 2}px`,
+      width: "18px",
+      height: "18px",
+      margin: "-9px 0 0 -9px",
+      border: `2px solid ${SYNC_RIPPLE_GREEN}`,
+      borderRadius: "999px",
+      background: "rgba(61,180,137,.16)",
+      boxShadow: "0 0 0 0 rgba(61,180,137,.34)",
+      pointerEvents: "none",
+      zIndex: "2147483647",
+      animation: "typstry-editor-caret-ripple 900ms ease-out forwards"
+    });
+    ensureEditorCaretRippleStyle();
+    document.body.appendChild(ripple);
+    window.setTimeout(() => {
+      if (ripple.isConnected) ripple.remove();
+    }, 1000);
+    return true;
+  }
+
   private async handlePdfForwardSync(path: string, cursor: number): Promise<boolean> {
     const client = this.lspClient;
-    const rootPath = this.previewRootPath;
-    const taskId = this.previewTaskId;
+    const rootPath = this.pdfPreviewSourceMapRootPath ?? this.previewRootPath;
+    const taskId = this.pdfPreviewSourceMapTaskId ?? this.previewTaskId;
     if (!client || !rootPath || !taskId || !this.lspReady || !this.previewFrame.currentUrl) {
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "forward sync",
+        message: `Skipped forward sync: client=${!!client}, root=${rootPath ?? "n/a"}, task=${taskId ?? "n/a"}, lspReady=${this.lspReady}, preview=${this.previewFrame.currentUrl || "n/a"}.`
+      });
       return false;
     }
 
     const target = await this.forwardSyncTarget(path, cursor);
-    if (!target) return false;
+    if (!target) {
+      this.appendDeveloperLog({
+        kind: "warning",
+        source: "forward sync",
+        message: `Skipped forward sync: could not map editor cursor ${cursor} for ${path}.`
+      });
+      return false;
+    }
 
     const socket = await this.ensurePdfSourceMapSocket(client, rootPath, taskId, "forward sync");
-    if (!socket) return true;
+    if (!socket) {
+      this.appendDeveloperLog({
+        kind: "warning",
+        source: "forward sync",
+        message: "Skipped forward sync: source-map socket unavailable."
+      });
+      return true;
+    }
 
     const generation = ++this.pdfForwardSyncGeneration;
     this.pendingPdfForwardSync = { generation, requestedAt: Date.now() };
     window.setTimeout(() => {
       if (this.pendingPdfForwardSync?.generation === generation) {
         this.pendingPdfForwardSync = null;
+        this.appendDeveloperLog({
+          kind: "warning",
+          source: "forward sync",
+          message: "Forward sync timed out waiting for Tinymist source-map position."
+        });
       }
     }, 5000);
 
@@ -2041,7 +2250,8 @@ export class TypstryWorkspaceController {
   private async forwardSyncTarget(path: string, cursor: number): Promise<{ filepath: string; line: number; character: number } | null> {
     const editor = this.editorInstance;
     const position = Math.max(0, Math.min(cursor, editor.state.doc.length));
-    if (!this.settingsController.value.preview.khmerRenderPreparation) {
+    const generated = this.pdfPreviewGeneratedFiles.get(filePathKey(path));
+    if (!generated) {
       const line = editor.state.doc.lineAt(position);
       return {
         filepath: path,
@@ -2050,9 +2260,8 @@ export class TypstryWorkspaceController {
       };
     }
 
-    const cached = this.preparedContentsCache.get(filePathKey(path));
     const cacheRoot = this.getCacheRootPath();
-    if (!cached || !cacheRoot || !this.workspaceRootPath) return null;
+    if (!cacheRoot || !this.workspaceRootPath) return null;
 
     const originalContent = editor.state.doc.toString();
     const sourceByteOffset = new TextEncoder().encode(originalContent.slice(0, position)).length;
@@ -2066,11 +2275,11 @@ export class TypstryWorkspaceController {
     }).catch(() => null);
     if (generatedByteOffset === null || generatedByteOffset === undefined) return null;
 
-    const generatedOffset = this.utf8ByteOffsetToStringOffset(cached.preparedText, generatedByteOffset);
-    const generatedDoc = EditorState.create({ doc: cached.preparedText }).doc;
+    const generatedOffset = this.utf8ByteOffsetToStringOffset(generated.preparedText, generatedByteOffset);
+    const generatedDoc = EditorState.create({ doc: generated.preparedText }).doc;
     const line = generatedDoc.lineAt(Math.max(0, Math.min(generatedOffset, generatedDoc.length)));
     return {
-      filepath: cached.generatedPath,
+      filepath: generated.generatedPath,
       line: line.number - 1,
       character: this.lspClient?.lspCharacterFromStringOffset(line.text, generatedOffset - line.from) ?? generatedOffset - line.from
     };
@@ -2087,7 +2296,7 @@ export class TypstryWorkspaceController {
       this.appendDeveloperLog({
         kind: "info",
         source,
-        message: `Starting hidden Tinymist source-map session for ${rootPath}.`
+        message: `Starting hidden Tinymist source-map session: root=${rootPath}; task=${taskId}; mode=${previewRefreshStyle(this.settingsController.value.preview.renderMode)}; active=${this.activeFilePath ?? "n/a"}.`
       });
       const url = await client.startPreview(
         rootPath,
@@ -2138,7 +2347,7 @@ export class TypstryWorkspaceController {
       this.appendDeveloperLog({
         kind: "info",
         source: "inverse sync",
-        message: `Starting hidden Tinymist source-map session for ${rootPath}.`
+        message: `Starting hidden Tinymist source-map session: root=${rootPath}; task=${taskId}; mode=${previewRefreshStyle(this.settingsController.value.preview.renderMode)}; active=${this.activeFilePath ?? "n/a"}.`
       });
       const url = await client.startPreview(
         rootPath,
@@ -2206,7 +2415,7 @@ export class TypstryWorkspaceController {
         resolve(socket);
       }, { once: true });
       socket.addEventListener("message", event => {
-        this.handlePdfSyncSocketMessage(event.data);
+        void this.handlePdfSyncSocketMessage(event.data);
       });
       socket.addEventListener("close", () => {
         if (this.pdfSyncSocket === socket) this.pdfSyncSocket = null;
@@ -2219,15 +2428,25 @@ export class TypstryWorkspaceController {
     });
   }
 
-  private handlePdfSyncSocketMessage(data: unknown): void {
-    if (typeof data !== "string") return;
-    const positions = parseTinymistPreviewPositions(data);
+  private async handlePdfSyncSocketMessage(data: unknown): Promise<void> {
+    const text = await previewSocketMessageText(data);
+    if (!text) {
+      if (this.pendingPdfForwardSync) {
+        this.appendDeveloperLog({
+          kind: "info",
+          source: "forward sync",
+          message: `Ignored non-text source-map payload: ${Object.prototype.toString.call(data)}.`
+        });
+      }
+      return;
+    }
+    const positions = parseTinymistPreviewPositions(text);
     if (positions.length === 0) {
       if (this.pendingPdfForwardSync) {
         this.appendDeveloperLog({
           kind: "info",
           source: "forward sync",
-          message: `Ignored source-map payload without PDF position: ${data.slice(0, 120)}`
+          message: `Ignored source-map payload without PDF position: ${text.slice(0, 120)}`
         });
       }
       return;
@@ -2559,7 +2778,7 @@ export class TypstryWorkspaceController {
   }
 
   private logEntryFromDiagnostic(uri: string, diagnostic: LspDiagnostic): LogConsoleEntryInput {
-    const filePath = filePathFromUri(uri);
+    const filePath = this.mapToOriginalPath(filePathFromUri(uri));
     return {
       kind: this.diagnosticSeverityFromLsp(diagnostic.severity),
       source: diagnostic.source ?? "typst",
@@ -2850,10 +3069,15 @@ export class TypstryWorkspaceController {
         this.renderEditorTabs();
       }
       
-      if (state.activeFilePath && this.openTabs.some(t => t.path === state.activeFilePath)) {
-         await this.activateEditorTab(state.activeFilePath, false);
+      if (state.activeFilePath) {
+        const activeTab = this.openTabs.find(t => filePathKey(t.path) === filePathKey(state.activeFilePath!));
+        if (activeTab) {
+          await this.activateEditorTab(activeTab.path, false, { skipPreviewActivation: !this.lspReady });
+        } else if (this.openTabs.length > 0) {
+          await this.activateEditorTab(this.openTabs[0].path, false, { skipPreviewActivation: !this.lspReady });
+        }
       } else if (this.openTabs.length > 0) {
-         await this.activateEditorTab(this.openTabs[0].path, false);
+         await this.activateEditorTab(this.openTabs[0].path, false, { skipPreviewActivation: !this.lspReady });
       }
     } catch(e) {
       console.warn("Failed to restore workspace state:", e);
@@ -3220,7 +3444,23 @@ export class TypstryWorkspaceController {
     this.recentProjectsController.add(selected);
     if (this.lspClient) {
       this.setLspStatus({ kind: "starting", message: "Connecting to new workspace root..." });
-      void this.lspClient.restart();
+      this.lspReady = false;
+      this.openedDocumentUris.clear();
+      try {
+        await this.lspClient.restart();
+        this.lspReady = true;
+        this.pdfSyncPreviewTaskKey = null;
+        this.pdfSyncSocket?.close();
+        this.pdfSyncSocket = null;
+        this.pdfSyncSocketUrl = "";
+      } catch (error) {
+        this.lspReady = false;
+        this.appendDeveloperLog({
+          kind: "error",
+          source: "lsp",
+          message: `Failed to restart Tinymist for workspace ${selected}: ${String(error)}`
+        });
+      }
     }
     await this.restoreWorkspaceState(selected);
     // Reload explorer tree to make sure the restored pinned main file color/format is rendered
@@ -3777,7 +4017,7 @@ export class TypstryWorkspaceController {
   }
 
   private mapToOriginalPath(cachePath: string): string {
-    if (!this.workspaceRootPath || !this.settingsController.value.preview.khmerRenderPreparation) {
+    if (!this.workspaceRootPath) {
       return cachePath;
     }
     const prefix = `${this.workspaceRootPath}/.typstry/cache/render/`.replace(/\\/g, "/").toLowerCase();
@@ -3924,9 +4164,27 @@ function nextAnimationFrame(): Promise<void> {
   return new Promise(resolve => requestAnimationFrame(() => resolve()));
 }
 
+async function previewSocketMessageText(data: unknown): Promise<string | null> {
+  if (typeof data === "string") return data;
+  if (data instanceof ArrayBuffer) {
+    return new TextDecoder().decode(new Uint8Array(data));
+  }
+  if (ArrayBuffer.isView(data)) {
+    const view = data as ArrayBufferView;
+    return new TextDecoder().decode(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+  }
+  if (typeof Blob !== "undefined" && data instanceof Blob) {
+    return await data.text();
+  }
+  return null;
+}
+
 function parseTinymistPreviewPositions(data: string): PreviewDocumentPosition[] {
-  const candidates = jsonPayloadCandidates(data);
   const positions: PreviewDocumentPosition[] = [];
+  const jumpPosition = parseTinymistJumpPosition(data);
+  if (jumpPosition) positions.push(jumpPosition);
+
+  const candidates = jsonPayloadCandidates(data);
   for (const candidate of candidates) {
     try {
       collectPreviewPositions(JSON.parse(candidate), positions);
@@ -3935,6 +4193,16 @@ function parseTinymistPreviewPositions(data: string): PreviewDocumentPosition[] 
     }
   }
   return positions;
+}
+
+function parseTinymistJumpPosition(data: string): PreviewDocumentPosition | null {
+  const match = data.trim().match(/^jump,\s*(\d+)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/u);
+  if (!match) return null;
+  const pageNo = Number(match[1]);
+  const x = Number(match[2]);
+  const y = Number(match[3]);
+  if (!Number.isFinite(pageNo) || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return { page_no: pageNo, x, y };
 }
 
 function jsonPayloadCandidates(data: string): string[] {

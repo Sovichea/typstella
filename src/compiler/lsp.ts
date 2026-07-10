@@ -157,7 +157,14 @@ export class TinymistLspClient {
     private onInverseSync: (uri: string | undefined, position: LspSourcePosition) => LspInverseSyncResult | Promise<LspInverseSyncResult> = () => {},
     private onDiagnostics: (uri: string, diagnostics: LspDiagnostic[], version?: number) => void = () => {},
     private onLog: (entry: LspLogEntry) => void = () => {},
-    private onDocumentOutline: (items: TinymistDocumentOutlineItem[]) => void = () => {}
+    private onDocumentOutline: (items: TinymistDocumentOutlineItem[]) => void = () => {},
+    private onPreviewStartupFailed: (context: {
+      path: string;
+      taskId: string;
+      refreshStyle: "on-type" | "on-save";
+      partialRendering: boolean;
+      message: string;
+    }) => void = () => {}
   ) {}
 
   public setEditorView(view: EditorView) {
@@ -468,6 +475,7 @@ export class TinymistLspClient {
           ? error
           : JSON.stringify(error);
       this.onLog({ kind: "error", source: "preview", message: `Preview startup failed: ${message}` });
+      this.onPreviewStartupFailed({ path, taskId, refreshStyle, partialRendering, message });
       this.setStatus("error", "Preview startup failed");
       return "";
     }
