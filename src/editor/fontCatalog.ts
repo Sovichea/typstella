@@ -49,6 +49,26 @@ const legacyCodeFonts: Record<string, string> = {
   "system-monospace": "monospace"
 };
 
+const complexScriptFallbackFonts = [
+  "Noto Sans Khmer",
+  "Khmer OS System",
+  "Khmer OS",
+  "Noto Sans Thai",
+  "Noto Sans Lao",
+  "Noto Sans Myanmar",
+  "Noto Sans Devanagari",
+  "Noto Sans Bengali",
+  "Noto Sans Tamil",
+  "Noto Sans Telugu",
+  "Noto Sans Kannada",
+  "Noto Sans Malayalam",
+  "Noto Sans Sinhala",
+  "Noto Sans Hebrew",
+  "Noto Sans Arabic",
+  "Noto Sans",
+  "sans-serif"
+];
+
 export function normalizeCodeEditorFont(value: unknown): CodeEditorFontId {
   if (!validFamily(value)) return "Fira Mono";
   if (value === "MiSans Latin") return "Fira Mono";
@@ -75,6 +95,7 @@ export function codeEditorFontStack(id: CodeEditorFontId, unicodeFamily?: string
     "SFMono-Regular",
     "Consolas",
     '"Liberation Mono"',
+    ...complexScriptFallbackFonts.map(family => family === "sans-serif" ? family : quoteFamily(family)),
     "monospace"
   ];
   return [...new Set(families.filter((family): family is string => !!family))].join(", ");

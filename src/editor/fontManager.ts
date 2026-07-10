@@ -104,7 +104,7 @@ export class EditorFontManager {
       this.applyStack(candidate.fontFamily);
       return;
     }
-    this.applyStack();
+    this.applyStack(candidate.fontFamily);
     if (this.declinedIds().has(candidate.id)) {
       this.hide();
       return;

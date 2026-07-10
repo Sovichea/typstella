@@ -13,6 +13,13 @@ export const baseEditorLayoutTheme = EditorView.theme({
       fontSize: "var(--editor-font-size, 14px) !important",
       lineHeight: "var(--editor-line-height, 1.7) !important"
   },
+  ".cm-content": {
+      color: "var(--ui-text, #333333) !important",
+      WebkitTextFillColor: "currentColor"
+  },
+  ".cm-line, .cm-line *": {
+      WebkitTextFillColor: "currentColor"
+  },
   ".cm-gutterElement": {
       lineHeight: "var(--editor-line-height, 1.7) !important"
   },

@@ -28,6 +28,12 @@ describe("editor font catalog", () => {
     expect(codeEditorFontStack("Fira Mono", "MiSans Khmer").startsWith('"Fira Mono", "MiSans Khmer"')).toBe(true);
   });
 
+  test("keeps system complex-script fallbacks in the editor stack", () => {
+    const stack = codeEditorFontStack("Fira Mono");
+    expect(stack).toContain('"Noto Sans Khmer"');
+    expect(stack).toContain('"Noto Sans"');
+  });
+
   test("recommends Noto Sans when MiSans has no matching script family", () => {
     expect(detectUnicodeEditorFont("\u65E5\u672C\u8A9E\u30AB\u30CA")?.id).toBe("noto-sans-jp");
     expect(detectUnicodeEditorFont("\uD55C\uAE00")?.id).toBe("noto-sans-kr");
