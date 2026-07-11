@@ -17,6 +17,8 @@ Editor, diagnostics, and reverse sync map back to original files.
 
 Khmer render preparation is implemented as an experimental path, defaults to off, and the Settings row is shown only in dev builds. The current renderer inserts `U+200B` zero-width spaces only; Khmer `U+00AD` soft hyphen insertion was intentionally removed because it creates poor non-lexical break behavior. Normal users should first rely on Typst justification/tracking limits. Keep this pipeline for controlled experiments, preview/export comparison, and future segmentation tuning.
 
+The v1.x reassessment, end-to-end Khmer workflow audit, promotion gates, and native-speaker evaluation are tracked as `V1X-K` in the [v1.x implementation plan](./V1X_IMPLEMENTATION_PLAN.md). This document remains the single technical contract for the transformation pipeline; update it alongside any v1.x implementation change.
+
 The implemented settings shape is:
 
 ```json
