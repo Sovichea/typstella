@@ -481,6 +481,13 @@ export class TinymistLspClient {
     }
   }
 
+  public async stopPreview(taskId: string): Promise<void> {
+    await this.request<unknown>("workspace/executeCommand", {
+      command: "tinymist.doKillPreview",
+      arguments: [taskId]
+    }, 5000);
+  }
+
   public async pinMain(path: string | null): Promise<void> {
     await this.request<unknown>("workspace/executeCommand", {
       command: "tinymist.pinMain",

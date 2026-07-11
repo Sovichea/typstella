@@ -46,6 +46,8 @@ The preview setting `renderMode` controls refresh timing:
 
 Imported files normally preview through their top-level importer. A first-line `// @standalone-preview` directive lets an imported file use itself as the preview root.
 
+PDF forward and inverse sync use one hidden Tinymist web-preview task solely for its source-map data plane. The task ID ends in `-source-map`; Typstry serializes concurrent startup requests and calls `tinymist.doKillPreview` before replacing a stale task. Do not start a normal-task fallback: Tinymist can reject a second registration against the same compiler instance with `cannot register preview to the compiler instance`.
+
 ## Security boundaries
 
 Preview helper commands remain narrow:

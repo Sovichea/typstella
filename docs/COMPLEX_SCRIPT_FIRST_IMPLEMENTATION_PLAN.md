@@ -609,9 +609,9 @@ Tracked by `P7.1`, `P7.2`, `P7.9`, and `P7.10`.
 
 ### Gate checklist
 
-- [ ] A 100-page document remains navigable without multi-gigabyte preview memory growth.
-- [ ] Zooming cannot leave visible pages blank or permanently blurry.
-- [ ] A syntax error followed by a valid edit recovers diagnostics and preview without restarting the LSP.
+- [x] A 100-page document remains navigable without multi-gigabyte preview memory growth.
+- [x] Zooming cannot leave visible pages blank or permanently blurry.
+- [x] A syntax error followed by a valid edit recovers diagnostics and preview without restarting the LSP.
 - [ ] Release and debug builds render the same editor layout and document content.
 - [ ] Opening an undocked preview does not expose an uninitialized intermediate UI.
 

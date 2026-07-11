@@ -80,3 +80,12 @@ export function supportsResponsivePartialRendering(userAgent: string): boolean {
   // visible multi-second redraws while scrolling long documents.
   return !/Linux/i.test(userAgent);
 }
+
+export function sourceMapPreviewTaskId(taskId: string): string {
+  return taskId.endsWith("-source-map") ? taskId : `${taskId}-source-map`;
+}
+
+export function staleSourceMapTaskIds(taskId: string, registeredTaskId: string | null): string[] {
+  return [...new Set([registeredTaskId, taskId, sourceMapPreviewTaskId(taskId)]
+    .filter((value): value is string => Boolean(value)))];
+}

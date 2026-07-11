@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, supportsResponsivePartialRendering, tinymistPreviewArguments } from "../src/preview/previewPolicy";
+import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, supportsResponsivePartialRendering, tinymistPreviewArguments } from "../src/preview/previewPolicy";
 
 describe("preview policy", () => {
   test("only accepts the directive on the first line", () => {
@@ -49,5 +49,15 @@ describe("preview policy", () => {
     expect(supportsResponsivePartialRendering("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")).toBe(true);
     expect(tinymistPreviewArguments("/docs/main.typ", "preview-1", "on-type", false))
       .not.toContain("--partial-rendering");
+  });
+
+  test("uses one dedicated source-map task and cleans legacy registrations", () => {
+    expect(sourceMapPreviewTaskId("preview-1")).toBe("preview-1-source-map");
+    expect(sourceMapPreviewTaskId("preview-1-source-map")).toBe("preview-1-source-map");
+    expect(staleSourceMapTaskIds("preview-1", "preview-old-source-map")).toEqual([
+      "preview-old-source-map",
+      "preview-1",
+      "preview-1-source-map"
+    ]);
   });
 });

@@ -26,7 +26,7 @@ import { isBinaryImagePath, isSupportedInAppPath } from "./platform/fileTypes";
 import { WysiwymAdapter } from "./wysiwym/adapter";
 import { PreviewFrame, type PreviewClickPoint, type PreviewInteractionStatus } from "./preview/previewFrame";
 import { PreviewSyncController } from "./preview/previewSyncController";
-import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
+import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
 import { LogConsoleController, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
 import { EditorFontManager } from "./editor/fontManager";
 import { TabStripController } from "./editor/tabStripController";
@@ -181,6 +181,9 @@ export class TypstryWorkspaceController {
   private workspaceChangeQueue: Promise<void> = Promise.resolve();
   private pdfPreviewGeneration = 0;
   private pdfSyncPreviewTaskKey: string | null = null;
+  private pdfSyncRegisteredTaskId: string | null = null;
+  private pdfSourceMapStartupKey: string | null = null;
+  private pdfSourceMapStartup: Promise<{ socket: WebSocket; taskId: string } | null> | null = null;
   private pdfSyncSocket: WebSocket | null = null;
   private pdfSyncSocketUrl = "";
   private pdfForwardSyncGeneration = 0;
@@ -1378,6 +1381,9 @@ export class TypstryWorkspaceController {
       await this.lspClient.connect();
       this.lspReady = true;
       this.pdfSyncPreviewTaskKey = null;
+      this.pdfSyncRegisteredTaskId = null;
+      this.pdfSourceMapStartup = null;
+      this.pdfSourceMapStartupKey = null;
       this.pdfSyncSocket?.close();
       this.pdfSyncSocket = null;
       this.pdfSyncSocketUrl = "";
@@ -1394,10 +1400,15 @@ export class TypstryWorkspaceController {
     partialRendering: boolean;
     message: string;
   }): void {
-    this.pdfSyncPreviewTaskKey = null;
-    this.pdfSyncSocket?.close();
-    this.pdfSyncSocket = null;
-    this.pdfSyncSocketUrl = "";
+    const affectsSourceMapSession = !this.pdfSyncRegisteredTaskId
+      || context.taskId === this.pdfSyncRegisteredTaskId;
+    if (affectsSourceMapSession) {
+      this.pdfSyncPreviewTaskKey = null;
+      this.pdfSyncRegisteredTaskId = null;
+      this.pdfSyncSocket?.close();
+      this.pdfSyncSocket = null;
+      this.pdfSyncSocketUrl = "";
+    }
     this.appendDeveloperLog({
       kind: "error",
       source: "preview startup",
@@ -1418,6 +1429,9 @@ export class TypstryWorkspaceController {
     this.toolchainController.setStatus(status);
     this.lspReady = false;
     this.pdfSyncPreviewTaskKey = null;
+    this.pdfSyncRegisteredTaskId = null;
+    this.pdfSourceMapStartup = null;
+    this.pdfSourceMapStartupKey = null;
     this.pdfSyncSocket?.close();
     this.pdfSyncSocket = null;
     this.pdfSyncSocketUrl = "";
@@ -1807,6 +1821,9 @@ export class TypstryWorkspaceController {
     await this.lspClient.restart();
     this.lspReady = true;
     this.pdfSyncPreviewTaskKey = null;
+    this.pdfSyncRegisteredTaskId = null;
+    this.pdfSourceMapStartup = null;
+    this.pdfSourceMapStartupKey = null;
     this.pdfSyncSocket?.close();
     this.pdfSyncSocket = null;
     this.pdfSyncSocketUrl = "";
@@ -2474,41 +2491,83 @@ export class TypstryWorkspaceController {
     taskId: string,
     source: "forward sync" | "inverse sync"
   ): Promise<{ socket: WebSocket; taskId: string } | null> {
-    const taskIds = [...new Set([taskId, `${taskId}-source-map`])];
-    for (const candidateTaskId of taskIds) {
-      const taskKey = `${filePathKey(rootPath)}\u0000${candidateTaskId}`;
-      if (this.pdfSyncPreviewTaskKey !== taskKey) {
-        this.appendDeveloperLog({
-          kind: "info",
-          source,
-          message: `Starting hidden Tinymist source-map session: root=${rootPath}; task=${candidateTaskId}; mode=${previewRefreshStyle(this.settingsController.value.preview.renderMode)}; active=${this.activeFilePath ?? "n/a"}.`
-        });
-        const url = await client.startPreview(
-          rootPath,
-          candidateTaskId,
-          previewRefreshStyle(this.settingsController.value.preview.renderMode),
-          false
-        );
-        if (!url) {
-          this.appendDeveloperLog({
-            kind: "warning",
-            source,
-            message: `Tinymist source-map session failed to start for task ${candidateTaskId}.`
-          });
-          continue;
-        }
-        this.pdfSyncPreviewTaskKey = taskKey;
-      }
+    const sourceMapTaskId = sourceMapPreviewTaskId(taskId);
+    const taskKey = `${filePathKey(rootPath)}\u0000${sourceMapTaskId}`;
+    if (this.pdfSourceMapStartupKey === taskKey && this.pdfSourceMapStartup) {
+      return await this.pdfSourceMapStartup;
+    }
 
-      const dataPlaneUrl = client.getLatestPreviewDataPlaneUrl();
-      const socket = await this.ensurePdfSyncSocket(dataPlaneUrl, source);
-      if (socket) return { socket, taskId: candidateTaskId };
+    const startup = this.startPdfSourceMapSession(client, rootPath, taskId, sourceMapTaskId, taskKey, source);
+    this.pdfSourceMapStartupKey = taskKey;
+    this.pdfSourceMapStartup = startup;
+    try {
+      return await startup;
+    } finally {
+      if (this.pdfSourceMapStartup === startup) {
+        this.pdfSourceMapStartup = null;
+        this.pdfSourceMapStartupKey = null;
+      }
+    }
+  }
+
+  private async startPdfSourceMapSession(
+    client: TinymistLspClient,
+    rootPath: string,
+    legacyTaskId: string,
+    sourceMapTaskId: string,
+    taskKey: string,
+    source: "forward sync" | "inverse sync"
+  ): Promise<{ socket: WebSocket; taskId: string } | null> {
+    if (this.pdfSyncPreviewTaskKey === taskKey) {
+      const existingSocket = await this.ensurePdfSyncSocket(client.getLatestPreviewDataPlaneUrl(), source);
+      if (existingSocket) return { socket: existingSocket, taskId: sourceMapTaskId };
+    }
+
+    this.pdfSyncSocket?.close();
+    this.pdfSyncSocket = null;
+    this.pdfSyncSocketUrl = "";
+
+    const staleTasks = staleSourceMapTaskIds(legacyTaskId, this.pdfSyncRegisteredTaskId);
+    for (const staleTaskId of staleTasks) {
+      await client.stopPreview(staleTaskId).catch(() => {});
+    }
+    this.pdfSyncPreviewTaskKey = null;
+    this.pdfSyncRegisteredTaskId = null;
+
+    this.appendDeveloperLog({
+      kind: "info",
+      source,
+      message: `Starting hidden Tinymist source-map session: root=${rootPath}; task=${sourceMapTaskId}; mode=${previewRefreshStyle(this.settingsController.value.preview.renderMode)}; active=${this.activeFilePath ?? "n/a"}.`
+    });
+    const url = await client.startPreview(
+      rootPath,
+      sourceMapTaskId,
+      previewRefreshStyle(this.settingsController.value.preview.renderMode),
+      false
+    );
+    if (!url) {
       this.appendDeveloperLog({
         kind: "warning",
         source,
-        message: `Tinymist data-plane connection failed for task ${candidateTaskId}: ${dataPlaneUrl || "URL unavailable"}.`
+        message: `Tinymist source-map session failed to start for task ${sourceMapTaskId}.`
       });
+      return null;
     }
+    this.pdfSyncPreviewTaskKey = taskKey;
+    this.pdfSyncRegisteredTaskId = sourceMapTaskId;
+
+    const dataPlaneUrl = client.getLatestPreviewDataPlaneUrl();
+    const socket = await this.ensurePdfSyncSocket(dataPlaneUrl, source);
+    if (socket) return { socket, taskId: sourceMapTaskId };
+
+    this.appendDeveloperLog({
+      kind: "warning",
+      source,
+      message: `Tinymist data-plane connection failed for task ${sourceMapTaskId}: ${dataPlaneUrl || "URL unavailable"}.`
+    });
+    await client.stopPreview(sourceMapTaskId).catch(() => {});
+    if (this.pdfSyncRegisteredTaskId === sourceMapTaskId) this.pdfSyncRegisteredTaskId = null;
+    if (this.pdfSyncPreviewTaskKey === taskKey) this.pdfSyncPreviewTaskKey = null;
     return null;
   }
 
@@ -3552,6 +3611,9 @@ export class TypstryWorkspaceController {
         await this.lspClient.restart();
         this.lspReady = true;
         this.pdfSyncPreviewTaskKey = null;
+        this.pdfSyncRegisteredTaskId = null;
+        this.pdfSourceMapStartup = null;
+        this.pdfSourceMapStartupKey = null;
         this.pdfSyncSocket?.close();
         this.pdfSyncSocket = null;
         this.pdfSyncSocketUrl = "";
@@ -3621,6 +3683,16 @@ export class TypstryWorkspaceController {
   private closeProject() {
     this.saveWorkspaceState();
     this.pinnedMainFilePath = null;
+    if (this.pdfSyncRegisteredTaskId && this.lspClient) {
+      void this.lspClient.stopPreview(this.pdfSyncRegisteredTaskId).catch(() => {});
+    }
+    this.pdfSyncPreviewTaskKey = null;
+    this.pdfSyncRegisteredTaskId = null;
+    this.pdfSourceMapStartup = null;
+    this.pdfSourceMapStartupKey = null;
+    this.pdfSyncSocket?.close();
+    this.pdfSyncSocket = null;
+    this.pdfSyncSocketUrl = "";
     void this.updatePinnedMain(null, true);
     this.workspaceWatcher.stop();
     if (this.workspaceRootPath) {
@@ -3668,6 +3740,9 @@ export class TypstryWorkspaceController {
     }).catch(err => console.error("Error setting up Tauri preview event listeners", err));
 
     window.addEventListener("beforeunload", () => {
+      if (this.pdfSyncRegisteredTaskId && this.lspClient) {
+        void this.lspClient.stopPreview(this.pdfSyncRegisteredTaskId).catch(() => {});
+      }
       this.workspaceWatcher.stop();
       this.saveWorkspaceState();
       this.settingsController.flush();
