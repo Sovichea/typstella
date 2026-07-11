@@ -77,7 +77,13 @@ The **Language tools** setting chooses which installed providers participate:
 - `languageProviders: null` means all available providers are enabled.
 - An explicit array stores the selected provider IDs.
 
-**Add language...** downloads additional Hunspell dictionaries from a starter catalog that includes several complex-script languages as well as common Latin-script dictionaries.
+**Add language...** opens the catalog dialog to download additional Hunspell dictionaries. Each catalog entry row displays detailed onboarding metadata:
+- **Provider Type:** Displays the type level (e.g. `Deep provider` or `Dictionary only`).
+- **Support Level:** Displays support depth (Basic, Enhanced, Deep) and stability (Stable, Experimental).
+- **Download Size:** The combined byte size of the `.aff` and `.dic` files.
+- **License & Version:** Explicit license terms (e.g. `MPL 2.0 / GPL` or `LGPL`) and dictionary version.
+
+Each installed downloadable language can be uninstalled from this menu. Clicking the red **Remove** button deletes the files from the local storage folder and cleanly unregisters the language provider dynamically.
 
 Installed languages display both support depth and stability:
 
@@ -91,7 +97,7 @@ Bundled providers include:
 - Khmer through the custom Khmer segmenter.
 - English (US) through Hunspell-format dictionary resources.
 
-Khmer is currently **Deep · Experimental**. Bundled English is **Enhanced · Stable**. Downloaded Hunspell-compatible dictionaries are **Basic · Stable** unless a tested language-specific provider supersedes them.
+Khmer is currently **Deep · Experimental** (advertised as `Deep provider`). Bundled English is **Enhanced · Stable** (advertised as `Dictionary only`). Downloaded Hunspell-compatible dictionaries are **Basic · Stable** unless a tested language-specific provider supersedes them.
 
 Provider architecture is documented in [LANGUAGE_TOOLS.md](./LANGUAGE_TOOLS.md), and modern Khmer encoding policy is documented in [KHMER_SPELLCHECK.md](./KHMER_SPELLCHECK.md).
 

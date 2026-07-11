@@ -493,21 +493,21 @@ Tracked by `P7.1`, `P7.2`, `P7.9`, and `P7.10`.
 
 ### Task checklist
 
-- [ ] **P4.1 — Define catalog metadata.** Specify locale, scripts, provider type, support level, capabilities, download size, source, license, version, and checksum fields.
-- [ ] **P4.2 — Migrate the starter catalog.** Populate and validate metadata for bundled English and every downloadable dictionary. Depends on `P4.1`.
-- [ ] **P4.3 — Redesign language rows.** Show installed state, support level, provider source, download state, and only the controls supported by that language.
-- [ ] **P4.4 — Harden installation.** Verify checksums, write downloads atomically, retain license metadata, recover interrupted downloads, and refresh providers without restart.
-- [ ] **P4.5 — Implement clean removal.** Unregister the provider, remove its files, clear only its cached issues, and preserve unrelated language settings.
-- [ ] **P4.6 — Implement provider precedence.** Select a deep provider over a fallback for the same locale while retaining a reversible fallback path. Depends on `P2.4`.
-- [ ] **P4.7 — Label boundary quality.** Mark segmentation-dependent Hunspell languages as fallback support until a tokenizer-backed provider passes its fixtures.
-- [ ] **P4.8 — Test offline behavior.** Confirm installed provider metadata, license details, and capabilities remain visible without network access.
+- [x] **P4.1 — Define catalog metadata.** Specify locale, scripts, provider type, support level, capabilities, download size, source, license, version, and checksum fields.
+- [x] **P4.2 — Migrate the starter catalog.** Populate and validate metadata for bundled English and every downloadable dictionary. Depends on `P4.1`.
+- [x] **P4.3 — Redesign language rows.** Show installed state, support level, provider source, download state, and only the controls supported by that language.
+- [x] **P4.4 — Harden installation.** Verify checksums, write downloads atomically, retain license metadata, recover interrupted downloads, and refresh providers without restart.
+- [x] **P4.5 — Implement clean removal.** Unregister the provider, remove its files, clear only its cached issues, and preserve unrelated language settings.
+- [x] **P4.6 — Implement provider precedence.** Select a deep provider over a fallback for the same locale while retaining a reversible fallback path. Depends on `P2.4`.
+- [x] **P4.7 — Label boundary quality.** Mark segmentation-dependent Hunspell languages as fallback support until a tokenizer-backed provider passes its fixtures.
+- [x] **P4.8 — Test offline behavior.** Confirm installed provider metadata, license details, and capabilities remain visible without network access.
 
 ### Acceptance criteria
 
-- [ ] Installing a dictionary refreshes capabilities without restarting Typstry.
-- [ ] Thai or another segmentation-dependent language is labeled as fallback support until a tokenizer exists.
-- [ ] Removing a downloaded language cleanly unregisters it without affecting Khmer or English.
-- [ ] Provider source and license information remain available offline after installation.
+- [x] Installing a dictionary refreshes capabilities without restarting Typstry.
+- [x] Thai or another segmentation-dependent language is labeled as fallback support until a tokenizer exists.
+- [x] Removing a downloaded language cleanly unregisters it without affecting Khmer or English.
+- [x] Provider source and license information remain available offline after installation.
 
 ## Phase 5: Audit complex-script behavior across the whole UI
 

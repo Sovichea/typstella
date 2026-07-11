@@ -21,6 +21,9 @@ type LanguageCapabilityMetadata = {
   supportsSegmentation: boolean;
   supportsCustomDictionary: boolean;
   hasEditingPolicy: boolean;
+  providerType: "dictionary-only" | "dictionary-plus-tokenizer" | "deep";
+  version: string;
+  license: string;
 };
 
 export type LanguageProviderCapabilities = LanguageCapabilityMetadata & {
@@ -33,6 +36,8 @@ export type LanguageCatalogCapabilities = LanguageCapabilityMetadata & {
   installed: boolean;
   bundled: boolean;
   source: string;
+  downloadSize: number;
+  checksum: string;
 };
 
 export type SupportLevelPresentation = {
@@ -123,7 +128,9 @@ export function parseLanguageCatalog(value: unknown): LanguageCatalogCapabilitie
       locale: requiredString(record, "locale", path),
       installed: requiredBoolean(record, "installed", path),
       bundled: requiredBoolean(record, "bundled", path),
-      source: requiredString(record, "source", path)
+      source: requiredString(record, "source", path),
+      downloadSize: requiredNumber(record, "downloadSize", path),
+      checksum: optionalString(record, "checksum", path)
     };
   }), "catalog entry");
 }
@@ -159,6 +166,7 @@ function parseCapabilityMetadata(record: Record<string, unknown>, path: string):
   if (scripts.some(script => !/^[A-Z][a-z]{3}$/.test(script))) {
     throw new Error(`${path}.scripts must contain ISO 15924 codes.`);
   }
+  const providerType = requiredEnum(record, "providerType", ["dictionary-only", "dictionary-plus-tokenizer", "deep"] as const, path);
   return {
     schemaVersion,
     id: requiredString(record, "id", path),
@@ -175,14 +183,17 @@ function parseCapabilityMetadata(record: Record<string, unknown>, path: string):
     supportsCompletion: requiredBoolean(record, "supportsCompletion", path),
     supportsSegmentation: requiredBoolean(record, "supportsSegmentation", path),
     supportsCustomDictionary: requiredBoolean(record, "supportsCustomDictionary", path),
-    hasEditingPolicy: requiredBoolean(record, "hasEditingPolicy", path)
+    hasEditingPolicy: requiredBoolean(record, "hasEditingPolicy", path),
+    providerType,
+    version: requiredString(record, "version", path),
+    license: requiredString(record, "license", path)
   };
 }
 
 function rejectDuplicateIds<T extends { id: string }>(entries: T[], label: string): T[] {
   const ids = new Set<string>();
   for (const entry of entries) {
-    if (ids.has(entry.id)) throw new Error(`Duplicate ${label} ID '${entry.id}'.`);
+    if (ids.has(entry.id)) throw new Error("Duplicate " + label + " ID '" + entry.id + "'.");
     ids.add(entry.id);
   }
   return entries;
@@ -201,9 +212,22 @@ function requiredString(record: Record<string, unknown>, key: string, path: stri
   return value;
 }
 
+function optionalString(record: Record<string, unknown>, key: string, path: string): string {
+  const value = record[key];
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw new Error(`${path}.${key} must be a string.`);
+  return value;
+}
+
 function requiredBoolean(record: Record<string, unknown>, key: string, path: string): boolean {
   const value = record[key];
   if (typeof value !== "boolean") throw new Error(`${path}.${key} must be a boolean.`);
+  return value;
+}
+
+function requiredNumber(record: Record<string, unknown>, key: string, path: string): number {
+  const value = record[key];
+  if (typeof value !== "number" || isNaN(value)) throw new Error(`${path}.${key} must be a number.`);
   return value;
 }
 

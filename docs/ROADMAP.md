@@ -12,6 +12,7 @@
 - Context-aware syntax highlighting, bracket colorizer exclusions, and escaped character handling.
 - Native settings panel and versioned `settings.json`.
 - Modular local language tools with Khmer and English providers.
+- Dynamic language catalog onboarding with download integrity validation, capabilities metadata, and clean uninstallation.
 - Experimental Khmer render preparation for preview/export input.
 - Interactive document outline.
 - Writable Unicode-focused example workspace.

@@ -25,8 +25,8 @@ use render_prepare::{
 };
 use segmentation::{
     analyze_language_ranges, complete_language_word, get_provider_capabilities,
-    install_hunspell_dictionary, language_suggestions, list_hunspell_catalog, ProviderCapabilities,
-    SegmentationRegistry,
+    install_hunspell_dictionary, language_suggestions, list_hunspell_catalog,
+    remove_hunspell_dictionary, ProviderCapabilities, SegmentationRegistry,
 };
 use toolchain::active_tinymist;
 
@@ -1814,6 +1814,7 @@ pub fn run() {
             get_provider_capabilities,
             list_hunspell_catalog,
             install_hunspell_dictionary,
+            remove_hunspell_dictionary,
             open_devtools,
             complete_language_word,
             prepare_examples_workspace,

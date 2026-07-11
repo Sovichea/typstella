@@ -25,6 +25,13 @@ export type SettingsTimingEntry = {
   ms: number;
 };
 
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export class SettingsController {
   private settings: AppSettings = cloneDefaultAppSettings();
   private filePath = "";
@@ -399,14 +406,26 @@ export class SettingsController {
     const titleRow = document.createElement("div");
     titleRow.className = "settings-language-provider-title-row";
     titleRow.append(title, this.createSupportBadge(support.level, support.label, support.description));
+    if (entry.stability === "experimental") {
+      titleRow.append(this.createStabilityBadge());
+    }
+
     const meta = document.createElement("div");
     meta.className = "settings-language-catalog-meta";
+
+    const sizeStr = entry.downloadSize > 0 ? formatBytes(entry.downloadSize) : "";
+    const typeLabel = entry.providerType === "deep" ? "Deep provider" : "Dictionary only";
+
     meta.textContent = [
       entry.languageTag,
       entry.bundled ? "bundled" : entry.installed ? "installed" : "Hunspell",
-      boundaryModeLabel(entry.boundaryMode),
+      typeLabel,
+      sizeStr,
+      entry.version,
+      entry.license,
       entry.source
     ].filter(Boolean).join(" · ");
+
     const features = document.createElement("div");
     features.className = "settings-language-provider-features";
     features.textContent = providerFeatureLabels(entry).join(" · ") || "No active language-tool capabilities";
@@ -414,11 +433,20 @@ export class SettingsController {
     text.append(titleRow, meta, features);
 
     const button = document.createElement("button");
-    button.className = "settings-secondary-button";
     button.type = "button";
-    button.textContent = entry.bundled ? "Bundled" : entry.installed ? "Installed" : "Download";
-    button.disabled = entry.bundled || entry.installed;
-    button.addEventListener("click", () => void this.installLanguage(entry, button));
+    if (entry.bundled) {
+      button.className = "settings-secondary-button";
+      button.textContent = "Bundled";
+      button.disabled = true;
+    } else if (entry.installed) {
+      button.className = "settings-danger-button";
+      button.textContent = "Remove";
+      button.addEventListener("click", () => void this.uninstallLanguage(entry, button));
+    } else {
+      button.className = "settings-secondary-button";
+      button.textContent = "Download";
+      button.addEventListener("click", () => void this.installLanguage(entry, button));
+    }
 
     const row = document.createElement("div");
     row.className = "settings-language-catalog-row";
@@ -463,6 +491,29 @@ export class SettingsController {
       button.disabled = false;
       button.textContent = original;
       await message(String(error), { title: `Install ${entry.displayName}`, kind: "error" });
+    }
+  }
+
+  private async uninstallLanguage(entry: HunspellCatalogEntry, button: HTMLButtonElement): Promise<void> {
+    const original = button.textContent ?? "Remove";
+    button.disabled = true;
+    button.textContent = "Removing...";
+    try {
+      const providers = parseLanguageProviderCapabilitiesList(
+        await invoke<unknown>("remove_hunspell_dictionary", { locale: entry.locale })
+      );
+      this.setLanguageProviders(providers);
+      this.onLanguageProvidersChanged(providers);
+      this.update(settings => {
+        if (settings.editor.languageProviders !== null) {
+          settings.editor.languageProviders = settings.editor.languageProviders.filter(id => id !== entry.id);
+        }
+      });
+      await this.populateLanguageCatalog();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = original;
+      await message(String(error), { title: `Remove ${entry.displayName}`, kind: "error" });
     }
   }
 

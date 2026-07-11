@@ -117,6 +117,9 @@ pub struct ProviderCapabilities {
     pub supports_segmentation: bool,
     pub supports_custom_dictionary: bool,
     pub has_editing_policy: bool,
+    pub provider_type: String,
+    pub version: String,
+    pub license: String,
 }
 
 pub trait LanguageSegmenter: Send + Sync {
@@ -144,6 +147,15 @@ pub trait LanguageSegmenter: Send + Sync {
     }
     fn boundary_quality(&self) -> &'static str {
         "general"
+    }
+    fn provider_type(&self) -> &'static str {
+        "dictionary-only"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn license(&self) -> &'static str {
+        "unknown"
     }
     fn supports_spellcheck(&self) -> bool {
         true

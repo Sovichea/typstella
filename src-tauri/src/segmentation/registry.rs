@@ -7,7 +7,9 @@ use crate::render_prepare::scanner::{scan_typst_content, ScanState};
 use khmer_segmenter::kdict::{KDict, KHypDict};
 use khmer_segmenter::{KhmerSegmenter, SegmenterConfig};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::RwLock;
@@ -33,6 +35,12 @@ struct HunspellCatalogSpec {
     pattern: &'static str,
     aff_path: &'static str,
     dic_path: &'static str,
+    aff_size: u64,
+    aff_hash: &'static str,
+    dic_size: u64,
+    dic_hash: &'static str,
+    license: &'static str,
+    version: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -58,6 +66,11 @@ pub struct HunspellCatalogEntry {
     pub supports_segmentation: bool,
     pub supports_custom_dictionary: bool,
     pub has_editing_policy: bool,
+    pub provider_type: String,
+    pub download_size: u64,
+    pub license: String,
+    pub version: String,
+    pub checksum: String,
 }
 
 const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
@@ -68,6 +81,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0600-\\u06FF\\u0750-\\u077F\\u08A0-\\u08FF][\\u0600-\\u06FF\\u0750-\\u077F\\u08A0-\\u08FF\\u064B-\\u065F'’\\-]*",
         aff_path: "ar/ar.aff",
         dic_path: "ar/ar.dic",
+        aff_size: 86949,
+        aff_hash: "cec30b8621001e49618feb05aec1984c5fcfbf7d2ec309901d5cbf66585217a3",
+        dic_size: 7217161,
+        dic_hash: "2a3e5367f61c1583734db9d66734f5603e6be5c2d227cf5c5cd7e4ca586e34fe",
+        license: "GPL-3.0 or MPL-1.1 or LGPL-3.0",
+        version: "2020.10.01",
     },
     HunspellCatalogSpec {
         locale: "bn_BD",
@@ -76,6 +95,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0980-\\u09FF][\\u0980-\\u09FF'’\\-]*",
         aff_path: "bn_BD/bn_BD.aff",
         dic_path: "bn_BD/bn_BD.dic",
+        aff_size: 125422,
+        aff_hash: "6beeacefab0f691cb415c9ab8de227091a3be65510c3d8c0479513b261e61b97",
+        dic_size: 2237684,
+        dic_hash: "cfc78b361861a726d22f0654d7c4e0b47f843c4a9e8b605c4c99e91ea683e116",
+        license: "GPL-2.0 or LGPL-2.1 or MPL-1.1",
+        version: "2019.06.01",
     },
     HunspellCatalogSpec {
         locale: "bo",
@@ -84,6 +109,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0F00-\\u0FFF][\\u0F00-\\u0FFF'’\\-]*",
         aff_path: "bo/bo.aff",
         dic_path: "bo/bo.dic",
+        aff_size: 1706,
+        aff_hash: "b1b4501d05bd269c1edb01d62e9d04536697ee22afadd2b2bc0d068a7bfaa5b4",
+        dic_size: 4637,
+        dic_hash: "92e2ed6d89627852befd08572a5d8241674614083ffa53b66418fd68b49c85b5",
+        license: "GPL-3.0",
+        version: "2018.12.01",
     },
     HunspellCatalogSpec {
         locale: "gu_IN",
@@ -92,6 +123,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0A80-\\u0AFF][\\u0A80-\\u0AFF'’\\-]*",
         aff_path: "gu_IN/gu_IN.aff",
         dic_path: "gu_IN/gu_IN.dic",
+        aff_size: 174,
+        aff_hash: "79e7588cd644906e55b5cff8b78a47f285d94091f8d7d0e2855678caee4fdb26",
+        dic_size: 3792870,
+        dic_hash: "6039093a92e927a1ff08b756bd5cb5a8ad50700254f6d07bb81d7f2ac50ac364",
+        license: "GPL-2.0 or LGPL-2.1 or MPL-1.1",
+        version: "2020.08.01",
     },
     HunspellCatalogSpec {
         locale: "he_IL",
@@ -100,6 +137,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0590-\\u05FF][\\u0590-\\u05FF'’\\-]*",
         aff_path: "he_IL/he_IL.aff",
         dic_path: "he_IL/he_IL.dic",
+        aff_size: 78883,
+        aff_hash: "6caf86b3a545be5614f135d33a48baa244a59aca43f051dda6173d5d9cbc7700",
+        dic_size: 7796259,
+        dic_hash: "5f5331f90ed775bd527f6fb7ad1ead9a1b7d8ce46ad640c2387d9d1dc91d3058",
+        license: "GPL-2.0 or LGPL-2.1",
+        version: "2021.05.01",
     },
     HunspellCatalogSpec {
         locale: "hi_IN",
@@ -108,6 +151,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0900-\\u097F][\\u0900-\\u097F'’\\-]*",
         aff_path: "hi_IN/hi_IN.aff",
         dic_path: "hi_IN/hi_IN.dic",
+        aff_size: 12671,
+        aff_hash: "3ab96772dc3d1cdbec4141798efb8b7a091b92c9acbeb5dfd3c4998a5c508302",
+        dic_size: 5004835,
+        dic_hash: "1e01f962a02638ef73e3f8de3c44bfd854f7059d31c9fa96cff0b73a2840f9d9",
+        license: "GPL-2.0 or LGPL-2.1 or MPL-1.1",
+        version: "2020.08.01",
     },
     HunspellCatalogSpec {
         locale: "lo_LA",
@@ -116,6 +165,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0E80-\\u0EFF][\\u0E80-\\u0EFF'’\\-]*",
         aff_path: "lo_LA/lo_LA.aff",
         dic_path: "lo_LA/lo_LA.dic",
+        aff_size: 10,
+        aff_hash: "7f6d7c55043d4b09d0a4380720847457b7954048bf1dac70512593006bae8c37",
+        dic_size: 671495,
+        dic_hash: "766af9e9e114e70702bb9c1491b9057f7ae9f9eaa9745288d4a93aa702e7e018",
+        license: "GPL-3.0",
+        version: "2019.10.01",
     },
     HunspellCatalogSpec {
         locale: "mr_IN",
@@ -124,6 +179,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0900-\\u097F][\\u0900-\\u097F'’\\-]*",
         aff_path: "mr_IN/mr_IN.aff",
         dic_path: "mr_IN/mr_IN.dic",
+        aff_size: 30158,
+        aff_hash: "f870dde7dc0e50b15467b159c3c4c893c339936f1aa3642a4ab3303a13510ed9",
+        dic_size: 1036511,
+        dic_hash: "fe1112d88208b928dc2cca76f18bc3161b99c67b483778ed67fe5877461eb25a",
+        license: "GPL-2.0 or LGPL-2.1 or MPL-1.1",
+        version: "2020.08.01",
     },
     HunspellCatalogSpec {
         locale: "ne_NP",
@@ -132,6 +193,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0900-\\u097F][\\u0900-\\u097F'’\\-]*",
         aff_path: "ne_NP/ne_NP.aff",
         dic_path: "ne_NP/ne_NP.dic",
+        aff_size: 14162,
+        aff_hash: "ab53d76a82da5229d484ce0d4c892f6c1ffba5fddeb7bac73685cbf590ae130d",
+        dic_size: 874372,
+        dic_hash: "f3e8877d0f7f12c3ab7ef812388a77c20a9fcd3f8cc24d973709ec517150598d",
+        license: "GPL-3.0",
+        version: "2020.04.01",
     },
     HunspellCatalogSpec {
         locale: "pa_IN",
@@ -140,6 +207,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0A00-\\u0A7F][\\u0A00-\\u0A7F'’\\-]*",
         aff_path: "pa_IN/pa_IN.aff",
         dic_path: "pa_IN/pa_IN.dic",
+        aff_size: 2513,
+        aff_hash: "fff90e3f46c11a50f887df1beb815eab9687bea2c67ceef9bb21d5151bea11b7",
+        dic_size: 37108,
+        dic_hash: "d164c74799990d6142e5976f88d6a57016f5e2609eef0fa36d2711093ffffc25",
+        license: "GPL-2.0 or LGPL-2.1 or MPL-1.1",
+        version: "2020.08.01",
     },
     HunspellCatalogSpec {
         locale: "si_LK",
@@ -148,6 +221,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0D80-\\u0DFF][\\u0D80-\\u0DFF'’\\-]*",
         aff_path: "si_LK/si_LK.aff",
         dic_path: "si_LK/si_LK.dic",
+        aff_size: 197175,
+        aff_hash: "d188ccc49f06ce50ccb80ab9f3d08808dfb5caeb039c09cde55c8664ca6d8643",
+        dic_size: 851377,
+        dic_hash: "d6ce8cef2bbf184459bb3073d2ddc246afa914efaf8fc438b32e8d7724abfcfd",
+        license: "GPL-2.0 or LGPL-2.1 or MPL-1.1",
+        version: "2020.10.01",
     },
     HunspellCatalogSpec {
         locale: "ta_IN",
@@ -156,6 +235,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0B80-\\u0BFF][\\u0B80-\\u0BFF'’\\-]*",
         aff_path: "ta_IN/ta_IN.aff",
         dic_path: "ta_IN/ta_IN.dic",
+        aff_size: 12114,
+        aff_hash: "e05c53e643a141efc1e9c00c5f6532a6fd8ac547b998e1347aa8aea5817f2e15",
+        dic_size: 2422307,
+        dic_hash: "4c079bde24d3232d4195e78bd33bbe5fcb887ceb6363065574cec048d04bc756",
+        license: "GPL-2.0 or LGPL-2.1 or MPL-1.1",
+        version: "2020.08.01",
     },
     HunspellCatalogSpec {
         locale: "te_IN",
@@ -164,6 +249,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0C00-\\u0C7F][\\u0C00-\\u0C7F'’\\-]*",
         aff_path: "te_IN/te_IN.aff",
         dic_path: "te_IN/te_IN.dic",
+        aff_size: 160,
+        aff_hash: "24883e46a03ebb381f40ce2c0ae59c30c6e3e14808de224c0005935bf3565b1e",
+        dic_size: 3402272,
+        dic_hash: "d8f2eb5301199b1e8874545c9ffc5058fc1d2cc76ea1fdf0765338501906b719",
+        license: "GPL-2.0 or LGPL-2.1 or MPL-1.1",
+        version: "2020.08.01",
     },
     HunspellCatalogSpec {
         locale: "th_TH",
@@ -172,6 +263,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\u0E00-\\u0E7F][\\u0E00-\\u0E7F'’\\-]*",
         aff_path: "th_TH/th_TH.aff",
         dic_path: "th_TH/th_TH.dic",
+        aff_size: 1555,
+        aff_hash: "a99ba46a0899a9155cd0d4f7f823ef9f5686281220ae2eb355c8b576d166e243",
+        dic_size: 1239954,
+        dic_hash: "42e9f145eb6744a3a24c498e143229a7ce7fb2cb67c8e8e94b42fde808dbf28f",
+        license: "GPL-2.0 or LGPL-2.1",
+        version: "2021.01.01",
     },
     HunspellCatalogSpec {
         locale: "vi_VN",
@@ -180,6 +277,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\p{Script=Latin}][\\p{Script=Latin}\\p{M}'’\\-]*",
         aff_path: "vi/vi_VN.aff",
         dic_path: "vi/vi_VN.dic",
+        aff_size: 788,
+        aff_hash: "b58b31ba3cfbf1c5a3730f2cceb8652604180770020f291d2cf6c6fecc9721f4",
+        dic_size: 39852,
+        dic_hash: "21d59c8385d2ac8d708bc5dfe83b62753d7769a8b2c9c38d319ce5c57bfba0c7",
+        license: "GPL-2.0 or LGPL-2.1 or MPL-1.1",
+        version: "2021.03.01",
     },
     HunspellCatalogSpec {
         locale: "en_GB",
@@ -188,6 +291,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[A-Za-z][A-Za-z'’\\-]*",
         aff_path: "en/en_GB.aff",
         dic_path: "en/en_GB.dic",
+        aff_size: 44158,
+        aff_hash: "0fd6ed120ef28957847d98ba5149b117e27116cf81b5aa36208453f6755a36fd",
+        dic_size: 1230571,
+        dic_hash: "04e90f34f5263bf26780e9c4a442e9ad16584e227af49ddd1b3b21b01df5b29c",
+        license: "LGPL-2.1 or GPL-2.0 or MPL-1.1",
+        version: "2022.06.01",
     },
     HunspellCatalogSpec {
         locale: "es_ES",
@@ -196,6 +305,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\p{Script=Latin}][\\p{Script=Latin}\\p{M}'’\\-]*",
         aff_path: "es/es_ES.aff",
         dic_path: "es/es_ES.dic",
+        aff_size: 169202,
+        aff_hash: "e73a9bf8e1383f4986a5dc9e2fbed49371c0c61f511c626d15586bd433c1cad9",
+        dic_size: 715989,
+        dic_hash: "6975dddec3d5d2c676069537bc67b4b5f786c65c5d4cf6703a82acf779ac9ec1",
+        license: "GPL-3.0 or MPL-2.0 or LGPL-3.0",
+        version: "2022.08.01",
     },
     HunspellCatalogSpec {
         locale: "fr_FR",
@@ -204,6 +319,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\p{Script=Latin}][\\p{Script=Latin}\\p{M}'’\\-]*",
         aff_path: "fr_FR/dictionaries/fr.aff",
         dic_path: "fr_FR/dictionaries/fr.dic",
+        aff_size: 199870,
+        aff_hash: "c176610cd5dc4846806a65ddd029f422d87978bf58f224aa44222662a16a2de5",
+        dic_size: 1236490,
+        dic_hash: "b78a868e31dd6e373b6c3217969afb898a9acde828a5e7ef97308da42218c88c",
+        license: "MPL-2.0",
+        version: "2022.10.01",
     },
     HunspellCatalogSpec {
         locale: "de_DE",
@@ -212,6 +333,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\p{Script=Latin}][\\p{Script=Latin}\\p{M}'’\\-]*",
         aff_path: "de/de_DE_frami.aff",
         dic_path: "de/de_DE_frami.dic",
+        aff_size: 19067,
+        aff_hash: "646bf3333ac69c23e9d794533ee5241d6f755c359e8fe10a648f87613743d594",
+        dic_size: 4356903,
+        dic_hash: "4ca3c958b0e5545910999bc246f668840bf8ede3df8e5e6790d05edd5a586c38",
+        license: "GPL-2.0 or LGPL-2.1",
+        version: "2021.12.01",
     },
     HunspellCatalogSpec {
         locale: "it_IT",
@@ -220,6 +347,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\p{Script=Latin}][\\p{Script=Latin}\\p{M}'’\\-]*",
         aff_path: "it_IT/it_IT.aff",
         dic_path: "it_IT/it_IT.dic",
+        aff_size: 70054,
+        aff_hash: "951afaa19272f13555b8823e8bcf9ccf78f8fe1a07835bdfb912ab3e4d537c2b",
+        dic_size: 1295083,
+        dic_hash: "bae1e3501dcd2a923669592493b3fde6c02aae7c7aab83bf5e5b49077e73dd64",
+        license: "GPL-3.0",
+        version: "2022.02.01",
     },
     HunspellCatalogSpec {
         locale: "pt_BR",
@@ -228,6 +361,12 @@ const HUNSPELL_CATALOG: &[HunspellCatalogSpec] = &[
         pattern: "[\\p{Script=Latin}][\\p{Script=Latin}\\p{M}'’\\-]*",
         aff_path: "pt_BR/pt_BR.aff",
         dic_path: "pt_BR/pt_BR.dic",
+        aff_size: 979792,
+        aff_hash: "21d8ad2a769a60e17e2b5ea4ef11d4d593a58b9e2a82d642ef82d6a4c5523865",
+        dic_size: 4477695,
+        dic_hash: "a38bfb26b68ece2834e79fe83e48d5792652970ace12db89d1b9674bf9933183",
+        license: "GPL-2.0 or LGPL-2.1",
+        version: "2022.04.01",
     },
 ];
 
@@ -412,6 +551,18 @@ impl LanguageSegmenter for KhmerProvider {
 
     fn support_level(&self) -> &'static str {
         "deep"
+    }
+
+    fn provider_type(&self) -> &'static str {
+        "deep"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.3.0"
+    }
+
+    fn license(&self) -> &'static str {
+        "MIT / Apache-2.0"
     }
 
     fn stability(&self) -> &'static str {
@@ -662,6 +813,128 @@ struct EnglishHunspellProvider {
     known_stems: HashSet<String>,
 }
 
+fn preprocess_aff(aff: &str) -> String {
+    let clean_count = |s: &str| -> String {
+        let digits: String = s.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if digits.is_empty() {
+            s.to_string()
+        } else {
+            digits
+        }
+    };
+
+    struct LineInfo {
+        original: String,
+        parts: Vec<String>,
+    }
+
+    let mut line_infos = Vec::new();
+    for line in aff.lines() {
+        let parts: Vec<String> = line.split_whitespace().map(|s| s.to_string()).collect();
+        line_infos.push(LineInfo {
+            original: line.to_string(),
+            parts,
+        });
+    }
+
+    let mut i = 0;
+    while i < line_infos.len() {
+        if line_infos[i].parts.len() >= 4
+            && (line_infos[i].parts[0] == "SFX" || line_infos[i].parts[0] == "PFX")
+        {
+            let kind = line_infos[i].parts[0].clone();
+            let flag = line_infos[i].parts[1].clone();
+            let option = line_infos[i].parts[2].clone();
+            if option == "Y" || option == "N" {
+                let mut actual_count = 0;
+                let mut j = i + 1;
+                while j < line_infos.len() {
+                    let next_parts = &line_infos[j].parts;
+                    if next_parts.len() >= 2 && next_parts[0] == kind && next_parts[1] == flag {
+                        if next_parts.len() >= 4 && (next_parts[2] == "Y" || next_parts[2] == "N") {
+                            break;
+                        }
+                        actual_count += 1;
+                    } else if next_parts.len() > 0
+                        && (next_parts[0] == "SFX"
+                            || next_parts[0] == "PFX"
+                            || next_parts[0] == "REP"
+                            || next_parts[0] == "MAP"
+                            || next_parts[0] == "KEY"
+                            || next_parts[0] == "TRY")
+                    {
+                        break;
+                    }
+                    j += 1;
+                }
+                let mut rebuilt = format!("{}\t{}\t{}\t{}", kind, flag, option, actual_count);
+                for part in &line_infos[i].parts[4..] {
+                    rebuilt.push_str(&format!("\t{}", part));
+                }
+                line_infos[i].original = rebuilt;
+            } else {
+                if line_infos[i].parts.len() >= 5 {
+                    let cond = &line_infos[i].parts[4];
+                    if cond.contains(']') && !cond.contains('[') {
+                        let corrected_cond = format!("[{}", cond);
+                        let mut rebuilt =
+                            format!("{}\t{}\t{}\t{}", kind, flag, option, line_infos[i].parts[3]);
+                        rebuilt.push_str(&format!("\t{}", corrected_cond));
+                        for part in &line_infos[i].parts[5..] {
+                            rebuilt.push_str(&format!("\t{}", part));
+                        }
+                        line_infos[i].original = rebuilt;
+                    }
+                }
+            }
+        } else if line_infos[i].parts.len() >= 2
+            && (line_infos[i].parts[0] == "REP" || line_infos[i].parts[0] == "MAP")
+        {
+            let kind = line_infos[i].parts[0].clone();
+            let mut actual_count = 0;
+            let mut j = i + 1;
+            while j < line_infos.len() {
+                let next_parts = &line_infos[j].parts;
+                if next_parts.len() >= 2 && next_parts[0] == kind {
+                    actual_count += 1;
+                } else if next_parts.len() > 0
+                    && (next_parts[0] == "SFX"
+                        || next_parts[0] == "PFX"
+                        || next_parts[0] == "REP"
+                        || next_parts[0] == "MAP"
+                        || next_parts[0] == "KEY"
+                        || next_parts[0] == "TRY")
+                {
+                    break;
+                }
+                j += 1;
+            }
+            let mut rebuilt = format!("{}\t{}", kind, actual_count);
+            for part in &line_infos[i].parts[2..] {
+                rebuilt.push_str(&format!("\t{}", part));
+            }
+            line_infos[i].original = rebuilt;
+        } else if line_infos[i].parts.len() >= 2
+            && (line_infos[i].parts[0] == "KEY" || line_infos[i].parts[0] == "TRY")
+        {
+            let kind = line_infos[i].parts[0].clone();
+            let cleaned = clean_count(&line_infos[i].parts[1]);
+            let mut rebuilt = format!("{}\t{}", kind, cleaned);
+            for part in &line_infos[i].parts[2..] {
+                rebuilt.push_str(&format!("\t{}", part));
+            }
+            line_infos[i].original = rebuilt;
+        }
+        i += 1;
+    }
+
+    line_infos
+        .into_iter()
+        .map(|info| info.original)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 struct GenericHunspellProvider {
     id: &'static str,
     display_name: &'static str,
@@ -671,6 +944,8 @@ struct GenericHunspellProvider {
     dictionary: spellbook::Dictionary,
     completion_words: Vec<String>,
     known_stems: HashSet<String>,
+    version: &'static str,
+    license: &'static str,
 }
 
 impl GenericHunspellProvider {
@@ -681,8 +956,11 @@ impl GenericHunspellProvider {
         pattern: &str,
         aff: &str,
         dic: &str,
+        version: &str,
+        license: &str,
     ) -> Result<Self, String> {
-        let dictionary = spellbook::Dictionary::new(aff, dic)
+        let preprocessed = preprocess_aff(aff);
+        let dictionary = spellbook::Dictionary::new(&preprocessed, dic)
             .map_err(|error| format!("Failed to load {locale} dictionary: {error}"))?;
         let mut completion_words: Vec<String> = dic
             .lines()
@@ -703,6 +981,8 @@ impl GenericHunspellProvider {
             dictionary,
             completion_words,
             known_stems,
+            version: Box::leak(version.to_owned().into_boxed_str()),
+            license: Box::leak(license.to_owned().into_boxed_str()),
         })
     }
 
@@ -773,6 +1053,18 @@ impl LanguageSegmenter for GenericHunspellProvider {
 
     fn support_level(&self) -> &'static str {
         "basic"
+    }
+
+    fn provider_type(&self) -> &'static str {
+        "dictionary-only"
+    }
+
+    fn version(&self) -> &'static str {
+        self.version
+    }
+
+    fn license(&self) -> &'static str {
+        self.license
     }
 
     fn boundary_mode(&self) -> &'static str {
@@ -953,6 +1245,18 @@ impl LanguageSegmenter for EnglishHunspellProvider {
 
     fn support_level(&self) -> &'static str {
         "enhanced"
+    }
+
+    fn provider_type(&self) -> &'static str {
+        "dictionary-only"
+    }
+
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+
+    fn license(&self) -> &'static str {
+        "Public Domain / MIT / BSD"
     }
 
     fn boundary_mode(&self) -> &'static str {
@@ -1216,6 +1520,8 @@ fn installed_hunspell_providers(data_dir: &Path) -> Result<Vec<GenericHunspellPr
             spec.pattern,
             &aff,
             &dic,
+            spec.version,
+            spec.license,
         )?);
     }
     Ok(providers)
@@ -1255,6 +1561,11 @@ fn catalog_entry(data_dir: Option<&Path>, spec: &HunspellCatalogSpec) -> Hunspel
         supports_segmentation: false,
         supports_custom_dictionary: true,
         has_editing_policy: false,
+        provider_type: "dictionary-only".to_string(),
+        download_size: spec.aff_size + spec.dic_size,
+        license: spec.license.to_string(),
+        version: spec.version.to_string(),
+        checksum: spec.dic_hash.to_string(),
     }
 }
 
@@ -1458,6 +1769,9 @@ impl SegmentationRegistry {
                 supports_segmentation: provider.supports_segmentation(),
                 supports_custom_dictionary: provider.supports_custom_dictionary(),
                 has_editing_policy: provider.has_editing_policy(),
+                provider_type: provider.provider_type().to_owned(),
+                version: provider.version().to_owned(),
+                license: provider.license().to_owned(),
             })
             .collect())
     }
@@ -1712,6 +2026,11 @@ pub fn list_hunspell_catalog(
         supports_segmentation: false,
         supports_custom_dictionary: true,
         has_editing_policy: false,
+        provider_type: "dictionary-only".to_string(),
+        download_size: 0,
+        license: "Public Domain / MIT / BSD".to_string(),
+        version: "1.0.0".to_string(),
+        checksum: "".to_string(),
     }];
     entries.extend(
         HUNSPELL_CATALOG
@@ -1719,6 +2038,21 @@ pub fn list_hunspell_catalog(
             .map(|spec| catalog_entry(Some(&data_dir), spec)),
     );
     Ok(entries)
+}
+
+fn verify_sha256(content: &str, expected_hash: &str) -> Result<(), String> {
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    let result = hasher.finalize();
+    let actual_hash = format!("{:x}", result);
+    if actual_hash == expected_hash {
+        Ok(())
+    } else {
+        Err(format!(
+            "Checksum verification failed. Expected: {}, got: {}",
+            expected_hash, actual_hash
+        ))
+    }
 }
 
 #[tauri::command]
@@ -1735,6 +2069,12 @@ pub async fn install_hunspell_dictionary(
         download_text(&aff_url, 8 * 1024 * 1024),
         download_text(&dic_url, 32 * 1024 * 1024)
     )?;
+
+    verify_sha256(&aff, spec.aff_hash)
+        .map_err(|e| format!("Verification failed for {}.aff: {}", spec.locale, e))?;
+    verify_sha256(&dic, spec.dic_hash)
+        .map_err(|e| format!("Verification failed for {}.dic: {}", spec.locale, e))?;
+
     GenericHunspellProvider::new(
         spec.locale,
         spec.display_name,
@@ -1742,6 +2082,8 @@ pub async fn install_hunspell_dictionary(
         spec.pattern,
         &aff,
         &dic,
+        spec.version,
+        spec.license,
     )?;
 
     let data_dir = app_handle
@@ -1751,11 +2093,73 @@ pub async fn install_hunspell_dictionary(
     let locale_dir = hunspell_install_root(&data_dir).join(spec.locale);
     std::fs::create_dir_all(&locale_dir)
         .map_err(|error| format!("Failed to create {}: {error}", locale_dir.display()))?;
-    std::fs::write(locale_dir.join(format!("{}.aff", spec.locale)), aff)
-        .map_err(|error| format!("Failed to write {} dictionary .aff: {error}", spec.locale))?;
-    std::fs::write(locale_dir.join(format!("{}.dic", spec.locale)), dic)
-        .map_err(|error| format!("Failed to write {} dictionary .dic: {error}", spec.locale))?;
 
+    let aff_path = locale_dir.join(format!("{}.aff", spec.locale));
+    let mut temp_aff = tempfile::NamedTempFile::new_in(&locale_dir)
+        .map_err(|error| format!("Failed to create temp aff file: {error}"))?;
+    temp_aff
+        .write_all(aff.as_bytes())
+        .map_err(|error| format!("Failed to write to temp aff file: {error}"))?;
+    temp_aff
+        .persist(&aff_path)
+        .map_err(|error| format!("Failed to persist atomic aff file: {error}"))?;
+
+    let dic_path = locale_dir.join(format!("{}.dic", spec.locale));
+    let mut temp_dic = tempfile::NamedTempFile::new_in(&locale_dir)
+        .map_err(|error| format!("Failed to create temp dic file: {error}"))?;
+    temp_dic
+        .write_all(dic.as_bytes())
+        .map_err(|error| format!("Failed to write to temp dic file: {error}"))?;
+    temp_dic
+        .persist(&dic_path)
+        .map_err(|error| format!("Failed to persist atomic dic file: {error}"))?;
+
+    let metadata_path = locale_dir.join("metadata.json");
+    let metadata = serde_json::json!({
+        "locale": spec.locale,
+        "displayName": spec.display_name,
+        "languageTag": spec.language_tag,
+        "version": spec.version,
+        "license": spec.license,
+        "providerType": "dictionary-only",
+        "downloadSize": spec.aff_size + spec.dic_size,
+        "checksum": spec.dic_hash,
+    });
+    let metadata_str = serde_json::to_string_pretty(&metadata)
+        .map_err(|error| format!("Failed to serialize metadata: {error}"))?;
+
+    let mut temp_meta = tempfile::NamedTempFile::new_in(&locale_dir)
+        .map_err(|error| format!("Failed to create temp metadata file: {error}"))?;
+    temp_meta
+        .write_all(metadata_str.as_bytes())
+        .map_err(|error| format!("Failed to write temp metadata file: {error}"))?;
+    temp_meta
+        .persist(&metadata_path)
+        .map_err(|error| format!("Failed to persist metadata.json: {error}"))?;
+
+    registry.reload_installed(&data_dir)?;
+    get_provider_capabilities(registry)
+}
+
+#[tauri::command]
+pub async fn remove_hunspell_dictionary(
+    app_handle: tauri::AppHandle,
+    registry: tauri::State<'_, SegmentationRegistry>,
+    locale: String,
+) -> Result<Vec<ProviderCapabilities>, String> {
+    let data_dir = app_handle
+        .path()
+        .app_local_data_dir()
+        .map_err(|error| format!("Failed to locate app data directory: {error}"))?;
+    let locale_dir = hunspell_install_root(&data_dir).join(&locale);
+    if locale_dir.exists() {
+        std::fs::remove_dir_all(&locale_dir).map_err(|error| {
+            format!(
+                "Failed to remove dictionary files at {}: {error}",
+                locale_dir.display()
+            )
+        })?;
+    }
     registry.reload_installed(&data_dir)?;
     get_provider_capabilities(registry)
 }

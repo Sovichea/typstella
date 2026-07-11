@@ -36,6 +36,7 @@ supportsSegmentation
 supportsCustomDictionary
 hasEditingPolicy
 pattern
+providerType, version, license
 ```
 
 `supportLevel` is `basic`, `enhanced`, or `deep`. `boundaryQuality` is `general`, `tested`, or `dedicated`. `correctionQuality` is `none`, `dictionary`, or `intended-word`. Capability booleans are enforced on the request path: a provider that does not advertise completion or corrections cannot be invoked for that feature.
@@ -91,13 +92,25 @@ Typstry can install additional Hunspell-compatible dictionaries from the Setting
 <app-local-data>/dictionaries/hunspell/<locale>/
   <locale>.aff
   <locale>.dic
+  metadata.json
 ```
 
-The starter catalog uses verified raw dictionary paths from the LibreOffice dictionaries repository and intentionally includes Unicode/complex-script languages such as Arabic, Bengali, Tibetan, Gujarati, Hebrew, Hindi, Lao, Marathi, Nepali, Punjabi, Sinhala, Tamil, Telugu, Thai, and Vietnamese, plus common Latin-script dictionaries.
+The catalog uses verified raw dictionary paths from the LibreOffice dictionaries repository. The installation pipeline is hardened to:
+- Perform SHA-256 integrity validation for both `.aff` and `.dic` files against catalog specs.
+- Write downloads utilizing atomic named temporary files inside the target locale directory to prevent corrupted files from partial downloads.
+- Create a self-contained `metadata.json` storing display name, language tag, size, license, version, and type metadata to keep capabilities visible offline without network access.
+
+To clean up downloaded dictionaries, the frontend exposes a red "Remove" button that cleanly deletes the locale directory and calls `reload_installed` in the backend provider registry to dynamically unregister the provider.
+
+### Robust Affix Preprocessing
+
+To handle quirks in upstream `.aff` files (such as counts with trailing comments, non-numeric qualifiers like `2$`, and mismatched/truncated suffix rule row counts), the Rust backend implements a `preprocess_aff` parser helper before passing the content to the strict `spellbook` library.
+
+The preprocessor also dynamically heals condition syntax typos in rule lines (such as a closing bracket without an opening bracket, e.g. `^য়া]া` which is automatically corrected to the valid character class `[^য়া]া`), ensuring that upstream dictionary bugs do not cause backend parsing panics.
 
 The provider registry instantiates one provider per installed language ID, e.g. `hunspell:fr_FR`, and refreshes provider capabilities after installation without requiring an app restart.
 
-Downloaded Hunspell-compatible dictionaries are registered as **Basic · Stable**. They advertise spellcheck and corrections, but not typing word completion or reliable language segmentation. A future tested tokenizer-backed provider can supersede that fallback and advertise additional capabilities.
+Downloaded Hunspell-compatible dictionaries are registered as **Basic · Stable** (or labeled as fallback support for segmentation-dependent scripts). They advertise spellcheck and corrections, but not typing word completion or reliable language segmentation. A future tested tokenizer-backed provider can supersede that fallback and advertise additional capabilities.
 
 For languages with reliable whitespace or Unicode word boundaries, a Hunspell-compatible provider can provide useful Basic spellcheck and correction support quickly.
 

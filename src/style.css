@@ -1014,6 +1014,23 @@ body.typstry-resizing #preview-render-pane::after {
 .settings-secondary-button:hover { background: var(--ui-hover); }
 .settings-secondary-button:disabled { opacity: 0.55; cursor: default; }
 
+.settings-danger-button {
+  padding: 6px 10px;
+  border: 1px solid #cf222e;
+  border-radius: 5px;
+  color: #cf222e;
+  background: var(--ui-bg);
+  font: inherit;
+  cursor: pointer;
+}
+.settings-danger-button:hover {
+  background: rgba(207, 34, 46, 0.1);
+}
+.settings-danger-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 .settings-field {
   display: grid;
   grid-template-columns: minmax(180px, 250px) 1fr;
