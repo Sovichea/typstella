@@ -1564,6 +1564,15 @@ export class TypstryWorkspaceController {
       }
       return true;
     } catch (error) {
+      try {
+        await this.reloadWorkspaceFonts();
+      } catch (restartError) {
+        this.appendDeveloperLog({
+          kind: "error",
+          source: "typography",
+          message: `Failed to restore Tinymist after typography error: ${String(restartError)}`
+        });
+      }
       this.appendLspLog({
         kind: "warning",
         source: "formatter",
@@ -1667,6 +1676,9 @@ export class TypstryWorkspaceController {
           userEvent: "input"
         });
         await this.saveActiveFile();
+        await this.prepareWorkspaceTypographyFont(config);
+        await this.reloadWorkspaceFonts();
+        await this.refreshActivePreviewRoot();
         editor.focus();
         return;
       }
@@ -1691,6 +1703,8 @@ export class TypstryWorkspaceController {
             userEvent: "input"
           });
           await this.saveActiveFile();
+          await this.prepareWorkspaceTypographyFont(config);
+          await this.reloadWorkspaceFonts();
           editor.focus();
           this.setLspStatus({ kind: "preview-ready", message: "Typography applied to template" });
           await this.refreshActivePreviewRoot();
@@ -1738,6 +1752,8 @@ export class TypstryWorkspaceController {
       }
 
       this.setLspStatus({ kind: "preview-ready", message: "Typography applied to template" });
+      await this.prepareWorkspaceTypographyFont(config);
+      await this.reloadWorkspaceFonts();
       await this.refreshActivePreviewRoot();
       this.editorInstance.focus();
     } catch (error) {
@@ -1748,6 +1764,32 @@ export class TypstryWorkspaceController {
       });
       await message(String(error), { title: "Unable to apply typography", kind: "error" });
     }
+  }
+
+  private async prepareWorkspaceTypographyFont(config: DocumentTypography): Promise<void> {
+    if (!this.workspaceRootPath) return;
+    if (!config.complexFont) {
+      await invoke("clear_scaled_workspace_fonts", { workspaceRootPath: this.workspaceRootPath });
+      return;
+    }
+    await invoke("prepare_scaled_workspace_font", {
+      workspaceRootPath: this.workspaceRootPath,
+      family: config.complexFont,
+      scale: config.complexScale
+    });
+  }
+
+  private async reloadWorkspaceFonts(): Promise<void> {
+    if (!this.lspClient || !this.workspaceRootPath) return;
+    this.setLspStatus({ kind: "starting", message: "Reloading workspace fonts..." });
+    this.lspReady = false;
+    this.openedDocumentUris.clear();
+    await this.lspClient.restart();
+    this.lspReady = true;
+    this.pdfSyncPreviewTaskKey = null;
+    this.pdfSyncSocket?.close();
+    this.pdfSyncSocket = null;
+    this.pdfSyncSocketUrl = "";
   }
 
   private applyPreviewTargetToTab(tab: EditorTab, target: PreviewTarget): void {

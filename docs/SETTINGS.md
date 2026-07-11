@@ -62,7 +62,9 @@ Typstry never downloads fonts without confirmation and does not repeat a recomme
 
 The selected Unicode fallback is also included in Typstry's own UI font stack for app-rendered text such as search controls, hover popups, and preview status messages.
 
-The typography toolbar controls the fonts used by the compiled document, separately from the editor font settings. Enable either the Latin rule, the complex-script rule, or both. **Apply to document** writes a managed `typstry:typography` block into the active file. **Apply as template** updates the local function used by the main document's `#show: ...with(...)` rule, or creates `typstry-template.typ` when no editable local template can be identified.
+The typography toolbar controls the fonts used by the compiled document, separately from the editor font settings. Enable either the Latin family, the complex-script fallback family, or both. **Apply to document** writes a source-preserving fallback stack in a managed `typstry:typography` block. **Apply as template** updates the local function used by the main document's `#show: ...with(...)` rule, or creates `typstry-template.typ` when no editable local template can be identified.
+
+The complex-script scale is uniform in both dimensions. Values other than `1.0` generate a render-only font under `.typstry/fonts/generated` and restart Tinymist with that directory as a project font path. Typstry does not create script-matching regex show rules because they break character-level inverse sync. Raw code keeps Typst's original raw font. See [Document typography](DOCUMENT_TYPOGRAPHY.md).
 
 ## Language tools
 

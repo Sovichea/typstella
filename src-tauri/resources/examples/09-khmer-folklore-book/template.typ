@@ -23,8 +23,7 @@
 
 #let khmer_folklore_book(body) = {
   // typstry:typography:start
-  set text(font: "MiSans Latin", size: 11pt)
-  show regex("[\u1780-\u17ff]+"): set text(font: "MiSans Khmer", size: 1.05em)
+  set text(font: ("MiSans Latin", "MiSans Khmer"), size: 11pt)
   // typstry:typography:end
 
   set page(

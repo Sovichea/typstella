@@ -7,20 +7,38 @@ describe("document typography", () => {
     latinSizePt: 11,
     complexFont: "MiSans Khmer",
     complexScript: "khmer",
-    complexSizeAdjustmentPt: -0.5
+    complexScale: 1.05
   };
 
   test("renders reliable Typst font rules", () => {
-    expect(renderTypographyBlock(config)).toContain('#set text(font: "Calibri", size: 11pt)');
-    expect(renderTypographyBlock(config)).toContain('#show regex("\\p{Khmer}+"): set text(font: "MiSans Khmer", size: 1em - 0.5pt)');
+    expect(renderTypographyBlock(config)).toContain('#set text(font: ("Calibri", "MiSans Khmer"), size: 11pt)');
+    expect(renderTypographyBlock(config)).toContain('// typstry:complex-font {"family":"MiSans Khmer","script":"khmer","scale":1.05}');
+    expect(renderTypographyBlock(config)).not.toContain("#show regex(");
+    expect(renderTypographyBlock(config)).not.toContain("show raw");
     expect(parseTypographyBlock(renderTypographyBlock(config))).toEqual(config);
+  });
+
+  test("migrates the former regex size adjustment to a uniform scale", () => {
+    const legacy = [
+      "// typstry:typography:start",
+      '#set text(font: "Calibri", size: 10pt)',
+      '#show regex("\\p{Khmer}+"): set text(font: "MiSans Khmer", size: 1em + 0.5pt)',
+      "// typstry:typography:end",
+      ""
+    ].join("\n");
+    expect(parseTypographyBlock(legacy)).toEqual({
+      latinFont: "Calibri",
+      latinSizePt: 10,
+      complexFont: "MiSans Khmer",
+      complexScript: "khmer",
+      complexScale: 1.05
+    });
   });
 
   test("supports independent Latin and complex-script rules", () => {
     const complexOnly = { ...config, latinFont: null };
     const complexBlock = renderTypographyBlock(complexOnly);
-    expect(complexBlock).not.toContain("#set text(");
-    expect(complexBlock).toContain('#show regex("\\p{Khmer}+")');
+    expect(complexBlock).toContain('#set text(font: "MiSans Khmer", size: 11pt)');
     expect(parseTypographyBlock(complexBlock)).toEqual({ ...complexOnly, latinSizePt: 11 });
 
     const latinOnly = { ...config, complexFont: null };
@@ -30,7 +48,7 @@ describe("document typography", () => {
     expect(parseTypographyBlock(latinBlock)).toEqual({
       ...latinOnly,
       complexScript: "khmer",
-      complexSizeAdjustmentPt: 0
+      complexScale: 1
     });
   });
 
@@ -51,7 +69,7 @@ describe("document typography", () => {
     const second = typographyEdit(withBlock, { ...config, latinFont: "MiSans Latin" });
     const updated = withBlock.slice(0, second.from) + second.insert + withBlock.slice(second.to);
     expect(updated.match(/typstry:typography:start/g)?.length).toBe(1);
-    expect(updated).toContain('font: "MiSans Latin"');
+    expect(updated).toContain('font: ("MiSans Latin", "MiSans Khmer")');
   });
 
   test("detects the dominant complex script", () => {

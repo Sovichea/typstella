@@ -6,8 +6,7 @@
 )
 
 // typstry:typography:start
-#set text(font: "MiSans Latin", size: 10pt)
-#show regex("[\u1780-\u17ff]+"): set text(font: "MiSans Khmer", size: 1em + 0pt)
+#set text(font: ("MiSans Latin", "MiSans Khmer"), size: 10pt)
 // typstry:typography:end
 
 #align(center)[

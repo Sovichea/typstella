@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const SOURCE_MAP_VERSION: u32 = 3;
+pub const SOURCE_MAP_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

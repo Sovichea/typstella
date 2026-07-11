@@ -5,8 +5,7 @@
   body,
 ) = {
   // typstry:typography:start
-  set text(font: "MiSans Latin", size: 11pt)
-  show regex("\p{Khmer}+"): set text(font: "MiSans Khmer", size: 1em + 0pt)
+  set text(font: ("MiSans Latin", "MiSans Khmer"), size: 11pt)
   // typstry:typography:end
   set document(title: title, author: author)
   set page(

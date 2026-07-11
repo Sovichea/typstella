@@ -2,6 +2,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use std::path::Path;
 use tauri::{Emitter, Manager};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{
@@ -15,6 +16,7 @@ use tokio_tungstenite::{
 mod examples;
 mod font_store;
 mod render_prepare;
+mod scaled_fonts;
 mod segmentation;
 mod toolchain;
 use examples::prepare_examples_workspace;
@@ -28,9 +30,39 @@ use segmentation::{
 };
 use toolchain::active_tinymist;
 
+fn generated_font_directory(start: &Path) -> Option<std::path::PathBuf> {
+    for ancestor in start.ancestors() {
+        let candidate = ancestor.join(".typstry").join("fonts").join("generated");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
 #[tauri::command]
 fn list_system_fonts() -> font_store::SystemFontCatalog {
     font_store::list_system_fonts()
+}
+
+#[tauri::command]
+async fn prepare_scaled_workspace_font(
+    state: tauri::State<'_, LspState>,
+    workspace_root_path: String,
+    family: String,
+    scale: f32,
+) -> Result<scaled_fonts::ScaledFontResult, String> {
+    stop_lsp_process(&state).await;
+    scaled_fonts::prepare_scaled_workspace_font(Path::new(&workspace_root_path), &family, scale)
+}
+
+#[tauri::command]
+async fn clear_scaled_workspace_fonts(
+    state: tauri::State<'_, LspState>,
+    workspace_root_path: String,
+) -> Result<(), String> {
+    stop_lsp_process(&state).await;
+    scaled_fonts::clear_scaled_workspace_fonts(Path::new(&workspace_root_path))
 }
 
 #[tauri::command]
@@ -744,6 +776,9 @@ async fn check_typst_document(
 
     let mut command = std::process::Command::new(&tinymist_cmd);
     command.current_dir(parent);
+    if let Some(fonts) = generated_font_directory(parent) {
+        command.env("TYPST_FONT_PATHS", fonts);
+    }
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
@@ -839,6 +874,9 @@ async fn compile_typst_document(
 
     let mut command = std::process::Command::new(&tinymist_cmd);
     command.current_dir(parent);
+    if let Some(fonts) = generated_font_directory(parent) {
+        command.env("TYPST_FONT_PATHS", fonts);
+    }
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
@@ -1294,6 +1332,7 @@ async fn install_tinymist_toolchain(
 async fn start_tinymist_lsp(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, LspState>,
+    workspace_root_path: Option<String>,
 ) -> Result<(), String> {
     use tauri::Manager;
 
@@ -1312,6 +1351,15 @@ async fn start_tinymist_lsp(
         .ok_or_else(|| "No managed Tinymist toolchain is installed.".to_string())?;
 
     let mut command = tokio::process::Command::new(&tinymist_exe);
+    if let Some(workspace_root) = workspace_root_path {
+        let generated_fonts = Path::new(&workspace_root)
+            .join(".typstry")
+            .join("fonts")
+            .join("generated");
+        if generated_fonts.is_dir() {
+            command.env("TYPST_FONT_PATHS", generated_fonts);
+        }
+    }
     command
         .arg("lsp")
         .stdin(std::process::Stdio::piped())
@@ -1758,6 +1806,8 @@ pub fn run() {
             ensure_toolchain,
             get_toolchain_status,
             list_system_fonts,
+            prepare_scaled_workspace_font,
+            clear_scaled_workspace_fonts,
             install_unicode_font,
             analyze_language_ranges,
             language_suggestions,

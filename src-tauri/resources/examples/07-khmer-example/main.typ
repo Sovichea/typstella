@@ -7,7 +7,7 @@
 
 // typstry:typography:start
 #set text(font: "MiSans Latin", size: 11pt)
-#show regex("\p{Khmer}+"): set text(font: "MiSans Khmer", size: 1em + 0pt)
+#set text(font: ("MiSans Latin", "MiSans Khmer"))
 // typstry:typography:end
 
 #let draw-line = cetz.draw.line

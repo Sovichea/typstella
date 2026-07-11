@@ -175,7 +175,7 @@ export class TinymistLspClient {
     try {
       this.setStatus("starting", "Starting Tinymist");
       await this.ensureTransportListeners();
-      await this.transport.start();
+      await this.transport.start(this.getWorkspaceRoot());
       this.setStatus("running", "Tinymist process running");
 
       this.setStatus("initializing", "Initializing LSP");
@@ -191,7 +191,7 @@ export class TinymistLspClient {
   public async restart(): Promise<void> {
     this.setStatus("starting", "Restarting Tinymist");
     await this.ensureTransportListeners();
-    await this.transport.start();
+    await this.transport.start(this.getWorkspaceRoot());
     this.setStatus("running", "Tinymist process running");
     this.setStatus("initializing", "Initializing LSP");
     await this.initializeLsp();

@@ -3,9 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::scanner::{scan_typst_content, ScanState};
-use super::segment::{
-    prepare_khmer_text_for_rendering, prepare_markup_for_inverse_sync, KhmerTextSegmenter,
-};
+use super::segment::{prepare_khmer_text_for_rendering, KhmerTextSegmenter};
 use super::sourcemap::{MappingKind, SourceMap, SOURCE_MAP_VERSION};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -222,14 +220,6 @@ pub fn prepare_single_in_memory_file(
                 scope,
             );
             generated_content.push_str(&prepared);
-        } else if options.generate_source_map && state == ScanState::MarkupText {
-            let prepared = prepare_markup_for_inverse_sync(
-                chunk_text,
-                start,
-                generated_content.len(),
-                &mut sourcemap,
-            );
-            generated_content.push_str(&prepared);
         } else {
             let gen_start = generated_content.len();
             generated_content.push_str(chunk_text);
@@ -400,14 +390,6 @@ fn process_typ_file(
                 generated_content.len(),
                 &mut sourcemap,
                 scope,
-            );
-            generated_content.push_str(&prepared);
-        } else if options.generate_source_map && state == ScanState::MarkupText {
-            let prepared = prepare_markup_for_inverse_sync(
-                chunk_text,
-                start,
-                generated_content.len(),
-                &mut sourcemap,
             );
             generated_content.push_str(&prepared);
         } else {

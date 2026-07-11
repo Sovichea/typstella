@@ -3,8 +3,8 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { parseJsonRpcMessage, type JsonRpcMessage } from "./jsonRpc";
 
 export class TauriLspTransport {
-  public start(): Promise<void> {
-    return invoke("start_tinymist_lsp");
+  public start(workspaceRootPath: string | null): Promise<void> {
+    return invoke("start_tinymist_lsp", { workspaceRootPath });
   }
 
   public send(message: JsonRpcMessage): Promise<void> {

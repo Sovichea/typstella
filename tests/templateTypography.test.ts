@@ -14,7 +14,7 @@ const config = {
   latinSizePt: 11,
   complexFont: "MiSans Khmer",
   complexScript: "khmer",
-  complexSizeAdjustmentPt: 0
+  complexScale: 1
 };
 
 describe("template typography", () => {
@@ -40,8 +40,8 @@ describe("template typography", () => {
     const source = "#let thesis(title: none, body) = {\n  body\n}\n";
     const edit = templateTypographyEdit(source, "thesis", config)!;
     const updated = source.slice(0, edit.from) + edit.insert + source.slice(edit.to);
-    expect(updated).toContain('  set text(font: "MiSans Latin", size: 11pt)');
-    expect(updated).toContain('  show regex("\\p{Khmer}+"): set text(font: "MiSans Khmer", size: 1em + 0pt)');
+    expect(updated).toContain('  set text(font: ("MiSans Latin", "MiSans Khmer"), size: 11pt)');
+    expect(updated).not.toContain("show regex(");
   });
 
   test("creates a portable local fallback and preview source", () => {

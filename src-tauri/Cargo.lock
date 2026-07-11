@@ -4499,10 +4499,15 @@ dependencies = [
  "tokio-tungstenite",
  "trash",
  "ttf-parser",
+ "typstry-font-scaler",
  "windows-sys 0.61.2",
  "winreg",
  "zip",
 ]
+
+[[package]]
+name = "typstry-font-scaler"
+version = "0.1.0"
 
 [[package]]
 name = "unic-char-property"

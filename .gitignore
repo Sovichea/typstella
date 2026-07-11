@@ -16,6 +16,7 @@ public/standard_fonts/
 # Tauri & Rust
 src-tauri/target/
 src-tauri/gen/
+crates/*/target/
 **/*.rs.bk
 
 # Editor

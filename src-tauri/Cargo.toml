@@ -30,6 +30,7 @@ ttf-parser = "0.25"
 khmer_segmenter = { path = "../third_party/khmer_segmenter/port/rust", default-features = false }
 spellbook = "0.4.2"
 open = "5.3"
+typstry-font-scaler = { path = "../crates/font-scaler" }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

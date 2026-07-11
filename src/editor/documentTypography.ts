@@ -11,7 +11,7 @@ export type DocumentTypography = {
   latinSizePt: number;
   complexFont: string | null;
   complexScript: string;
-  complexSizeAdjustmentPt: number;
+  complexScale: number;
 };
 
 export type TypographyEdit = { from: number; to: number; insert: string };
@@ -77,15 +77,20 @@ function decimal(value: number): string {
 }
 
 export function renderTypographyBlock(config: DocumentTypography): string {
-  const script = documentScripts.find(candidate => candidate.id === config.complexScript) ?? documentScripts[0];
-  const adjustment = Math.max(-12, Math.min(12, config.complexSizeAdjustmentPt));
-  const operator = adjustment < 0 ? "-" : "+";
   const lines = [blockStart];
-  if (config.latinFont) {
-    lines.push(`#set text(font: "${escapeTypstString(config.latinFont)}", size: ${decimal(config.latinSizePt)}pt)`);
-  }
   if (config.complexFont) {
-    lines.push(`#show regex("\\p{${script.unicodeProperty}}+"): set text(font: "${escapeTypstString(config.complexFont)}", size: 1em ${operator} ${decimal(Math.abs(adjustment))}pt)`);
+    lines.push(`// typstry:complex-font ${JSON.stringify({
+      family: config.complexFont,
+      script: config.complexScript,
+      scale: Math.max(0.5, Math.min(2, config.complexScale))
+    })}`);
+  }
+  const fonts = [config.latinFont, config.complexFont].filter((font): font is string => !!font);
+  if (fonts.length > 0) {
+    const fontValue = fonts.length === 1
+      ? `"${escapeTypstString(fonts[0])}"`
+      : `(${fonts.map(font => `"${escapeTypstString(font)}"`).join(", ")})`;
+    lines.push(`#set text(font: ${fontValue}, size: ${decimal(config.latinSizePt)}pt)`);
   }
   lines.push(blockEnd, "");
   return lines.join("\n");
@@ -96,21 +101,31 @@ export function parseTypographyBlock(text: string): DocumentTypography | null {
   const end = start >= 0 ? text.indexOf(blockEnd, start) : -1;
   if (start < 0 || end < 0) return null;
   const block = text.slice(start, end);
-  const latin = block.match(/#set text\(font: "((?:\\.|[^"])*)", size: (-?\d+(?:\.\d+)?)pt\)/);
-  const complex = block.match(/#show regex\("\\p\{([^}]+)\}\+"\): set text\(font: "((?:\\.|[^"])*)", size: 1em ([+-]) (\d+(?:\.\d+)?)pt\)/);
-  if (!latin && !complex) return null;
-  const script = complex
-    ? documentScripts.find(candidate => candidate.unicodeProperty === complex[1])
-    : documentScripts[0];
-  if (complex && !script) return null;
+  const metadata = /\/\/ typstry:complex-font (\{[^\r\n]+\})/.exec(block);
+  let complexMetadata: { family?: string; script?: string; scale?: number } | null = null;
+  if (metadata) {
+    try { complexMetadata = JSON.parse(metadata[1]); } catch { return null; }
+  }
+  const stack = block.match(/#set text\(font: \("((?:\\.|[^"])*)", "((?:\\.|[^"])*)"\), size: (-?\d+(?:\.\d+)?)pt\)/);
+  const single = block.match(/#set text\(font: "((?:\\.|[^"])*)", size: (-?\d+(?:\.\d+)?)pt\)/);
+  const legacyComplex = block.match(/#show regex\("\\p\{([^}]+)\}\+"\): set text\(font: "((?:\\.|[^"])*)", size: 1em ([+-]) (\d+(?:\.\d+)?)pt\)/);
+  if (!stack && !single && !legacyComplex) return null;
+  const legacyScript = legacyComplex
+    ? documentScripts.find(candidate => candidate.unicodeProperty === legacyComplex[1])
+    : null;
+  const latinSizePt = Number(stack?.[3] ?? single?.[2] ?? 11);
+  const complexFont = complexMetadata?.family
+    ?? (stack ? unescapeTypstString(stack[2]) : null)
+    ?? (legacyComplex ? unescapeTypstString(legacyComplex[2]) : null);
+  const legacyAdjustment = legacyComplex
+    ? Number(legacyComplex[4]) * (legacyComplex[3] === "-" ? -1 : 1)
+    : 0;
   return {
-    latinFont: latin ? unescapeTypstString(latin[1]) : null,
-    latinSizePt: latin ? Number(latin[2]) : 11,
-    complexFont: complex ? unescapeTypstString(complex[2]) : null,
-    complexScript: script?.id ?? documentScripts[0].id,
-    complexSizeAdjustmentPt: complex
-      ? Number(complex[4]) * (complex[3] === "-" ? -1 : 1)
-      : 0
+    latinFont: stack ? unescapeTypstString(stack[1]) : single && !complexMetadata ? unescapeTypstString(single[1]) : null,
+    latinSizePt,
+    complexFont,
+    complexScript: complexMetadata?.script ?? legacyScript?.id ?? documentScripts[0].id,
+    complexScale: complexMetadata?.scale ?? Math.max(0.5, Math.min(2, (latinSizePt + legacyAdjustment) / latinSizePt))
   };
 }
 

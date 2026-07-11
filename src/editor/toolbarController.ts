@@ -64,7 +64,7 @@ export class EditorToolbarController {
     latinSizePt: 11,
     complexFont: "MiSans Latin",
     complexScript: "khmer",
-    complexSizeAdjustmentPt: 0
+    complexScale: 1
   };
 
   constructor(private readonly dependencies: EditorToolbarDependencies) {}
@@ -225,7 +225,7 @@ export class EditorToolbarController {
       latinSizePt: existing?.latinSizePt ?? 11,
       complexFont,
       complexScript: script.id,
-      complexSizeAdjustmentPt: existing?.complexSizeAdjustmentPt ?? 0
+      complexScale: existing?.complexScale ?? 1
     };
     const latinEnable = document.getElementById("toolbar-latin-enable") as HTMLInputElement | null;
     if (latinEnable) {
@@ -239,7 +239,7 @@ export class EditorToolbarController {
     this.setTypographyControl("toolbar-latin-size", String(this.typographyDefaults.latinSizePt));
     this.setTypographyControl("toolbar-complex-script", script.id);
     this.setTypographyControl("toolbar-complex-font", complexFont ?? "");
-    this.setTypographyControl("toolbar-complex-adjustment", String(this.typographyDefaults.complexSizeAdjustmentPt));
+    this.setTypographyControl("toolbar-complex-adjustment", String(this.typographyDefaults.complexScale));
     this.updateScriptHint(script.id, detected?.id === script.id ? detected.label : null);
     this.updateTypographyAvailability();
   }
@@ -311,7 +311,7 @@ export class EditorToolbarController {
       latinSizePt: this.boundedTypographyNumber(value("toolbar-latin-size"), 6, 96, this.typographyDefaults.latinSizePt),
       complexFont,
       complexScript: value("toolbar-complex-script") || this.typographyDefaults.complexScript,
-      complexSizeAdjustmentPt: this.boundedTypographyNumber(value("toolbar-complex-adjustment"), -12, 12, 0)
+      complexScale: this.boundedTypographyNumber(value("toolbar-complex-adjustment"), 0.5, 2, 1)
     };
     void this.dependencies.applyTypography(config, target);
     this.typographyDefaults = config;
