@@ -35,7 +35,7 @@ describe("editor grapheme navigation", () => {
   test("snaps CodeMirror selections before they can commit inside a cluster", () => {
     const doc = Text.of(["ខ្មែរ"]);
     const selection = snapSelectionToGraphemeBoundaries(doc, EditorSelection.create([EditorSelection.cursor(2)]));
-    expect(selection.main.head).toBe(4);
+    expect(selection.main.head).toBe(0);
   });
 
   test("backspace deletes one Unicode code point except Khmer subscript pairs", () => {

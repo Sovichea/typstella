@@ -105,7 +105,7 @@ export function snapPositionToGraphemeBoundary(doc: Text, position: number, temp
     if (local <= boundary.from) return line.from + boundary.from;
     if (boundary.from < local && local < boundary.to) {
       const midpoint = boundary.from + ((boundary.to - boundary.from) / 2);
-      return line.from + (local < midpoint ? boundary.from : boundary.to);
+      return line.from + (local <= midpoint ? boundary.from : boundary.to);
     }
   }
   return Math.max(line.from, Math.min(position, line.to));
