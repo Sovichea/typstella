@@ -205,6 +205,7 @@ export class TypstryWorkspaceController {
   });
 
   private editorInstance!: EditorView;
+  private isComposing = false;
   private readonly editorFontManager = new EditorFontManager(() => this.editorInstance);
   private readonly spellcheckController = new SpellcheckController(
     () => this.editorInstance,
@@ -782,10 +783,19 @@ export class TypstryWorkspaceController {
           this.spellcheckController.extension(),
           EditorView.updateListener.of((update) => {
             this.spellcheckController.completionStateChanged(completionStatus(update.state) !== null);
+            const wasComposing = this.isComposing;
+            this.isComposing = update.view.composing;
+
             if (update.docChanged) {
               const currentText = update.state.doc.toString();
               this.previewSyncController.clearForward();
               this.editorFontManager.updateDocument(currentText);
+              if (!update.view.composing) {
+                this.handleContentMutation(currentText);
+                this.spellcheckController.documentChanged(update);
+              }
+            } else if (wasComposing && !update.view.composing) {
+              const currentText = update.state.doc.toString();
               this.handleContentMutation(currentText);
               this.spellcheckController.documentChanged(update);
             }
@@ -2571,7 +2581,7 @@ export class TypstryWorkspaceController {
         this.appendDeveloperLog({
           kind: "info",
           source: "forward sync",
-          message: `Ignored source-map payload without PDF position: ${text.slice(0, 120)}`
+          message: `Ignored source-map payload without PDF position: ${sanitizeLogText(text).slice(0, 120)}`
         });
       }
       return;
@@ -4168,17 +4178,43 @@ function nextAnimationFrame(): Promise<void> {
   return new Promise(resolve => requestAnimationFrame(() => resolve()));
 }
 
+function isBinaryPayload(bytes: Uint8Array): boolean {
+  if (bytes.length >= 8 &&
+      bytes[0] === 100 && // d
+      bytes[1] === 105 && // i
+      bytes[2] === 102 && // f
+      bytes[3] === 102 && // f
+      bytes[4] === 45 &&  // -
+      bytes[5] === 118 && // v
+      bytes[6] === 49 &&  // 1
+      bytes[7] === 44)    // ,
+  {
+    return true;
+  }
+  return false;
+}
+
+function sanitizeLogText(str: string): string {
+  return str.replace(/[\x00-\x1F\x7F-\x9F\uFFFD]/g, ".");
+}
+
 async function previewSocketMessageText(data: unknown): Promise<string | null> {
   if (typeof data === "string") return data;
   if (data instanceof ArrayBuffer) {
-    return new TextDecoder().decode(new Uint8Array(data));
+    const bytes = new Uint8Array(data);
+    if (isBinaryPayload(bytes)) return null;
+    return new TextDecoder().decode(bytes);
   }
   if (ArrayBuffer.isView(data)) {
     const view = data as ArrayBufferView;
-    return new TextDecoder().decode(new Uint8Array(view.buffer, view.byteOffset, view.byteLength));
+    const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+    if (isBinaryPayload(bytes)) return null;
+    return new TextDecoder().decode(bytes);
   }
   if (typeof Blob !== "undefined" && data instanceof Blob) {
-    return await data.text();
+    const text = await data.text();
+    if (text.startsWith("diff-v1,")) return null;
+    return text;
   }
   return null;
 }

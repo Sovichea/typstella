@@ -527,21 +527,21 @@ Tracked by `P7.1`, `P7.2`, `P7.9`, and `P7.10`.
 
 ### Task checklist
 
-- [ ] **P5.1 — Create a text-surface inventory.** List every component that renders user, file, diagnostic, dictionary, or document text and identify its font stack and direction behavior.
-- [ ] **P5.2 — Centralize font tokens.** Define reusable UI, code, and complex-script fallback font variables and apply them to all inventoried surfaces. Depends on `P5.1`.
-- [ ] **P5.3 — Verify Unicode-safe search.** Test query entry, match ranges, replacement, whole-word behavior, and navigation with Khmer, combining sequences, emoji, and right-to-left text.
-- [ ] **P5.4 — Harden IME transactions.** Suppress premature completion, spellcheck publication, save, and render requests until composition is committed.
-- [ ] **P5.5 — Audit editor geometry.** Test gutters, caret, selections, autocomplete, invisible characters, and line measurement after runtime font-size changes.
-- [ ] **P5.6 — Add bidirectional fixtures.** Verify mixed left-to-right and right-to-left UI labels and editor lines without applying global direction changes.
-- [ ] **P5.7 — Add platform visual checks.** Cover Windows WebView2 and Linux WebKitGTK for the same font, popup, caret, and selection fixtures.
-- [ ] **P5.8 — Add accessibility checks.** Verify keyboard navigation, focus order, contrast, zoom, and screen-reader labels for language controls and completion lists.
+- [x] **P5.1 — Create a text-surface inventory.** List every component that renders user, file, diagnostic, dictionary, or document text and identify its font stack and direction behavior.
+- [x] **P5.2 — Centralize font tokens.** Define reusable UI, code, and complex-script fallback font variables and apply them to all inventoried surfaces. Depends on `P5.1`.
+- [x] **P5.3 — Verify Unicode-safe search.** Test query entry, match ranges, replacement, whole-word behavior, and navigation with Khmer, combining sequences, emoji, and right-to-left text.
+- [x] **P5.4 — Harden IME transactions.** Suppress premature completion, spellcheck publication, save, and render requests until composition is committed.
+- [x] **P5.5 — Audit editor geometry.** Test gutters, caret, selections, autocomplete, invisible characters, and line measurement after runtime font-size changes.
+- [x] **P5.6 — Add bidirectional fixtures.** Verify mixed left-to-right and right-to-left UI labels and editor lines without applying global direction changes.
+- [x] **P5.7 — Add platform visual checks.** Cover Windows WebView2 and Linux WebKitGTK for the same font, popup, caret, and selection fixtures.
+- [x] **P5.8 — Add accessibility checks.** Verify keyboard navigation, focus order, contrast, zoom, and screen-reader labels for language controls and completion lists.
 
 ### Acceptance criteria
 
-- [ ] Increasing the UI or editor font size does not misalign gutters, selections, or caret placement.
-- [ ] Search finds complete complex-script sequences and highlights the correct range.
-- [ ] Autocomplete rows render one consistent popup with visible keyboard selection in every theme.
-- [ ] IME composition does not publish partial text as a spelling issue or destructive completion.
+- [x] Increasing the UI or editor font size does not misalign gutters, selections, or caret placement.
+- [x] Search finds complete complex-script sequences and highlights the correct range.
+- [x] Autocomplete rows render one consistent popup with visible keyboard selection in every theme.
+- [x] IME composition does not publish partial text as a spelling issue or destructive completion.
 
 ## Phase 6: Harden research-document workflows
 

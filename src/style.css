@@ -1485,7 +1485,7 @@ body.typstry-resizing #preview-render-pane::after {
   flex: 1;
   overflow: auto;
   padding: 4px 0;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-family-mono);
   font-size: 12px;
 }
 
