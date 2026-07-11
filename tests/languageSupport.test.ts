@@ -17,6 +17,9 @@ const serializedProvider = {
   languageTag: "km",
   scripts: ["Khmr"],
   engine: "khmer_segmenter",
+  providerType: "deep",
+  version: "test-1",
+  license: "MIT",
   supportLevel: "deep",
   stability: "experimental",
   boundaryMode: "custom-segmenter",
@@ -122,7 +125,8 @@ describe("language support taxonomy", () => {
       locale: "th_TH",
       installed: false,
       bundled: false,
-      source: "LibreOffice dictionaries"
+      source: "LibreOffice dictionaries",
+      downloadSize: 1024
     }]);
     expect(entry.supportLevel).toBe("basic");
     expect(entry.supportsCompletion).toBe(false);

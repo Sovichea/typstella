@@ -558,24 +558,24 @@ Tracked by `P7.1`, `P7.2`, `P7.9`, and `P7.10`.
 
 ### Task checklist
 
-- [ ] **P6.1 — Define document identity.** Specify how workspace root, main file, included file, standalone file, preview session, and cache paths are keyed.
-- [ ] **P6.2 — Unify preview ownership.** Keep one full-document preview session when navigating between the main file and included files. Depends on `P6.1`.
-- [ ] **P6.3 — Implement standalone preview rules.** Parse and document the standalone-preview directive, scope it correctly, and prevent accidental main-document replacement.
-- [ ] **P6.4 — Harden source navigation.** Test Ctrl-hover and open behavior for includes, imports, bibliography files, images, templates, repeated filenames, spaces, and Unicode paths.
-- [ ] **P6.5 — Order external updates.** Route file watcher changes through editor state, mirror state where required, LSP notifications, and preview compilation with revision guards.
-- [ ] **P6.6 — Separate render modes.** Add deterministic tests proving render-on-save compiles only after a successful save and render-on-type compiles debounced document revisions.
-- [ ] **P6.7 — Add compiler recovery.** Ensure a failed render or LSP restart cannot permanently stop later diagnostics or preview updates.
-- [ ] **P6.8 — Harden workspace restoration.** Restore the main file and active tab from an empty-tab state, then restore cursor, scroll, split, and preview state.
-- [ ] **P6.9 — Isolate caches.** Hide `.typstry`, clean obsolete cache entries safely, and verify external Typst compilation never depends on cache contents.
-- [ ] **P6.10 — Add a research-project fixture.** Maintain a multi-file project containing a template, chapters, bibliography, figures, Khmer, Latin, and standalone-preview content.
+- [x] **P6.1 — Define document identity.** Specify how workspace root, main file, included file, standalone file, preview session, and cache paths are keyed.
+- [x] **P6.2 — Unify preview ownership.** Keep one full-document preview session when navigating between the main file and included files. Depends on `P6.1`.
+- [x] **P6.3 — Implement standalone preview rules.** Parse and document the standalone-preview directive, scope it correctly, and prevent accidental main-document replacement.
+- [x] **P6.4 — Harden source navigation.** Test Ctrl-hover and open behavior for includes, imports, bibliography files, images, templates, repeated filenames, spaces, and Unicode paths.
+- [x] **P6.5 — Order external updates.** Route file watcher changes through editor state, mirror state where required, LSP notifications, and preview compilation with revision guards.
+- [x] **P6.6 — Separate render modes.** Add deterministic tests proving render-on-save compiles only after a successful save and render-on-type compiles debounced document revisions.
+- [x] **P6.7 — Add compiler recovery.** Ensure a failed render or LSP restart cannot permanently stop later diagnostics or preview updates.
+- [x] **P6.8 — Harden workspace restoration.** Restore the main file and active tab from an empty-tab state, then restore cursor, scroll, split, and preview state.
+- [x] **P6.9 — Isolate caches.** Hide `.typstry`, clean obsolete cache entries safely, and verify external Typst compilation never depends on cache contents.
+- [x] **P6.10 — Add a research-project fixture.** Maintain a multi-file project containing a template, chapters, bibliography, figures, Khmer, Latin, and standalone-preview content.
 
 ### Acceptance criteria
 
-- [ ] Opening an included chapter does not start an unrelated full-document preview session.
-- [ ] Restarting a workspace can open the configured main file even when no other tab is open.
-- [ ] A change in any included source reaches diagnostics and preview exactly once in the correct order.
-- [ ] Render-on-save does not compile while typing, and render-on-type recovers after a compiler error.
-- [ ] The same source project compiles with the standard Typst toolchain outside Typstry.
+- [x] Opening an included chapter does not start an unrelated full-document preview session.
+- [x] Restarting a workspace can open the configured main file even when no other tab is open.
+- [x] A change in any included source reaches diagnostics and preview exactly once in the correct order.
+- [x] Render-on-save does not compile while typing, and render-on-type recovers after a compiler error.
+- [x] The same source project compiles with the standard Typst toolchain outside Typstry.
 
 ## Phase 7: Set reliability and performance gates
 

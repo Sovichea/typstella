@@ -154,6 +154,7 @@ Typstry downloads and manages Tinymist for preview and diagnostics. A separate T
 - [Script-aware editor policy guide](./docs/SCRIPT_EDITING_POLICIES.md)
 - [Khmer spellcheck and word completion](./docs/KHMER_SPELLCHECK.md)
 - [Preview implementation notes](./docs/PREVIEW_INTERCEPTION.md)
+- [Research-document workflows](./docs/RESEARCH_DOCUMENT_WORKFLOWS.md)
 
 ## Beta status
 

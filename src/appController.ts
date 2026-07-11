@@ -26,13 +26,13 @@ import { isBinaryImagePath, isSupportedInAppPath } from "./platform/fileTypes";
 import { WysiwymAdapter } from "./wysiwym/adapter";
 import { PreviewFrame, type PreviewClickPoint, type PreviewInteractionStatus } from "./preview/previewFrame";
 import { PreviewSyncController } from "./preview/previewSyncController";
-import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
+import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
 import { LogConsoleController, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
 import { EditorFontManager } from "./editor/fontManager";
 import { TabStripController } from "./editor/tabStripController";
 import { createAppIcon } from "./ui/icons";
 import { LayoutController } from "./layout/layoutController";
-import { WorkspaceStateStore } from "./workspace/workspaceStateStore";
+import { WorkspaceStateStore, workspaceRestoreCandidates } from "./workspace/workspaceStateStore";
 import { RecentProjectsController } from "./workspace/recentProjectsController";
 import { WorkspaceWatcher, type WorkspaceChange } from "./workspace/workspaceWatcher";
 import { EditorToolbarController } from "./editor/toolbarController";
@@ -1804,7 +1804,10 @@ export class TypstryWorkspaceController {
 
   private applyPreviewTargetToTab(tab: EditorTab, target: PreviewTarget): void {
     const style = previewRefreshStyle(this.settingsController.value.preview.renderMode);
-    const identity = target.rootPath ? previewSessionIdentity(target.rootPath, style) : null;
+    const document = target.rootPath
+      ? researchDocumentIdentity(this.workspaceRootPath ?? target.rootPath, target.mainPath, tab.path)
+      : null;
+    const identity = target.rootPath ? previewSessionIdentity(target.rootPath, style, document ?? undefined) : null;
     tab.previewRootPath = target.rootPath;
     tab.previewMainPath = target.mainPath;
     tab.previewTaskId = identity?.taskId ?? null;
@@ -1892,7 +1895,8 @@ export class TypstryWorkspaceController {
 
       const identity = previewSessionIdentity(
         activePath,
-        previewRefreshStyle(this.settingsController.value.preview.renderMode)
+        previewRefreshStyle(this.settingsController.value.preview.renderMode),
+        researchDocumentIdentity(this.workspaceRootPath, target.mainPath, activePath)
       );
       const previewPath = await join(
         this.workspaceRootPath,
@@ -3095,6 +3099,15 @@ export class TypstryWorkspaceController {
         }
         this.renderEditorTabs();
       }
+
+      if (this.openTabs.length === 0) {
+        for (const candidate of workspaceRestoreCandidates(state)) {
+          if (await invoke<boolean>("workspace_path_exists", { path: candidate })) {
+            await this.loadFile(candidate);
+            return;
+          }
+        }
+      }
       
       if (state.activeFilePath) {
         const activeTab = this.openTabs.find(t => filePathKey(t.path) === filePathKey(state.activeFilePath!));
@@ -3126,15 +3139,10 @@ export class TypstryWorkspaceController {
     
     if (!hasExternalChanges) return;
 
-    await this.prepareRenderProjectIfNeeded();
-
-    await Promise.all([
-      this.explorer.loadWorkspace(workspaceRoot),
-      this.reloadOpenFilesFromDisk()
-    ]);
+    // One ordered synchronization path: editor state, render mirror, LSP, preview.
+    await this.reloadOpenFilesFromDisk(false);
     if (this.workspaceRootPath !== workspaceRoot) return;
-
-    await this.refreshActivePreviewRoot();
+    await this.prepareRenderProjectIfNeeded();
 
     if (this.lspReady && this.lspClient) {
       const defaultType: 1 | 2 | 3 = change.kind === "create" ? 1 : change.kind === "remove" ? 3 : 2;
@@ -3149,9 +3157,12 @@ export class TypstryWorkspaceController {
       });
       await this.lspClient.notifyWorkspaceFilesChanged(changes);
     }
+    await this.explorer.loadWorkspace(workspaceRoot);
+    if (this.workspaceRootPath !== workspaceRoot) return;
+    await this.refreshActivePreviewRoot();
   }
 
-  private async reloadOpenFilesFromDisk(): Promise<void> {
+  private async reloadOpenFilesFromDisk(refreshPreview = true): Promise<void> {
     for (const tab of [...this.openTabs]) {
       const pathKey = filePathKey(tab.path);
       const exists = await invoke<boolean>("workspace_path_exists", { path: tab.path });
@@ -3192,11 +3203,11 @@ export class TypstryWorkspaceController {
       }
 
       this.externalConflictPaths.delete(pathKey);
-      await this.applyExternalFileContent(tab, contents);
+      await this.applyExternalFileContent(tab, contents, refreshPreview);
     }
   }
 
-  private async applyExternalFileContent(tab: EditorTab, contents: string): Promise<void> {
+  private async applyExternalFileContent(tab: EditorTab, contents: string, refreshPreview = true): Promise<void> {
     const isActive = this.activeFilePath !== null && filePathKey(tab.path) === filePathKey(this.activeFilePath);
     tab.content = contents;
     tab.savedContent = contents;
@@ -3264,7 +3275,7 @@ export class TypstryWorkspaceController {
         lspUpdated = true;
       }
     }
-    if (tab.path.toLowerCase().endsWith(".typ")) {
+    if (refreshPreview && tab.path.toLowerCase().endsWith(".typ")) {
       if (this.settingsController.value.preview.renderMode === "on-save") {
         void this.renderPdfPreview(contents);
       } else {

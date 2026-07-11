@@ -402,6 +402,8 @@ mod tests {
         assert!(base_path.join("import.typ").is_file());
         assert!(base_path.join("readme.typ").is_file());
         assert!(base_path.join("refs.bib").is_file());
+        assert!(base_path.join("chapters/research-workflow.typ").is_file());
+        assert!(base_path.join("chapters/ការស្រាវជ្រាវ.typ").is_file());
         assert!(base_path.join("assets/typstry-icon.png").is_file());
         assert!(base_path.join("assets/typstry-wordmark.png").is_file());
     }

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, supportsResponsivePartialRendering, tinymistPreviewArguments } from "../src/preview/previewPolicy";
+import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, supportsResponsivePartialRendering, tinymistPreviewArguments } from "../src/preview/previewPolicy";
 
 describe("preview policy", () => {
   test("only accepts the directive on the first line", () => {
@@ -20,6 +20,22 @@ describe("preview policy", () => {
     const saved = previewSessionIdentity("C:\\docs\\main.typ", "on-save");
     expect(live).toEqual(previewSessionIdentity("C:\\docs\\main.typ", "on-type"));
     expect(live.taskId).not.toBe(saved.taskId);
+  });
+
+  test("keys a research document by workspace and configured main file", () => {
+    const chapter = researchDocumentIdentity("C:\\research", "C:\\research\\main.typ", "C:\\research\\chapters\\one.typ");
+    const sibling = researchDocumentIdentity("C:\\research", "C:\\research\\main.typ", "C:\\research\\chapters\\two.typ");
+    expect(chapter.cacheKey).toBe(sibling.cacheKey);
+    expect(chapter.sourceKey).not.toBe(sibling.sourceKey);
+    expect(previewSessionIdentity("C:\\research\\main.typ", "on-type", chapter))
+      .toEqual(previewSessionIdentity("C:\\research\\main.typ", "on-type", sibling));
+  });
+
+  test("isolates identical main paths owned by different workspaces", () => {
+    const first = researchDocumentIdentity("C:\\one", "C:\\one\\main.typ", "C:\\one\\main.typ");
+    const second = researchDocumentIdentity("C:\\two", "C:\\two\\main.typ", "C:\\two\\main.typ");
+    expect(previewSessionIdentity("main.typ", "on-type", first).key)
+      .not.toBe(previewSessionIdentity("main.typ", "on-type", second).key);
   });
 
   test("enables Tinymist partial rendering for live previews", () => {

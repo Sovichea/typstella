@@ -88,14 +88,19 @@ const linkDecoration = Decoration.mark({ class: "cm-ctrl-link", attributes: { st
 
 export function typstImportPathRange(state: EditorState, position: number): { from: number; to: number } | null {
   const line = state.doc.lineAt(position);
-  const pathPattern = /#(?:include|import)\s+"((?:\\.|[^"\\])*)"/g;
-  for (const match of line.text.matchAll(pathPattern)) {
-    if (match.index === undefined) continue;
-    const quotedPath = match[1];
-    const openingQuote = match[0].indexOf('"');
-    const from = line.from + match.index + openingQuote + 1;
-    const to = from + quotedPath.length;
-    if (position >= from && position < to) return { from, to };
+  const pathPatterns = [
+    /#(?:include|import)\s+"((?:\\.|[^"\\])*)"/g,
+    /#?(?:bibliography|image)\s*\(\s*"((?:\\.|[^"\\])*)"/g
+  ];
+  for (const pathPattern of pathPatterns) {
+    for (const match of line.text.matchAll(pathPattern)) {
+      if (match.index === undefined) continue;
+      const quotedPath = match[1];
+      const openingQuote = match[0].indexOf('"');
+      const from = line.from + match.index + openingQuote + 1;
+      const to = from + quotedPath.length;
+      if (position >= from && position < to) return { from, to };
+    }
   }
   return null;
 }

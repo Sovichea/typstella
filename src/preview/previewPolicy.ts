@@ -10,6 +10,29 @@ export type PreviewTarget = {
 
 export type PreviewRefreshStyle = "on-type" | "on-save";
 
+export type ResearchDocumentIdentity = {
+  workspaceKey: string;
+  mainKey: string;
+  sourceKey: string;
+  cacheKey: string;
+};
+
+export function researchDocumentIdentity(
+  workspacePath: string,
+  mainPath: string | null,
+  sourcePath: string
+): ResearchDocumentIdentity {
+  const workspaceKey = filePathKey(workspacePath);
+  const mainKey = filePathKey(mainPath ?? sourcePath);
+  const sourceKey = filePathKey(sourcePath);
+  return {
+    workspaceKey,
+    mainKey,
+    sourceKey,
+    cacheKey: `${workspaceKey}::${mainKey}`
+  };
+}
+
 export function allowsStandalonePreview(contents: string): boolean {
   const firstLine = contents.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0];
   return firstLine === "// @standalone-preview" || firstLine === "//@standalone-preview";
@@ -19,8 +42,15 @@ export function previewRefreshStyle(renderMode: PreviewRefreshStyle): PreviewRef
   return renderMode;
 }
 
-export function previewSessionIdentity(rootPath: string, style: PreviewRefreshStyle): { key: string; taskId: string } {
-  const key = `${filePathKey(rootPath)}::${style}`;
+export function previewSessionIdentity(
+  rootPath: string,
+  style: PreviewRefreshStyle,
+  document?: Pick<ResearchDocumentIdentity, "workspaceKey" | "mainKey">
+): { key: string; taskId: string } {
+  const owner = document
+    ? `${document.workspaceKey}::${document.mainKey}`
+    : filePathKey(rootPath);
+  const key = `${owner}::${filePathKey(rootPath)}::${style}`;
   let hash = 0x811c9dc5;
   for (let index = 0; index < key.length; index += 1) {
     hash ^= key.charCodeAt(index);

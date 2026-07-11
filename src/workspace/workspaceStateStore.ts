@@ -15,6 +15,13 @@ export type StoredWorkspaceState = {
   explorerSidebarWidthPx: number;
 };
 
+export function workspaceRestoreCandidates(state: StoredWorkspaceState): string[] {
+  const candidates = [state.activeFilePath, state.pinnedMainFilePath, ...state.openTabs.map(tab => tab.path)];
+  return candidates.filter((path, index): path is string =>
+    typeof path === "string" && path.length > 0 && candidates.indexOf(path) === index
+  );
+}
+
 export class WorkspaceStateStore {
   public save(workspacePath: string, state: StoredWorkspaceState): void {
     localStorage.setItem(this.key(workspacePath), JSON.stringify(state));

@@ -558,7 +558,7 @@ fn collect_typst_files(root: &std::path::Path, files: &mut Vec<std::path::PathBu
         let path = entry.path();
         if path.is_dir() {
             let name = entry.file_name();
-            if name != ".git" && name != "target" && name != "node_modules" {
+            if name != ".git" && name != "target" && name != "node_modules" && name != ".typstry" {
                 collect_typst_files(&path, files);
             }
         } else if path.extension().and_then(|value| value.to_str()) == Some("typ") {
@@ -1226,6 +1226,53 @@ mod preview_main_tests {
                     .as_ref()
             )
         );
+    }
+
+    #[test]
+    fn example_11_proves_main_and_standalone_preview_ownership() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("examples")
+            .join("11-typstry-readme");
+        let main = root.join("main.typ");
+        let khmer = root.join("chapters").join("ការស្រាវជ្រាវ.typ");
+        let standalone = root.join("chapters").join("research-workflow.typ");
+
+        let khmer_target = resolve_preview_target(
+            khmer.to_string_lossy().to_string(),
+            Some(root.to_string_lossy().to_string()),
+            None,
+            Some(main.to_string_lossy().to_string()),
+        )
+        .expect("resolve Khmer chapter");
+        assert_eq!(
+            khmer_target.root_path.as_deref(),
+            Some(
+                super::normalized_existing_path(&main)
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+        assert!(khmer_target.imported);
+        assert!(!khmer_target.standalone);
+
+        let standalone_target = resolve_preview_target(
+            standalone.to_string_lossy().to_string(),
+            Some(root.to_string_lossy().to_string()),
+            None,
+            Some(main.to_string_lossy().to_string()),
+        )
+        .expect("resolve standalone chapter");
+        assert_eq!(
+            standalone_target.root_path.as_deref(),
+            Some(
+                super::normalized_existing_path(&standalone)
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+        assert!(standalone_target.imported);
+        assert!(standalone_target.standalone);
     }
 
     #[test]

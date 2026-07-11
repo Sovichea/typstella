@@ -29,4 +29,15 @@ describe("Ctrl-hover Typst links", () => {
 
     expect(typstImportPathRange(state, source.indexOf("bar"))).toBeNull();
   });
+
+  test.each([
+    ['#bibliography("references/research refs.bib")', "references/research refs.bib"],
+    ['#figure(image("figures/ការស្រាវជ្រាវ.png"))', "figures/ការស្រាវជ្រាវ.png"]
+  ])("covers navigable research asset paths in %s", (source, expected) => {
+    const state = EditorState.create({ doc: source });
+    const position = source.indexOf(expected) + Math.floor(expected.length / 2);
+    const range = typstImportPathRange(state, position);
+    expect(range).not.toBeNull();
+    expect(state.sliceDoc(range!.from, range!.to)).toBe(expected);
+  });
 });

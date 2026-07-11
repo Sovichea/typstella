@@ -19,6 +19,9 @@ src-tauri/gen/
 crates/*/target/
 **/*.rs.bk
 
+# Typstry workspace-generated render/font caches
+.typstry/
+
 # Editor
 .vscode/
 .idea/

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { WorkspaceStateStore } from "../src/workspace/workspaceStateStore";
+import { WorkspaceStateStore, workspaceRestoreCandidates } from "../src/workspace/workspaceStateStore";
 
 const values = new Map<string, string>();
 Object.defineProperty(globalThis, "localStorage", {
@@ -29,5 +29,15 @@ describe("workspace state store", () => {
   test("rejects malformed persisted state", () => {
     values.set("typstry-workspace-/work", "not json");
     expect(new WorkspaceStateStore().load("/work")).toBeNull();
+  });
+
+  test("restores an active or pinned main file when the saved tab list is empty", () => {
+    expect(workspaceRestoreCandidates({
+      activeFilePath: "/work/main.typ",
+      pinnedMainFilePath: "/work/main.typ",
+      openTabs: [],
+      inputContainerWidthPct: 50,
+      explorerSidebarWidthPx: 250
+    })).toEqual(["/work/main.typ"]);
   });
 });
