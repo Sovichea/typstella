@@ -32,7 +32,7 @@ fn migrate_legacy_contents(relative_path: &str, contents: Vec<u8>) -> Vec<u8> {
         return contents;
     };
     let migrated = match relative_path {
-        "01-writing-basics/main.typ" => text.replace(
+        "01-basics/01-writing-basics/main.typ" => text.replace(
             "..measurements.map(row => (row.at(0), str(row.at(1)))),",
             "..measurements.map(row => (row.at(0), str(row.at(1)))).flatten(),",
         ),
@@ -344,7 +344,7 @@ mod tests {
     #[test]
     fn migrates_the_original_example_syntax_errors() {
         let writing = migrate_legacy_contents(
-            "01-writing-basics/main.typ",
+            "01-basics/01-writing-basics/main.typ",
             b"..measurements.map(row => (row.at(0), str(row.at(1)))),".to_vec(),
         );
         assert!(String::from_utf8(writing)
@@ -363,40 +363,41 @@ mod tests {
     #[test]
     fn test_khmer_example_exists_in_resources() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let khmer_path = manifest_dir.join("resources/examples/07-khmer-example/main.typ");
+        let khmer_path = manifest_dir.join("resources/examples/03-language-tools/01-khmer-deep-support/main.typ");
         assert!(
             khmer_path.is_file(),
-            "07-khmer-example/main.typ must exist in the resources directory"
+            "03-language-tools/01-khmer-deep-support/main.typ must exist in the resources directory"
         );
     }
 
     #[test]
     fn khmer_folklore_example_is_multifile() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let example_dir = manifest_dir.join("resources/examples/09-khmer-folklore-book");
+        let example_dir = manifest_dir.join("resources/examples/04-projects/02-khmer-folklore-book");
         assert!(example_dir.join("main.typ").is_file());
         assert!(example_dir
             .join("stories/01-rabbit-and-snail.typ")
             .is_file());
         assert!(example_dir.join("stories/02-crab-and-heron.typ").is_file());
         assert!(example_dir.join("stories/03-three-sons.typ").is_file());
+        assert!(example_dir.join("stories/04-four-bald-men.typ").is_file());
     }
 
     #[test]
     fn khmer_segmentation_comparison_example_exists() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let example_path =
-            manifest_dir.join("resources/examples/10-khmer-segmentation-comparison/main.typ");
+            manifest_dir.join("resources/examples/03-language-tools/02-khmer-segmentation-comparison/main.typ");
         assert!(
             example_path.is_file(),
-            "10-khmer-segmentation-comparison/main.typ must exist in the resources directory"
+            "03-language-tools/02-khmer-segmentation-comparison/main.typ must exist in the resources directory"
         );
     }
 
     #[test]
     fn test_readme_example_exists() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let base_path = manifest_dir.join("resources/examples/11-typstry-readme");
+        let base_path = manifest_dir.join("resources/examples/04-projects/03-typstry-readme");
         assert!(base_path.join("main.typ").is_file());
         assert!(base_path.join("template.typ").is_file());
         assert!(base_path.join("import.typ").is_file());

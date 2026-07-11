@@ -24,6 +24,8 @@ Complex scripts rely on correct character shaping, combining marks, and font fal
 
 #sample("Lao", [ສະບາຍດີໂລກ. ຕົວອັກສອນລາວຕ້ອງການການຈັດຮູບຮ່າງທີ່ຖືກຕ້ອງ.])
 
+#text(size: 9.5pt, fill: luma(80))[_Note: Lao ICU4X word segmentation and optional `lo_LA` spellcheck are available in Settings → Language Tools._]
+
 #sample("Devanagari", [नमस्ते दुनिया। देवनागरी में अक्षरों और मात्राओं का सही संयोजन आवश्यक है।])
 
 #sample("Bengali", [নমস্কার বিশ্ব। বাংলা অক্ষর ও মাত্রার সঠিক বিন্যাস গুরুত্বপূর্ণ।])

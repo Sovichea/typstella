@@ -22,19 +22,27 @@ Khmer is the first language with deep support, including tailored cursor and del
 - CodeMirror editing with Unicode-safe ranges and complex-script font fallback.
 - Script-aware editing-policy registry with deeply tailored Khmer behavior.
 - Khmer spellcheck and word completion through the pinned Khmer segmenter.
+- Lao language support with ICU4X word segmentation and optional `lo_LA` Hunspell dictionary.
 - English spellcheck bundled by default, with optional Hunspell-compatible dictionaries for additional languages.
 - Independent controls for script-aware editing, spellcheck, and typing suggestions.
 - Tinymist diagnostics and managed Typst tooling.
 - Virtualized PDF preview designed for long documents and constrained memory use.
 - Main-document and standalone-preview workflows for multi-file projects.
 - Workspace support for templates, chapters, includes, bibliography files, figures, and external assets.
+- Contributor framework for adding new complex-script languages without modifying core editor code.
 
 == Language support
 
 Language support is capability-based rather than all-or-nothing:
 
-- *Deep support* can include a script editing policy, reliable segmentation, spellcheck, and word completion. Khmer is the first deep implementation.
-- *Enhanced support* can add a tokenizer or other language-specific boundary logic without requiring custom editor behavior.
-- *Basic support* uses a compatible dictionary where available. This can provide useful spellcheck, but it is not presented as reliable segmentation for languages that require a dedicated tokenizer.
+- *Deep support* includes a script editing policy, reliable segmentation, spellcheck, and word completion. Khmer is the first and reference deep implementation.
+- *Enhanced support* adds a tokenizer or language-specific boundary logic without requiring custom editor behavior. Lao uses ICU4X word segmentation at this level.
+- *Basic support* uses a compatible Hunspell dictionary where available. This can provide useful spellcheck, but it is not presented as reliable segmentation for languages that require a dedicated tokenizer.
+
+Each language entry in Settings shows its support level, stability status, and which capabilities are actually available.
+
+== Contributing a language
+
+#imp.project-name has a documented contributor framework for adding new complex-script languages. A contributor can implement a new language without editing any generic CodeMirror integration or Khmer code by following the language contributor guide and using the `bun run conform` command to validate their policy and provider.
 
 For more information, see the official publication @typst2024 and our repository @typstry2026.

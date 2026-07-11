@@ -1233,7 +1233,8 @@ mod preview_main_tests {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join("examples")
-            .join("11-typstry-readme");
+            .join("04-projects")
+            .join("03-typstry-readme");
         let main = root.join("main.typ");
         let khmer = root.join("chapters").join("ការស្រាវជ្រាវ.typ");
         let standalone = root.join("chapters").join("research-workflow.typ");
