@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { basename, dirname, join } from "@tauri-apps/api/path";
-import { confirm } from "@tauri-apps/plugin-dialog";
+import { confirm, message } from "@tauri-apps/plugin-dialog";
 import { readText, writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { open } from "@tauri-apps/plugin-shell";
 import type { EditorView } from "@codemirror/view";
@@ -29,6 +29,7 @@ export type ContextMenuDependencies = {
   setSpellingIgnored: (issue: SpellingIssue, ignored: boolean) => void;
   isPinnedMainFile: (path: string) => boolean;
   setPinnedMainFile: (path: string | null) => void | Promise<void>;
+  getPinnedMainFile: () => string | null;
 };
 
 const previewItems = `
@@ -182,6 +183,20 @@ export class ContextMenuController {
   private async deleteTarget(): Promise<void> {
     if (!this.targetPath) return;
     const path = this.targetPath;
+
+    const mainFilePath = this.dependencies.getPinnedMainFile();
+    if (mainFilePath) {
+      const mainKey = mainFilePath.toLowerCase().replace(/\\/g, "/");
+      const targetKey = path.toLowerCase().replace(/\\/g, "/");
+      if (mainKey === targetKey || (this.targetIsDirectory && mainKey.startsWith(targetKey + "/"))) {
+        await message(`The active main document cannot be deleted.`, {
+          title: "Delete Blocked",
+          kind: "error"
+        });
+        return;
+      }
+    }
+
     const accepted = await confirm(`Are you sure you want to move this ${this.targetIsDirectory ? "folder" : "file"} to the Trash?`, {
       title: "Confirm Delete", kind: "warning"
     });

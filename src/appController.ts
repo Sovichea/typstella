@@ -347,7 +347,8 @@ export class TypstryWorkspaceController {
         : settings.editor.ignoredWords.filter(word => word !== issue.word);
     }),
     isPinnedMainFile: path => this.isPinnedMainFile(path),
-    setPinnedMainFile: path => this.setPinnedMainFile(path)
+    setPinnedMainFile: path => this.setPinnedMainFile(path),
+    getPinnedMainFile: () => this.pinnedMainFilePath
   });
   private readonly documentOutlineController = new DocumentOutlineController(
     document.getElementById("document-outline-tree")!,
