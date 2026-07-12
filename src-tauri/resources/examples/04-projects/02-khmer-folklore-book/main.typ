@@ -29,10 +29,6 @@
 
 #pagebreak()
 
-#include "stories/01-rabbit-and-crocodile.typ"
-
-#pagebreak()
-
 #include "stories/01-rabbit-and-snail.typ"
 
 #pagebreak()
