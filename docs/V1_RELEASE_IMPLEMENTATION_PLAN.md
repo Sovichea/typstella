@@ -211,13 +211,13 @@ Installer verification is required for Windows MSI/NSIS, Linux DEB/RPM desktop i
 - [x] **V1-I.15 Register the file association.** Add `.typstry`, `application/vnd.typstry.project`, the exported macOS type, the Typstry icon, and installer metadata without claiming ownership of `.typ` or `.typst` source files.
 - [x] **V1-I.16 Route OS-open events safely.** Handle cold launch and single-instance handoff, queue requests until initialization completes, canonicalize and deduplicate paths, focus the existing window, and invoke the same import controller used by the File menu.
 - [x] **V1-I.17 Test packaged double-click import.** Verify association, icon, cold/warm launch, spaces and Unicode paths, corrupt archives, repeated events, cancellation, and uninstall cleanup on every supported installer format.
-- [ ] **V1-I.18 Capture effective render fonts.** Union exact faces declared by project typography configuration with faces resolved by the bound compilation; do not rely on regex/source scanning or family names alone.
-- [ ] **V1-I.19 Add font provenance and license validation.** Parse supported font formats, embedding restrictions, source metadata, redistribution/modification permission, and generated-font provenance; produce actionable blockers.
-- [ ] **V1-I.20 Build the packaged font payload.** Copy exact verified faces into `.typstry/fonts/package/`, use deterministic names, hash every file, and record all face/style/variation metadata in the manifest.
-- [ ] **V1-I.21 Verify hermetic rendering.** Before finalizing export, compile against the packaged font directory with ordinary system resolution excluded or audited; fail if a different or missing face is selected.
-- [ ] **V1-I.22 Load imported fonts project-locally.** Verify hashes and font structure, prioritize packaged faces for the workspace's Tinymist/Typst processes, and never register them with the OS.
-- [ ] **V1-I.23 Add font-package security limits.** Bound file size, total font bytes, collection face count, parsing time, supported formats, normalized paths, and duplicate family/PostScript identities.
-- [ ] **V1-I.24 Test font reproducibility.** Cover clean machines, conflicting system versions, variable fonts, math/symbol fonts, CJK and complex scripts, Khmer shaping, scaled generated fonts, restricted licenses, corrupt fonts, and cross-platform PDF comparison.
+- [x] **V1-I.18 Capture effective render fonts.** Union exact faces declared by project typography configuration with faces resolved by the bound compilation; do not rely on regex/source scanning or family names alone.
+- [x] **V1-I.19 Add font provenance and license validation.** Parse supported font formats, embedding restrictions, source metadata, redistribution/modification permission, and generated-font provenance; produce actionable blockers.
+- [x] **V1-I.20 Build the packaged font payload.** Copy exact verified faces into `.typstry/fonts/package/`, use deterministic names, hash every file, and record all face/style/variation metadata in the manifest.
+- [x] **V1-I.21 Verify hermetic rendering.** Before finalizing export, compile against the packaged font directory with ordinary system resolution excluded or audited; fail if a different or missing face is selected.
+- [x] **V1-I.22 Load imported fonts project-locally.** Verify hashes and font structure, prioritize packaged faces for the workspace's Tinymist/Typst processes, and never register them with the OS.
+- [x] **V1-I.23 Add font-package security limits.** Bound file size, total font bytes, collection face count, parsing time, supported formats, normalized paths, and duplicate family/PostScript identities.
+- [x] **V1-I.24 Test font reproducibility.** Cover clean machines, conflicting system versions, variable fonts, math/symbol fonts, CJK and complex scripts, Khmer shaping, scaled generated fonts, restricted licenses, corrupt fonts, and cross-platform PDF comparison.
 
 ### Acceptance criteria
 

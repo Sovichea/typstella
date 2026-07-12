@@ -2,7 +2,7 @@
 
 ## Status
 
-Schema version 1 is implemented through `V1-I.17`. It binds source to exact Typst/Tinymist versions, provides deterministic source integrity, supports secure preflight and transactional import, and presents an explicit compatibility decision. `renderEnvironment.fontsPackaged` remains `false` until `V1-I.18` through `V1-I.24` implement verified font packaging. An archive with `fontsPackaged: false` must not be described as hermetically render-reproducible.
+Schema version 1 is implemented through `V1-I.24`. It binds source to exact Typst/Tinymist versions, provides deterministic source integrity, secure transactional import, and verified project-local render fonts. An archive with `fontsPackaged: false` must not be described as hermetically render-reproducible.
 
 ## Container
 
@@ -12,7 +12,7 @@ Schema version 1 is implemented through `V1-I.17`. It binds source to exact Typs
 - Manifest: `.typstry/project.json`
 - Source paths: UTF-8, relative, `/`-separated
 
-Generated caches, `.git`, `.typstry`, `node_modules`, and `target` directories are excluded. The exporter regenerates only the manifest; later format work may add verified project-local fonts under `.typstry/fonts/package/`.
+Generated caches, `.git`, `.typstry`, `node_modules`, and `target` directories are excluded. The exporter adds only audited font payloads under `.typstry/fonts/package/`; other managed cache content remains excluded.
 
 ## Manifest v1
 
@@ -112,6 +112,18 @@ The exporter:
 - stages the ZIP beside its destination and publishes it only after the writer finishes.
 
 Empty directories are not stored because Typst projects do not require them to compile. A future schema may declare a required empty directory explicitly if a real workflow needs one.
+
+## Font reproducibility
+
+Export compiles the selected main document with the bound Tinymist/Typst toolchain and reads the exact PostScript face identities embedded in its PDF. This avoids guessing from family names or scanning Typst source. Every resolved identity must map to an exact file-backed face.
+
+Typstry accepts TTF, OTF, and TTC payloads. It validates face indices, collection counts, OpenType structure and embedding flags, and requires a recognized redistributable license in font metadata. Missing provenance, restricted embedding, unrecognized licenses, corrupt fonts, and unresolved compiler faces block version-bound export. Generated scaled fonts must also permit modification.
+
+Font files receive deterministic names derived from PostScript identity and SHA-256. Export recompiles with `--ignore-system-fonts` and only `.typstry/fonts/package/`; the resolved PostScript set must exactly match the original compile before the archive is published.
+
+On import, font paths and hashes are validated during archive preflight and extraction. Before starting Tinymist, Typstry reparses every packaged face, checks its face index and digest, supplies the package directory through `TYPST_FONT_PATHS`, and disables ordinary system-font resolution. Fonts remain project-local and are never installed with the operating system.
+
+Security limits are 64 MiB per font file, 256 MiB total packaged fonts, 64 faces per collection, and 128 declared faces. Duplicate normalized paths or PostScript-name/face-index identities are rejected. Cross-platform release verification is defined in [FONT_REPRODUCIBILITY_TESTS.md](FONT_REPRODUCIBILITY_TESTS.md).
 
 ## Source ZIP distinction
 

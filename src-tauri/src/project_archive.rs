@@ -17,6 +17,8 @@ const MAX_TOTAL_UNCOMPRESSED_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const MAX_PATH_BYTES: usize = 512;
 const MAX_COMPRESSION_RATIO: u64 = 200;
+const MAX_PACKAGED_FONT_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_TOTAL_PACKAGED_FONT_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +78,14 @@ pub struct ProjectFont {
     pub stretch: u16,
     pub path: String,
     pub sha256: String,
+    #[serde(default)]
+    pub face_index: u32,
+    #[serde(default)]
+    pub format: String,
+    #[serde(default)]
+    pub variable: bool,
+    #[serde(default)]
+    pub source: String,
     pub license: ProjectFontLicense,
 }
 
@@ -84,6 +94,8 @@ pub struct ProjectFont {
 pub struct ProjectFontLicense {
     pub name: String,
     pub redistributable: bool,
+    #[serde(default)]
+    pub modifiable: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -107,6 +119,7 @@ pub struct ProjectExport<'a> {
     pub app_version: &'a str,
     pub typst_version: &'a str,
     pub tinymist_version: &'a str,
+    pub packaged_fonts: Option<Vec<ProjectFont>>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -193,6 +206,66 @@ pub fn validate_manifest_compatibility(manifest: &ProjectManifest) -> Result<(),
             return Err(format!("The integrity digest for '{path}' is not SHA-256."));
         }
     }
+    if manifest.render_environment.fonts_packaged != !manifest.fonts.is_empty() {
+        return Err("The packaged-font capability does not match the font manifest.".to_string());
+    }
+    let mut font_identities = HashSet::new();
+    let mut face_descriptors = HashSet::new();
+    let mut font_paths = HashSet::new();
+    for font in &manifest.fonts {
+        validate_archive_path(&font.path)?;
+        if !font.path.starts_with(".typstry/fonts/package/") {
+            return Err(format!(
+                "Packaged font path '{}' is outside the font package.",
+                font.path
+            ));
+        }
+        if !font.license.redistributable {
+            return Err(format!(
+                "Packaged font '{}' is not redistributable.",
+                font.postscript_name
+            ));
+        }
+        if !matches!(font.format.as_str(), "ttf" | "otf" | "ttc") {
+            return Err(format!(
+                "Packaged font '{}' has an unsupported format.",
+                font.postscript_name
+            ));
+        }
+        let expected = manifest.integrity.files.get(&font.path).ok_or_else(|| {
+            format!(
+                "Packaged font '{}' is missing from integrity.files.",
+                font.postscript_name
+            )
+        })?;
+        if expected != &font.sha256 {
+            return Err(format!(
+                "Packaged font '{}' has inconsistent hashes.",
+                font.postscript_name
+            ));
+        }
+        let identity = format!(
+            "{}#{}",
+            font.postscript_name.to_lowercase(),
+            font.face_index
+        );
+        let descriptor = format!(
+            "{}|{}|{}|{}",
+            font.family.to_lowercase(),
+            font.style.to_lowercase(),
+            font.weight,
+            font.stretch
+        );
+        if !font_identities.insert(identity)
+            || !face_descriptors.insert(descriptor)
+            || !font_paths.insert(font.path.to_lowercase())
+        {
+            return Err(format!(
+                "Duplicate packaged font identity '{}'.",
+                font.postscript_name
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -203,6 +276,7 @@ pub fn inspect_typstry_project(archive_path: &Path) -> Result<ArchiveInspection,
     Ok(validate_open_archive(&mut archive)?.inspection)
 }
 
+#[allow(dead_code)]
 pub fn import_typstry_project(
     archive_path: &Path,
     destination_path: &Path,
@@ -418,7 +492,32 @@ pub fn export_typstry_project(options: ProjectExport<'_>) -> Result<ProjectManif
     }
     let main_relative = archive_path_for(&root, &main)?;
     let excluded_output = canonicalize_if_exists(options.archive_path);
-    let files = collect_workspace_files(&root, excluded_output.as_deref())?;
+    let mut files = collect_workspace_files(&root, excluded_output.as_deref())?;
+    let packaged_fonts = options.packaged_fonts.unwrap_or_default();
+    for font in &packaged_fonts {
+        validate_archive_path(&font.path)?;
+        if !font.path.starts_with(".typstry/fonts/package/") || !font.license.redistributable {
+            return Err(format!(
+                "Font {:?} is not a valid redistributable package asset.",
+                font.postscript_name
+            ));
+        }
+        let absolute_path = join_archive_path(&root, &font.path);
+        let bytes = read_stable_file(&absolute_path)?;
+        let actual = sha256_hex(&bytes);
+        if actual != font.sha256 {
+            return Err(format!(
+                "Packaged font {:?} changed before export.",
+                font.postscript_name
+            ));
+        }
+        files.push(FileSnapshot {
+            absolute_path,
+            archive_path: font.path.clone(),
+            sha256: actual,
+        });
+    }
+    files.sort_by(|left, right| left.archive_path.cmp(&right.archive_path));
     if !files.iter().any(|file| file.archive_path == main_relative) {
         return Err("The project main file was excluded from the archive.".to_string());
     }
@@ -453,9 +552,9 @@ pub fn export_typstry_project(options: ProjectExport<'_>) -> Result<ProjectManif
         // the verified project-local font payload. Do not infer full render
         // reproducibility while it remains false.
         render_environment: RenderEnvironment {
-            fonts_packaged: false,
+            fonts_packaged: !packaged_fonts.is_empty(),
         },
-        fonts: Vec::new(),
+        fonts: packaged_fonts,
         integrity: ProjectIntegrity {
             algorithm: "sha256".to_string(),
             files: integrity_files,
@@ -595,12 +694,63 @@ fn validate_open_archive(file: &mut zip::ZipArchive<File>) -> Result<ValidatedAr
     manifest_entry
         .read_to_end(&mut manifest_bytes)
         .map_err(|error| format!("Failed to read project manifest: {error}"))?;
+    drop(manifest_entry);
     if manifest_bytes.len() as u64 > MAX_MANIFEST_BYTES {
         return Err("The project manifest is larger than 1 MiB.".to_string());
     }
     let manifest: ProjectManifest = serde_json::from_slice(&manifest_bytes)
         .map_err(|error| format!("The project manifest is invalid JSON: {error}"))?;
     validate_manifest_compatibility(&manifest)?;
+    let font_paths = manifest
+        .fonts
+        .iter()
+        .map(|font| font.path.as_str())
+        .collect::<HashSet<_>>();
+    let mut total_font_bytes = 0_u64;
+    for entry in &entries {
+        if font_paths.contains(entry.path.as_str()) {
+            if entry.size > MAX_PACKAGED_FONT_BYTES {
+                return Err(format!(
+                    "Packaged font '{}' exceeds the 64 MiB limit.",
+                    entry.path
+                ));
+            }
+            total_font_bytes = total_font_bytes.saturating_add(entry.size);
+        }
+    }
+    if total_font_bytes > MAX_TOTAL_PACKAGED_FONT_BYTES {
+        return Err("The packaged fonts exceed the 256 MiB total limit.".to_string());
+    }
+    for font in &manifest.fonts {
+        let metadata = entries
+            .iter()
+            .find(|entry| entry.path == font.path)
+            .ok_or_else(|| {
+                format!(
+                    "Packaged font '{}' is missing from the archive.",
+                    font.postscript_name
+                )
+            })?;
+        let mut entry = file.by_index(metadata.index).map_err(|error| {
+            format!(
+                "Failed to inspect packaged font '{}': {error}",
+                font.postscript_name
+            )
+        })?;
+        let mut bytes = Vec::with_capacity(entry.size() as usize);
+        entry.read_to_end(&mut bytes).map_err(|error| {
+            format!(
+                "Failed to read packaged font '{}': {error}",
+                font.postscript_name
+            )
+        })?;
+        crate::project_fonts::validate_packaged_font_bytes(
+            &bytes,
+            font.face_index,
+            &font.sha256,
+            &font.postscript_name,
+        )?;
+    }
 
     let archive_files = entries
         .iter()
@@ -970,6 +1120,7 @@ mod tests {
             app_version: "1.0.0",
             typst_version: "0.13.1",
             tinymist_version: "0.13.10",
+            packaged_fonts: None,
         })
         .unwrap()
     }
@@ -1050,6 +1201,45 @@ mod tests {
             .files
             .insert("main.typ".to_string(), "invalid".to_string());
         assert!(validate_manifest_compatibility(&invalid).is_err());
+    }
+
+    #[test]
+    fn font_manifest_rejects_restricted_missing_and_duplicate_identities() {
+        let workspace = create_workspace();
+        let output = tempfile::tempdir().unwrap();
+        let archive = output.path().join("fonts.typstry");
+        let mut manifest = export_project(workspace.path(), &archive);
+        let path = ".typstry/fonts/package/test.ttf".to_string();
+        let hash = "a".repeat(64);
+        let font = ProjectFont {
+            id: "Test-Regular:0".into(),
+            family: "Test".into(),
+            postscript_name: "Test-Regular".into(),
+            style: "normal".into(),
+            weight: 400,
+            stretch: 100,
+            path: path.clone(),
+            sha256: hash.clone(),
+            face_index: 0,
+            format: "ttf".into(),
+            variable: false,
+            source: "system".into(),
+            license: ProjectFontLicense {
+                name: "OFL-1.1".into(),
+                redistributable: true,
+                modifiable: true,
+            },
+        };
+        manifest.render_environment.fonts_packaged = true;
+        manifest.fonts.push(font.clone());
+        assert!(validate_manifest_compatibility(&manifest).is_err());
+        manifest.integrity.files.insert(path, hash);
+        assert!(validate_manifest_compatibility(&manifest).is_ok());
+        manifest.fonts.push(font);
+        assert!(validate_manifest_compatibility(&manifest).is_err());
+        manifest.fonts.pop();
+        manifest.fonts[0].license.redistributable = false;
+        assert!(validate_manifest_compatibility(&manifest).is_err());
     }
 
     #[test]

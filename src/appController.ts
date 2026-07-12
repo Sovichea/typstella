@@ -41,7 +41,7 @@ import { EditorToolbarController } from "./editor/toolbarController";
 import { ContextMenuController } from "./components/contextMenuController";
 import { ToolchainController, type ToolchainStatus } from "./toolchain/toolchainController";
 import { DocumentOutlineController, type DocumentHeading } from "./outline/documentOutline";
-import { typographyEdit, type DocumentTypography } from "./editor/documentTypography";
+import { parseTypographyBlock, typographyEdit, type DocumentTypography } from "./editor/documentTypography";
 import { SpellcheckController, type SpellingIssue } from "./editor/spellcheck";
 import type { ImportedTypstryProject, TypstryProjectPreflight } from "./projectArchive";
 
@@ -4377,14 +4377,22 @@ export class TypstryWorkspaceController {
 
         if (selected) {
           this.setLspStatus({ kind: "running", message: "Exporting Typstry project..." });
+          const mainSource = filePathKey(mainFilePath) === filePathKey(this.activeFilePath ?? "")
+            ? this.editorInstance.state.doc.toString()
+            : await invoke<string>("read_workspace_file", { path: mainFilePath });
+          const typography = parseTypographyBlock(mainSource);
+          const declaredFontFamilies = typography
+            ? [typography.latinFont, typography.complexFont].filter((font): font is string => !!font)
+            : [];
           const manifest = await invoke<{ renderEnvironment: { fontsPackaged: boolean } }>("export_typstry_project", {
             workspacePath: this.workspaceRootPath,
             archivePath: selected,
-            mainFilePath
+            mainFilePath,
+            declaredFontFamilies
           });
           const fontStatus = manifest.renderEnvironment.fontsPackaged
-            ? ""
-            : " Toolchain is pinned; render fonts are not packaged in this implementation phase.";
+            ? " Exact render fonts were audited and packaged."
+            : " No render fonts were discovered; reproducibility could not be established.";
           this.setLspStatus({ kind: "preview-ready", message: `Typstry project exported to ${selected}.${fontStatus}` });
         }
       } catch (error) {

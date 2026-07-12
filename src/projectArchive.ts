@@ -37,9 +37,14 @@ export type TypstryProjectFont = {
   stretch: number;
   path: string;
   sha256: string;
+  faceIndex: number;
+  format: "ttf" | "otf" | "ttc" | "unknown";
+  variable: boolean;
+  source: string;
   license: {
     name: string;
     redistributable: boolean;
+    modifiable: boolean;
   };
 };
 
@@ -128,9 +133,14 @@ function parseFont(value: unknown, index: number): TypstryProjectFont {
     stretch: stretch as number,
     path: validArchivePath(font.path, `fonts[${index}].path`),
     sha256: sha256Value(font.sha256, `fonts[${index}].sha256`),
+    faceIndex: Number.isInteger(font.faceIndex) && (font.faceIndex as number) >= 0 ? font.faceIndex as number : 0,
+    format: font.format === "ttf" || font.format === "otf" || font.format === "ttc" ? font.format : "unknown",
+    variable: font.variable === true,
+    source: typeof font.source === "string" ? font.source : "unknown",
     license: {
       name: stringValue(license.name, `fonts[${index}].license.name`),
-      redistributable: license.redistributable
+      redistributable: license.redistributable,
+      modifiable: license.modifiable === true
     }
   };
 }

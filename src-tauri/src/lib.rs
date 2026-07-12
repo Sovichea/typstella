@@ -16,6 +16,7 @@ use tokio_tungstenite::{
 mod examples;
 mod font_store;
 mod project_archive;
+mod project_fonts;
 mod render_prepare;
 mod scaled_fonts;
 mod segmentation;
@@ -31,14 +32,41 @@ use segmentation::{
 };
 use toolchain::active_tinymist;
 
-fn generated_font_directory(start: &Path) -> Option<std::path::PathBuf> {
+fn workspace_font_directories(start: &Path) -> Vec<std::path::PathBuf> {
     for ancestor in start.ancestors() {
-        let candidate = ancestor.join(".typstry").join("fonts").join("generated");
-        if candidate.is_dir() {
-            return Some(candidate);
+        let root = ancestor.join(".typstry").join("fonts");
+        let mut candidates = Vec::new();
+        if workspace_has_bound_font_package(ancestor) && root.join("package").is_dir() {
+            candidates.push(root.join("package"));
+        }
+        if root.join("generated").is_dir() {
+            candidates.push(root.join("generated"));
+        }
+        if !candidates.is_empty() {
+            return candidates;
         }
     }
-    None
+    Vec::new()
+}
+
+fn apply_workspace_font_paths(command: &mut std::process::Command, start: &Path) {
+    let paths = workspace_font_directories(start);
+    if !paths.is_empty() {
+        if let Ok(value) = std::env::join_paths(paths) {
+            command.env("TYPST_FONT_PATHS", value);
+        }
+    }
+}
+
+fn has_packaged_workspace_fonts(start: &Path) -> bool {
+    start.ancestors().any(workspace_has_bound_font_package)
+}
+
+fn workspace_has_bound_font_package(workspace: &Path) -> bool {
+    std::fs::read(workspace.join(project_archive::PROJECT_MANIFEST_PATH))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<project_archive::ProjectManifest>(&bytes).ok())
+        .is_some_and(|manifest| manifest.render_environment.fonts_packaged)
 }
 
 #[tauri::command]
@@ -896,14 +924,15 @@ async fn check_typst_document(
 
     let mut command = std::process::Command::new(&tinymist_cmd);
     command.current_dir(parent);
-    if let Some(fonts) = generated_font_directory(parent) {
-        command.env("TYPST_FONT_PATHS", fonts);
-    }
+    apply_workspace_font_paths(&mut command, parent);
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
+    command.arg("compile");
+    if has_packaged_workspace_fonts(parent) {
+        command.arg("--ignore-system-fonts");
+    }
     let output = command
-        .arg("compile")
         .arg("--root")
         .arg(parent)
         .arg("--format")
@@ -994,15 +1023,16 @@ async fn compile_typst_document(
 
     let mut command = std::process::Command::new(&tinymist_cmd);
     command.current_dir(parent);
-    if let Some(fonts) = generated_font_directory(parent) {
-        command.env("TYPST_FONT_PATHS", fonts);
-    }
+    apply_workspace_font_paths(&mut command, parent);
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
 
+    command.arg("compile");
+    if has_packaged_workspace_fonts(parent) {
+        command.arg("--ignore-system-fonts");
+    }
     let output =
         command
-            .arg("compile")
             .arg("--root")
             .arg(".")
             .arg(input_path.file_name().ok_or_else(|| {
@@ -1519,17 +1549,37 @@ async fn start_tinymist_lsp(
         .ok_or_else(|| "No managed Tinymist toolchain is installed.".to_string())?;
 
     let mut command = tokio::process::Command::new(&tinymist_exe);
+    let mut ignore_system_fonts = false;
     if let Some(workspace_root) = workspace_root_path {
-        let generated_fonts = Path::new(&workspace_root)
-            .join(".typstry")
-            .join("fonts")
-            .join("generated");
-        if generated_fonts.is_dir() {
-            command.env("TYPST_FONT_PATHS", generated_fonts);
+        let workspace = Path::new(&workspace_root);
+        let paths = workspace_font_directories(workspace);
+        if !paths.is_empty() {
+            let project_manifest = workspace.join(project_archive::PROJECT_MANIFEST_PATH);
+            if project_manifest.is_file() {
+                let manifest: project_archive::ProjectManifest = serde_json::from_slice(
+                    &std::fs::read(&project_manifest)
+                        .map_err(|e| format!("Failed to read imported project manifest: {e}"))?,
+                )
+                .map_err(|e| format!("Failed to parse imported project manifest: {e}"))?;
+                if manifest.render_environment.fonts_packaged {
+                    let font_manifest: project_fonts::FontPackageManifest = serde_json::from_value(
+                        serde_json::json!({ "version": 1, "fonts": manifest.fonts }),
+                    )
+                    .map_err(|e| format!("Invalid imported font manifest: {e}"))?;
+                    project_fonts::verify_package_files(workspace, &font_manifest)?;
+                    ignore_system_fonts = true;
+                }
+            }
+            if let Ok(value) = std::env::join_paths(paths) {
+                command.env("TYPST_FONT_PATHS", value);
+            }
         }
     }
+    command.arg("lsp");
+    if ignore_system_fonts {
+        command.arg("--ignore-system-fonts");
+    }
     command
-        .arg("lsp")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -1847,6 +1897,7 @@ async fn export_typstry_project(
     workspace_path: String,
     archive_path: String,
     main_file_path: String,
+    declared_font_families: Vec<String>,
 ) -> Result<project_archive::ProjectManifest, String> {
     let data_dir = app_handle
         .path()
@@ -1861,7 +1912,38 @@ async fn export_typstry_project(
         "Cannot export a version-bound project because no validated Tinymist toolchain is active."
             .to_string()
     })?;
+    let tinymist_executable = active_tinymist(&data_dir).ok_or_else(|| {
+        "Cannot package fonts because the selected Tinymist executable is unavailable.".to_string()
+    })?;
     tauri::async_runtime::spawn_blocking(move || {
+        let workspace = Path::new(&workspace_path);
+        let main = Path::new(&main_file_path);
+        let audit = tempfile::tempdir().map_err(|e| format!("Failed to stage font audit: {e}"))?;
+        let baseline_pdf = audit.path().join("baseline.pdf");
+        let generated = workspace.join(".typstry").join("fonts").join("generated");
+        project_fonts::compile_for_audit(
+            &tinymist_executable, workspace, main, &baseline_pdf,
+            generated.is_dir().then_some(generated.as_path()), false,
+        )?;
+        let baseline_fonts = project_fonts::pdf_postscript_names(&baseline_pdf)?;
+        let mut required_fonts = baseline_fonts.clone();
+        required_fonts.extend(project_fonts::declared_family_faces(workspace, &declared_font_families)?);
+        let font_package = project_fonts::build_package(workspace, &required_fonts)?;
+        let package_dir = project_fonts::verify_package_files(workspace, &font_package)?;
+        let hermetic_pdf = audit.path().join("hermetic.pdf");
+        project_fonts::compile_for_audit(
+            &tinymist_executable, workspace, main, &hermetic_pdf, Some(&package_dir), true,
+        )?;
+        let hermetic_fonts = project_fonts::pdf_postscript_names(&hermetic_pdf)?;
+        if hermetic_fonts != baseline_fonts {
+            return Err(format!(
+                "Hermetic font verification selected different faces. Required: {:?}; packaged compile: {:?}.",
+                baseline_fonts, hermetic_fonts
+            ));
+        }
+        let packaged_fonts = serde_json::from_value::<Vec<project_archive::ProjectFont>>(
+            serde_json::to_value(font_package.fonts).map_err(|e| e.to_string())?
+        ).map_err(|e| format!("Failed to construct project font manifest: {e}"))?;
         project_archive::export_typstry_project(project_archive::ProjectExport {
             workspace_root: Path::new(&workspace_path),
             archive_path: Path::new(&archive_path),
@@ -1869,6 +1951,7 @@ async fn export_typstry_project(
             app_version: env!("CARGO_PKG_VERSION"),
             typst_version: &typst_version,
             tinymist_version: &tinymist_version,
+            packaged_fonts: Some(packaged_fonts),
         })
     })
     .await
