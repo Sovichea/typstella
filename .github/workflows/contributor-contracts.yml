@@ -76,11 +76,18 @@ jobs:
 
   linux-conformance:
     name: Cross-platform conformance (Linux)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libglib2.0-dev libwebkit2gtk-4.1-dev \
+            build-essential curl wget file libxdo-dev libssl-dev \
+            libayatana-appindicator3-dev librsvg2-dev
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2

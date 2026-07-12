@@ -68,8 +68,9 @@ Debian/Ubuntu:
 
 ```bash
 sudo apt update
-sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
-  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev unzip
+sudo apt install pkg-config libglib2.0-dev libwebkit2gtk-4.1-dev \
+  build-essential curl wget file libxdo-dev libssl-dev \
+  libayatana-appindicator3-dev librsvg2-dev unzip
 ```
 
 Fedora:
