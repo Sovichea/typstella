@@ -104,7 +104,7 @@ Typstella also treats a document as a project rather than an isolated file. A re
 - Independent controls for script-aware editing, spellcheck, and typing suggestions.
 - Tinymist diagnostics and managed Typst tooling.
 - Virtualized PDF preview designed for long documents and constrained memory use.
-- Main-document and standalone-preview workflows for multi-file projects.
+- Main-document preview workflows for multi-file projects.
 - Workspace support for templates, chapters, includes, bibliography files, figures, and external assets.
 - Contributor framework for adding new complex-script languages without modifying core editor code.
 
@@ -126,7 +126,6 @@ The scalable workflow covers:
 
 - project and main-document identity;
 - included chapters, templates, imports, bibliographies, figures, and data;
-- explicit standalone previews via a `// @standalone-preview` directive;
 - render-on-type and render-on-save policies;
 - revision-safe diagnostics, language analysis, compilation, and source navigation;
 - virtualized preview rendering for long PDFs;

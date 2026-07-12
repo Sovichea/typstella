@@ -560,7 +560,7 @@ Tracked by `P7.1`, `P7.2`, `P7.9`, and `P7.10`.
 
 - [x] **P6.1 — Define document identity.** Specify how workspace root, main file, included file, standalone file, preview session, and cache paths are keyed.
 - [x] **P6.2 — Unify preview ownership.** Keep one full-document preview session when navigating between the main file and included files. Depends on `P6.1`.
-- [x] **P6.3 — Implement standalone preview rules.** Parse and document the standalone-preview directive, scope it correctly, and prevent accidental main-document replacement.
+- [x] **P6.3 — Implement standalone preview rules.** This implementation was subsequently disabled for v1.0 after source-sync reliability regressions; redesign is tracked by `V1X-P.1`.
 - [x] **P6.4 — Harden source navigation.** Test Ctrl-hover and open behavior for includes, imports, bibliography files, images, templates, repeated filenames, spaces, and Unicode paths.
 - [x] **P6.5 — Order external updates.** Route file watcher changes through editor state, mirror state where required, LSP notifications, and preview compilation with revision guards.
 - [x] **P6.6 — Separate render modes.** Add deterministic tests proving render-on-save compiles only after a successful save and render-on-type compiles debounced document revisions.

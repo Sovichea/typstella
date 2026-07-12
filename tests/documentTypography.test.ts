@@ -61,10 +61,10 @@ describe("document typography", () => {
   });
 
   test("updates one managed block and preserves the preview directive", () => {
-    const original = "// @standalone-preview\n= Chapter\n";
+    const original = "// legacy preview directive\n= Chapter\n";
     const first = typographyEdit(original, config);
     const withBlock = original.slice(0, first.from) + first.insert + original.slice(first.to);
-    expect(withBlock.startsWith("// @standalone-preview\n// typstella:typography:start")).toBe(true);
+    expect(withBlock.startsWith("// typstella:typography:start")).toBe(true);
 
     const second = typographyEdit(withBlock, { ...config, latinFont: "MiSans Latin" });
     const updated = withBlock.slice(0, second.from) + second.insert + withBlock.slice(second.to);

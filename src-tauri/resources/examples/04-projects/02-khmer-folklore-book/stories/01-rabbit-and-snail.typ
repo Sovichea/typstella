@@ -1,4 +1,3 @@
-// @standalone-preview
 
 = រឿងទន្សាយ និងខ្យង
 

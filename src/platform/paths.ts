@@ -38,6 +38,14 @@ export function filePathKey(path: string): string {
   return isWindowsPath ? normalized.toLowerCase() : normalized;
 }
 
+export function nativeFilePath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  if (/^[A-Za-z]:\//.test(normalized) || normalized.startsWith("//")) {
+    return normalized.replace(/\//g, "\\");
+  }
+  return normalized;
+}
+
 export function fileNameFromPath(path: string): string {
   const parts = path.replace(/\\/g, "/").split("/");
   return parts[parts.length - 1] || path;

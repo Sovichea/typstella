@@ -46,7 +46,7 @@ The Toolchain panel installs stable Tinymist releases and shows each release's e
 
 ## Preview
 
-`renderMode` accepts `"on-type"` or `"on-save"`. It controls Tinymist refresh timing for every preview root. Imported files normally preview through their top-level importer; a first-line `// @standalone-preview` directive gives an imported file its own preview root without overriding the selected render mode.
+`renderMode` accepts `"on-type"` or `"on-save"`. Imported files preview through their configured main document. The former standalone-preview directive is disabled for v1.0 and tracked for redesign in the v1.x plan.
 
 ## Fonts and typography
 

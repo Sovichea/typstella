@@ -722,11 +722,10 @@ fn collect_typst_files(root: &std::path::Path, files: &mut Vec<std::path::PathBu
     }
 }
 
-fn allows_standalone_preview(contents: &str) -> bool {
-    matches!(
-        contents.trim_start_matches('\u{feff}').lines().next(),
-        Some("// @standalone-preview" | "//@standalone-preview")
-    )
+fn allows_standalone_preview(_contents: &str) -> bool {
+    // Disabled for v1.0. Keep preview resolution on the configured main
+    // document until the v1.x source-sync redesign is complete.
+    false
 }
 
 fn resolve_preview_target(
@@ -1344,7 +1343,7 @@ mod preview_main_tests {
     }
 
     #[test]
-    fn top_directive_enables_standalone_import_preview() {
+    fn standalone_directive_is_ignored_for_imported_files() {
         let workspace = tempfile::tempdir().expect("create workspace");
         let main_path = workspace.path().join("main.typ");
         let draft_path = workspace.path().join("chapter.typ");
@@ -1360,11 +1359,11 @@ mod preview_main_tests {
         .expect("resolve preview");
 
         assert!(resolved.imported);
-        assert!(resolved.standalone);
+        assert!(!resolved.standalone);
         assert_eq!(
             resolved.root_path.as_deref(),
             Some(
-                super::normalized_existing_path(&draft_path)
+                super::normalized_existing_path(&main_path)
                     .to_string_lossy()
                     .as_ref()
             )

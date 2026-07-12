@@ -11,7 +11,7 @@ preview session = document + preview root + render mode
 cache = workspace/.typstella
 ```
 
-Opening a normal included or imported file reuses the main document's preview session and scroll state. A first-line `// @standalone-preview` directive explicitly gives that source an independent preview root. It does not replace the configured main file or affect sibling chapters.
+Opening an included or imported file reuses the main document's preview session and scroll state. Independent preview roots are disabled for v1.0 pending the `V1X-P.1` redesign.
 
 ## Recommended project structure
 
@@ -26,7 +26,7 @@ project/
   references.bib
 ```
 
-Keep project-wide typography and page configuration in the template applied by `main.typ`. Example 11 is the maintained end-to-end fixture: it contains a template, metadata import, included chapters, standalone-preview content, bibliography, figures, Latin, Khmer, spaces, and a Unicode filename.
+Keep project-wide typography and page configuration in the template applied by `main.typ`. The maintained end-to-end fixture contains a template, metadata import, included chapters, bibliography, figures, Latin, Khmer, spaces, and a Unicode filename.
 
 ## Render modes
 

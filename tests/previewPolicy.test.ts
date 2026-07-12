@@ -1,12 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, supportsResponsivePartialRendering, tinymistPreviewArguments } from "../src/preview/previewPolicy";
+import { allowsStandalonePreview, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, supportsResponsivePartialRendering, tinymistPreviewArguments, tinymistPreviewByteColumn, usesTemplateAwareStandaloneRoot } from "../src/preview/previewPolicy";
 
 describe("preview policy", () => {
-  test("only accepts the directive on the first line", () => {
-    expect(allowsStandalonePreview("// @standalone-preview\n= Chapter")).toBe(true);
-    expect(allowsStandalonePreview("\uFEFF// @standalone-preview\n= Chapter")).toBe(true);
-    expect(allowsStandalonePreview("//@standalone-preview\n= Chapter")).toBe(true);
-    expect(allowsStandalonePreview("\n// @standalone-preview\n= Chapter")).toBe(false);
+  test("keeps standalone preview disabled for v1.0", () => {
+    expect(allowsStandalonePreview("// @standalone-preview\n= Chapter")).toBe(false);
+    expect(allowsStandalonePreview("\uFEFF// @standalone-preview\n= Chapter")).toBe(false);
+    expect(allowsStandalonePreview("= Chapter")).toBe(false);
     expect(allowsStandalonePreview("// @allow-preview\n= Legacy chapter")).toBe(false);
   });
 
@@ -20,6 +19,37 @@ describe("preview policy", () => {
     const saved = previewSessionIdentity("C:\\docs\\main.typ", "on-save");
     expect(live).toEqual(previewSessionIdentity("C:\\docs\\main.typ", "on-type"));
     expect(live.taskId).not.toBe(saved.taskId);
+  });
+
+  test("pins a standalone preview to its compilation root", () => {
+    expect(previewLspMainPath({
+      rootPath: "/workspace/.chapter.preview.typ",
+      mainPath: "/workspace/main.typ",
+      standalone: true
+    })).toBe("/workspace/.chapter.preview.typ");
+    expect(previewLspMainPath({
+      rootPath: "/workspace/main.typ",
+      mainPath: "/workspace/main.typ",
+      standalone: false
+    })).toBe("/workspace/main.typ");
+  });
+
+  test("uses UTF-8 byte columns for Tinymist preview source mapping", () => {
+    const line = "Latin ខ្មែរ text";
+    const offset = line.indexOf(" text");
+    expect(tinymistPreviewByteColumn(line, offset)).toBe(new TextEncoder().encode("Latin ខ្មែរ").length);
+    expect(tinymistPreviewByteColumn("😀x", 2)).toBe(4);
+  });
+
+  test("keeps original source paths for template-aware standalone wrappers", () => {
+    const active = "C:\\workspace\\chapters\\one.typ";
+    expect(usesTemplateAwareStandaloneRoot(
+      active,
+      "C:/workspace/.one.typ.task.typstella-preview.typ",
+      true
+    )).toBe(true);
+    expect(usesTemplateAwareStandaloneRoot(active, active, true)).toBe(false);
+    expect(usesTemplateAwareStandaloneRoot(active, "C:/workspace/main.typ", false)).toBe(false);
   });
 
   test("keys a research document by workspace and configured main file", () => {

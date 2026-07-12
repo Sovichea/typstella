@@ -26,6 +26,7 @@ Tasks use stable IDs such as `V1X-A.1`. Implementation, tests, documentation, pr
 ### Stability work
 
 - Fix user-reported crashes, preview/LSP recovery failures, Unicode editing regressions, packaging issues, and project-interchange defects.
+- [ ] **V1X-P.1 Redesign standalone chapter previews.** The v1.0 `// @standalone-preview` directive is disabled. Reintroduce independent preview roots only after Tinymist forward/inverse sync task routing is deterministic for main files, imported chapters, template-aware wrappers, render-cache mirrors, Unicode byte offsets, and tab switches. Add end-to-end native tests before restoring the directive or any equivalent UI action.
 - Improve telemetry-free diagnostic bundles that users can explicitly export for bug reports.
 - Optimize startup, language-provider lazy loading, long-document memory, and PDF rendering.
 - Improve accessibility, platform integration, migration reliability, and release automation.
@@ -180,4 +181,3 @@ The technical transformation contract remains in the [Khmer render-preparation p
 ## v1.x release gate
 
 Each v1.x release must pass v1.0 project interchange, packaged-font, data recovery, Khmer regression, long-document, installer, and migration tests. A milestone feature cannot waive a failed baseline gate.
-

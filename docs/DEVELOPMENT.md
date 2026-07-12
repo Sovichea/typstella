@@ -61,7 +61,7 @@ cargo test --manifest-path src-tauri/Cargo.toml --lib khmer_reference_provider_f
 
 Each preview root has a uniquely identified Tinymist task whose iframe is cached across tab switches. Imported files normally preview through the top-level `main.typ` and update on save.
 
-Put `// @standalone-preview` on an imported file's first line to give that chapter an independent preview. The Preview setting selects whether every preview refreshes on type or on save. When `main.typ` applies a local template with `#show: template.with(...)`, Typstella creates a temporary preview entry that applies the same template without modifying the chapter. References to labels outside the chapter appear as explanatory placeholders in this standalone view; open `main.typ` to inspect final numbering and reference output.
+Imported chapters use the configured main document's preview. The former `// @standalone-preview` directive is disabled for v1.0 because independent preview roots made source synchronization unreliable; its redesign is tracked as `V1X-P.1`.
 
 PDF preview and source-map synchronization are documented in [PREVIEW_INTERCEPTION.md](./PREVIEW_INTERCEPTION.md).
 

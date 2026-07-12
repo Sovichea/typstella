@@ -44,4 +44,4 @@ Open any `main.typ` file from the explorer. These files are your own writable co
 
 When Typstella detects a script that needs another font, choose the font you prefer from the notification or Settings.
 
-Imported template sections start with `// @standalone-preview`, so opening one directly enables its independent preview.
+Imported template sections use their configured main-document preview.

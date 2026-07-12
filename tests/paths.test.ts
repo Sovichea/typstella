@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri, relativeFilePath } from "../src/platform/paths";
+import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri, nativeFilePath, relativeFilePath } from "../src/platform/paths";
 
 describe("platform paths", () => {
   test("round-trips Windows paths and encodes spaces", () => {
@@ -21,6 +21,13 @@ describe("platform paths", () => {
   test("preserves case sensitivity for Unix and folds Windows keys", () => {
     expect(filePathKey("/work/Main.typ")).not.toBe(filePathKey("/work/main.typ"));
     expect(filePathKey("C:\\Work\\Main.typ")).toBe(filePathKey("c:/work/main.typ"));
+  });
+
+  test("normalizes compiler-bound paths to native separators", () => {
+    expect(nativeFilePath("C:/Work Files\\cache/render/main.typ"))
+      .toBe("C:\\Work Files\\cache\\render\\main.typ");
+    expect(nativeFilePath("/work/cache\\render/main.typ"))
+      .toBe("/work/cache/render/main.typ");
   });
 
   test("extracts file names with either separator", () => {

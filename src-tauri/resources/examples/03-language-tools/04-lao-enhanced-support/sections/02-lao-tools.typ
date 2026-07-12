@@ -1,4 +1,3 @@
-// @standalone-preview
 = ເຄື່ອງມືພາສາ (Language Tools)
 
 Typstella ໃຊ້ ICU4X ສຳລັບການແບ່ງຄຳ (word segmentation) ໂດຍອັດຕະໂນມັດ. ມັນຊ່ວຍໃຫ້ການເຄື່ອນຍ້າຍເຄີເຊີ (cursor) ແລະ ການເລືອກຄຳມີຄວາມຖືກຕ້ອງຫຼາຍຂຶ້ນ.

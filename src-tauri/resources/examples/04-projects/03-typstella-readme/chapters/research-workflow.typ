@@ -1,7 +1,6 @@
-// @standalone-preview
 = A scalable research workflow <workflow>
 
-A research document is larger than its currently open source file. This chapter is deliberately stored separately while `main.typ` remains the document entry point. In Typstella, opening this file keeps the full-document preview, unless the first-line `// @standalone-preview` directive is present to provide an independent preview for this file.
+A research document is larger than its currently open source file. This chapter is deliberately stored separately while `main.typ` remains the document entry point. Opening this file keeps the full-document preview.
 
 The project keeps reusable concerns separate:
 

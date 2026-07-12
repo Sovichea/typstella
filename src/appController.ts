@@ -21,12 +21,12 @@ import { TinymistLspClient } from "./compiler/lsp";
 import type { EditorTextEdit, LspDiagnostic, LspInverseSyncResult, LspLogEntry, LspSourcePosition, LspStatus, PreviewDocumentPosition } from "./compiler/lsp";
 import type { AppSettings } from "./settings";
 import { SettingsController } from "./settingsController";
-import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri, relativeFilePath } from "./platform/paths";
+import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri, nativeFilePath, relativeFilePath } from "./platform/paths";
 import { isBinaryImagePath, isSupportedInAppPath } from "./platform/fileTypes";
 import { WysiwymAdapter } from "./wysiwym/adapter";
 import { PreviewFrame, type PreviewClickPoint, type PreviewInteractionStatus } from "./preview/previewFrame";
 import { PreviewSyncController } from "./preview/previewSyncController";
-import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
+import { allowsStandalonePreview, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, tinymistPreviewByteColumn, usesTemplateAwareStandaloneRoot, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
 import { LogConsoleController, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
 import { EditorFontManager } from "./editor/fontManager";
 import { TabStripController } from "./editor/tabStripController";
@@ -1371,7 +1371,10 @@ export class TypstellaWorkspaceController {
         const { uri: lspUri, content: lspContent } = lspRes;
         await this.openDocumentIfNeeded(lspUri, lspContent, this.currentVersion);
       }
-      const pinChanged = await this.updatePinnedMain(previewTarget?.mainPath ?? this.previewMainPath);
+      const lspMainPath = previewTarget
+        ? previewLspMainPath(previewTarget)
+        : (this.previewStandalone ? this.previewRootPath : (this.previewMainPath ?? this.previewRootPath));
+      const pinChanged = await this.updatePinnedMain(lspMainPath);
       if (pinChanged) {
         await this.recheckActiveDocumentAfterPin(tab.content);
       }
@@ -2074,6 +2077,7 @@ export class TypstellaWorkspaceController {
         previewPath,
         previewRefreshStyle(this.settingsController.value.preview.renderMode)
       ).taskId;
+      await this.resetPdfSourceMapSession();
       this.lastPdfBase64 = pdf.data!;
       await this.previewFrame.loadPdfData(pdf.data!, previewPath);
       if (this.pdfPreviewFailureAt !== null) {
@@ -2105,12 +2109,6 @@ export class TypstellaWorkspaceController {
       this.queuedPdfPreviewContents = null;
       if (queued !== null && queued !== contents) {
         void this.renderPdfPreview(queued);
-      } else if (this.settingsController.value.preview.renderMode === "on-type") {
-        window.setTimeout(() => {
-          if (this.pdfPreviewGeneration !== generation || this.pdfPreviewRunning || this.queuedPdfPreviewContents !== null) return;
-          const cursor = this.editorInstance.state.selection.main.head;
-          void this.previewSyncController.renderAtCursor(cursor);
-        }, 120);
       }
     }
   }
@@ -2504,7 +2502,7 @@ export class TypstellaWorkspaceController {
 
     await client.scrollPreview(sourceMapSession.taskId, {
       event: "panelScrollTo",
-      filepath: target.filepath,
+      filepath: nativeFilePath(target.filepath),
       line: target.line,
       character: target.character
     });
@@ -2519,13 +2517,18 @@ export class TypstellaWorkspaceController {
   private async forwardSyncTarget(path: string, cursor: number): Promise<{ filepath: string; line: number; character: number } | null> {
     const editor = this.editorInstance;
     const position = Math.max(0, Math.min(cursor, editor.state.doc.length));
-    const generated = this.pdfPreviewGeneratedFiles.get(filePathKey(path));
+    // Template-aware standalone wrappers use workspace-root (`/...`) imports.
+    // Those imports retain the original source IDs even when the wrapper itself
+    // is mirrored into the render cache.
+    const generated = usesTemplateAwareStandaloneRoot(path, this.previewRootPath, this.previewStandalone)
+      ? undefined
+      : this.pdfPreviewGeneratedFiles.get(filePathKey(path));
     if (!generated) {
       const line = editor.state.doc.lineAt(position);
       return {
         filepath: path,
         line: line.number - 1,
-        character: this.lspClient?.lspCharacterFromStringOffset(line.text, position - line.from) ?? position - line.from
+        character: tinymistPreviewByteColumn(line.text, position - line.from)
       };
     }
 
@@ -2550,7 +2553,7 @@ export class TypstellaWorkspaceController {
     return {
       filepath: generated.generatedPath,
       line: line.number - 1,
-      character: this.lspClient?.lspCharacterFromStringOffset(line.text, generatedOffset - line.from) ?? generatedOffset - line.from
+      character: tinymistPreviewByteColumn(line.text, generatedOffset - line.from)
     };
   }
 
@@ -2576,6 +2579,24 @@ export class TypstellaWorkspaceController {
         this.pdfSourceMapStartup = null;
         this.pdfSourceMapStartupKey = null;
       }
+    }
+  }
+
+  private async resetPdfSourceMapSession(): Promise<void> {
+    this.pdfForwardSyncGeneration += 1;
+    this.pendingPdfForwardSync = null;
+    const startup = this.pdfSourceMapStartup;
+    if (startup) await startup.catch(() => null);
+    const registeredTaskId = this.pdfSyncRegisteredTaskId;
+    this.pdfSourceMapStartup = null;
+    this.pdfSourceMapStartupKey = null;
+    this.pdfSyncPreviewTaskKey = null;
+    this.pdfSyncRegisteredTaskId = null;
+    this.pdfSyncSocket?.close();
+    this.pdfSyncSocket = null;
+    this.pdfSyncSocketUrl = "";
+    if (registeredTaskId && this.lspClient) {
+      await this.lspClient.stopPreview(registeredTaskId).catch(() => {});
     }
   }
 
@@ -2609,7 +2630,7 @@ export class TypstellaWorkspaceController {
       message: `Starting hidden Tinymist source-map session: root=${rootPath}; task=${sourceMapTaskId}; mode=${previewRefreshStyle(this.settingsController.value.preview.renderMode)}; active=${this.activeFilePath ?? "n/a"}.`
     });
     const url = await client.startPreview(
-      rootPath,
+      nativeFilePath(rootPath),
       sourceMapTaskId,
       previewRefreshStyle(this.settingsController.value.preview.renderMode),
       false
@@ -2693,13 +2714,19 @@ export class TypstellaWorkspaceController {
     return await new Promise(resolve => {
       const socket = new WebSocket(url);
       socket.binaryType = "arraybuffer";
+      let settled = false;
+      const finish = (value: WebSocket | null) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        resolve(value);
+      };
       const timeout = window.setTimeout(() => {
         socket.close();
         if (this.pdfSyncSocket === socket) this.pdfSyncSocket = null;
-        resolve(null);
-      }, 5000);
+        finish(null);
+      }, 10000);
       socket.addEventListener("open", () => {
-        window.clearTimeout(timeout);
         this.pdfSyncSocket = socket;
         socket.send("current");
         this.appendDeveloperLog({
@@ -2707,18 +2734,19 @@ export class TypstellaWorkspaceController {
           source,
           message: `Tinymist data-plane connected: ${url}.`
         });
-        resolve(socket);
       }, { once: true });
       socket.addEventListener("message", event => {
+        // The first payload is the response to `current` (normally a binary
+        // diff-v1 snapshot). Wait for it before issuing source-map commands.
+        finish(socket);
         void this.handlePdfSyncSocketMessage(event.data);
       });
       socket.addEventListener("close", () => {
         if (this.pdfSyncSocket === socket) this.pdfSyncSocket = null;
       });
       socket.addEventListener("error", () => {
-        window.clearTimeout(timeout);
         if (this.pdfSyncSocket === socket) this.pdfSyncSocket = null;
-        resolve(null);
+        finish(null);
       }, { once: true });
     });
   }
@@ -3490,8 +3518,7 @@ export class TypstellaWorkspaceController {
       `<div class="preview-disabled-icon">🚫</div>` +
       `<div class="preview-disabled-title">Preview Unavailable</div>` +
       `<div class="preview-disabled-msg">This file is not imported or included by the main document. Only the main file and its dependencies are previewed.</div>` +
-      `<div class="preview-disabled-hint">// standalone-preview</div>` +
-      `<div class="preview-disabled-msg" style="margin-top: 8px; font-size: 12px; opacity: 0.75;">Add this directive at the top of the file to preview it standalone.</div>` +
+      `<div class="preview-disabled-msg" style="margin-top: 8px; font-size: 12px; opacity: 0.75;">Include this file from the configured main document to preview it.</div>` +
       `</div>`
     );
   }
@@ -3628,7 +3655,7 @@ export class TypstellaWorkspaceController {
       return;
     }
     target = await this.prepareTemplateAwarePreview(target, this.activeFilePath, contents);
-    await this.updatePinnedMain(target.mainPath);
+    await this.updatePinnedMain(previewLspMainPath(target));
     const identity = target.rootPath
       ? previewSessionIdentity(target.rootPath, previewRefreshStyle(this.settingsController.value.preview.renderMode))
       : null;

@@ -131,11 +131,7 @@ export function ensureTypographyTemplateApplication(mainText: string): Typograph
   }
   const insert = '#import "typstella-template.typ": typstella-typography\n#show: typstella-typography\n\n';
   const bomOffset = mainText.startsWith("\uFEFF") ? 1 : 0;
-  const lineEnd = mainText.indexOf("\n", bomOffset);
-  const firstLine = mainText.slice(bomOffset, lineEnd < 0 ? mainText.length : lineEnd).replace(/\r$/, "");
-  const from = firstLine === "// @standalone-preview" || firstLine === "//@standalone-preview"
-    ? (lineEnd < 0 ? mainText.length : lineEnd + 1)
-    : bomOffset;
+  const from = bomOffset;
   return { from, to: from, insert };
 }
 

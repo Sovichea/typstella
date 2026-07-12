@@ -33,13 +33,33 @@ export function researchDocumentIdentity(
   };
 }
 
-export function allowsStandalonePreview(contents: string): boolean {
-  const firstLine = contents.replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0];
-  return firstLine === "// @standalone-preview" || firstLine === "//@standalone-preview";
+export function allowsStandalonePreview(_contents: string): boolean {
+  // Disabled for v1.0: independent preview roots currently make Tinymist
+  // forward-sync task routing unreliable. Revisit under V1X-P.1.
+  return false;
 }
 
 export function previewRefreshStyle(renderMode: PreviewRefreshStyle): PreviewRefreshStyle {
   return renderMode;
+}
+
+export function previewLspMainPath(target: Pick<PreviewTarget, "rootPath" | "mainPath" | "standalone">): string | null {
+  return target.standalone ? target.rootPath : (target.mainPath ?? target.rootPath);
+}
+
+export function tinymistPreviewByteColumn(lineText: string, utf16Offset: number): number {
+  const offset = Math.max(0, Math.min(utf16Offset, lineText.length));
+  return new TextEncoder().encode(lineText.slice(0, offset)).length;
+}
+
+export function usesTemplateAwareStandaloneRoot(
+  activePath: string,
+  previewRootPath: string | null,
+  standalone: boolean
+): boolean {
+  if (!standalone || !previewRootPath) return false;
+  return filePathKey(activePath) !== filePathKey(previewRootPath)
+    && /\.typstella-preview\.typ$/i.test(previewRootPath.replace(/\\/g, "/"));
 }
 
 export function previewSessionIdentity(

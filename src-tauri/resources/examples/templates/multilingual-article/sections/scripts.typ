@@ -1,4 +1,3 @@
-// @standalone-preview
 = Multilingual section <scripts>
 
 == Khmer

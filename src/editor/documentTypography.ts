@@ -143,10 +143,6 @@ export function typographyEdit(text: string, config: DocumentTypography): Typogr
   }
 
   const bomOffset = text.startsWith("\uFEFF") ? 1 : 0;
-  const firstLineEnd = text.indexOf("\n", bomOffset);
-  const firstLine = text.slice(bomOffset, firstLineEnd < 0 ? text.length : firstLineEnd).replace(/\r$/, "");
-  const from = firstLine === "// @standalone-preview" || firstLine === "//@standalone-preview"
-    ? (firstLineEnd < 0 ? text.length : firstLineEnd + 1)
-    : bomOffset;
+  const from = bomOffset;
   return { from, to: from, insert };
 }
