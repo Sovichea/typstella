@@ -30,7 +30,7 @@ import { allowsStandalonePreview, previewRefreshStyle, previewSessionIdentity, r
 import { LogConsoleController, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
 import { EditorFontManager } from "./editor/fontManager";
 import { TabStripController } from "./editor/tabStripController";
-import { createAppIcon } from "./ui/icons";
+import { createAppIcon, updateMaximizeIcon } from "./ui/icons";
 import { LayoutController } from "./layout/layoutController";
 import { WorkspaceStateStore, workspaceRestoreCandidates } from "./workspace/workspaceStateStore";
 import { RecentProjectsController } from "./workspace/recentProjectsController";
@@ -4546,6 +4546,12 @@ export class TypstryWorkspaceController {
     const appWindow = getCurrentWindow();
     document.getElementById("titlebar-minimize")?.addEventListener("click", () => appWindow.minimize());
     document.getElementById("titlebar-maximize")?.addEventListener("click", () => appWindow.toggleMaximize());
+
+    void appWindow.onResized(async () => {
+      const maximized = await appWindow.isMaximized();
+      updateMaximizeIcon(maximized);
+    });
+    void appWindow.isMaximized().then(maximized => updateMaximizeIcon(maximized));
     document.getElementById("titlebar-close")?.addEventListener("click", () => appWindow.close());
 
     void appWindow.onCloseRequested(async (event) => {

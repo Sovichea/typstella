@@ -10,6 +10,7 @@ import {
   ChevronRight,
   CircleX,
   CodeXml,
+  Copy,
   Download,
   Ellipsis,
   EllipsisVertical,
@@ -69,6 +70,7 @@ const iconNodes = {
   chevronRight: ChevronRight,
   circleX: CircleX,
   codeXml: CodeXml,
+  copy: Copy,
   download: Download,
   ellipsis: Ellipsis,
   ellipsisVertical: EllipsisVertical,
@@ -200,4 +202,8 @@ export function initializeLucideIcons(): void {
   replaceContents("#document-outline-toggle .sidebar-section-chevron", "chevronDown", 14);
   replaceContents("#status-error-icon", "circleX", 13);
   replaceContents("#status-warning-icon", "triangleAlert", 13);
+}
+
+export function updateMaximizeIcon(maximized: boolean): void {
+  replaceContents("#titlebar-maximize", maximized ? "copy" : "square", 11);
 }
