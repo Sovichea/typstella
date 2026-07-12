@@ -436,9 +436,15 @@ export class TypstryWorkspaceController {
     
     document.getElementById("preview-zoom-in-btn")?.addEventListener("click", () => {
       this.previewFrame?.zoomIn();
+      this.updatePreviewZoomLabel();
     });
     document.getElementById("preview-zoom-out-btn")?.addEventListener("click", () => {
       this.previewFrame?.zoomOut();
+      this.updatePreviewZoomLabel();
+    });
+    document.getElementById("preview-zoom-fit-btn")?.addEventListener("click", () => {
+      this.previewFrame?.zoomToFit();
+      this.updatePreviewZoomLabel();
     });
 
     const undockBtn = document.getElementById("undock-preview-btn");
@@ -2759,7 +2765,7 @@ export class TypstryWorkspaceController {
 
   private updatePreviewZoomLabel(zoomPercent = this.previewFrame.currentZoomPercent) {
     const label = document.getElementById("preview-zoom-label");
-    if (label) label.textContent = `${zoomPercent}%`;
+    if (label) label.textContent = this.previewFrame.isFitMode ? "Fit" : `${zoomPercent}%`;
   }
 
   private recordStartupTiming(source: string, label: string, start: number): void {
@@ -4233,6 +4239,11 @@ export class TypstryWorkspaceController {
 
     document.getElementById("preview-zoom-in-btn")?.addEventListener("click", () => {
       this.previewFrame.zoomIn();
+      this.updatePreviewZoomLabel();
+    });
+
+    document.getElementById("preview-zoom-fit-btn")?.addEventListener("click", () => {
+      this.previewFrame.zoomToFit();
       this.updatePreviewZoomLabel();
     });
 

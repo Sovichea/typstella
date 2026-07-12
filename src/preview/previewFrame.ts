@@ -27,8 +27,9 @@ type ActivePageRender = {
 };
 
 const ZOOM_LEVELS = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500];
-const DEFAULT_ZOOM_PERCENT = 90;
+const FALLBACK_ZOOM_PERCENT = 90;
 const MAX_OUTPUT_SCALE = 2;
+const FIT_PADDING_PX = 40;
 const FORWARD_SYNC_GREEN = "#3db489";
 
 export class PreviewFrame {
@@ -36,7 +37,9 @@ export class PreviewFrame {
   private messageHost: HTMLDivElement | null = null;
   private errorOverlay: HTMLDivElement | null = null;
   private mountedUrl = "";
-  private previewZoomPercent = DEFAULT_ZOOM_PERCENT;
+  private previewZoomPercent = FALLBACK_ZOOM_PERCENT;
+  private isFitToWidth = true;
+  private resizeObserver: ResizeObserver | null = null;
   private lastInteractionStatusKey = "";
   private pdfJsPromise: Promise<PdfJsModule> | null = null;
   private pdfLoadingTask: { destroy(): Promise<void> } | null = null;
@@ -67,6 +70,12 @@ export class PreviewFrame {
         }
       }
     }, { passive: false });
+
+    this.resizeObserver = new ResizeObserver(() => {
+      if (!this.isFitToWidth || !this.pdfDoc) return;
+      this.applyFitToWidth();
+    });
+    this.resizeObserver.observe(this.pane);
   }
 
   public get element(): HTMLIFrameElement | null {
@@ -81,12 +90,41 @@ export class PreviewFrame {
     return this.previewZoomPercent;
   }
 
+  public get isFitMode(): boolean {
+    return this.isFitToWidth;
+  }
+
   public zoomIn(): number {
+    this.isFitToWidth = false;
     return this.setZoom(ZOOM_LEVELS.find(level => level > this.previewZoomPercent) ?? this.previewZoomPercent);
   }
 
   public zoomOut(): number {
+    this.isFitToWidth = false;
     return this.setZoom([...ZOOM_LEVELS].reverse().find(level => level < this.previewZoomPercent) ?? this.previewZoomPercent);
+  }
+
+  public zoomToFit(): void {
+    this.isFitToWidth = true;
+    this.applyFitToWidth();
+  }
+
+  private computeFitToWidthPercent(): number {
+    const paneWidth = this.pane.clientWidth;
+    if (paneWidth <= 0) return FALLBACK_ZOOM_PERCENT;
+    let maxPageWidth = 0;
+    for (const dims of this.pageDimensions.values()) {
+      if (dims.width > maxPageWidth) maxPageWidth = dims.width;
+    }
+    if (maxPageWidth <= 0) return FALLBACK_ZOOM_PERCENT;
+    const availableWidth = paneWidth - FIT_PADDING_PX;
+    return Math.max(10, Math.round((availableWidth / maxPageWidth) * 100));
+  }
+
+  private applyFitToWidth(): void {
+    const percent = this.computeFitToWidthPercent();
+    if (percent === this.previewZoomPercent) return;
+    this.setZoom(percent);
   }
 
   private setZoom(percent: number): number {
@@ -156,6 +194,7 @@ export class PreviewFrame {
       this.pendingPdfLoadingTask = null;
       this.pageDimensions = nextDimensions;
       this.mountedUrl = identity;
+      if (this.isFitToWidth) this.previewZoomPercent = this.computeFitToWidthPercent();
       this.createPageSlots(iframeDoc, true);
       this.setupIframeInteractions();
       this.installPageObserver(iframe);
