@@ -2,7 +2,7 @@
 
 ## Status
 
-Schema version 1 is implemented through `V1-I.10`. It binds source to exact Typst/Tinymist versions, provides deterministic source integrity, supports secure preflight and transactional import, and presents an explicit compatibility decision. `renderEnvironment.fontsPackaged` remains `false` until `V1-I.18` through `V1-I.24` implement verified font packaging. An archive with `fontsPackaged: false` must not be described as hermetically render-reproducible.
+Schema version 1 is implemented through `V1-I.17`. It binds source to exact Typst/Tinymist versions, provides deterministic source integrity, supports secure preflight and transactional import, and presents an explicit compatibility decision. `renderEnvironment.fontsPackaged` remains `false` until `V1-I.18` through `V1-I.24` implement verified font packaging. An archive with `fontsPackaged: false` must not be described as hermetically render-reproducible.
 
 ## Container
 
@@ -96,6 +96,8 @@ The importer classifies the recorded toolchain as:
 
 The user may deliberately import with the current toolchain after a separate warning, but Typstry displays that rendering compatibility is not guaranteed. A downloaded executable whose embedded Typst version differs from the manifest is rejected before extraction.
 
+The manifest version is the project's **recommended** toolchain. Typstry stores the version actually selected for each workspace separately in workspace state. Reopening a workspace restores that selection before its LSP starts; selecting a version for one workspace does not rewrite another workspace's binding.
+
 ## Deterministic export
 
 The exporter:
@@ -114,3 +116,13 @@ Empty directories are not stored because Typst projects do not require them to c
 ## Source ZIP distinction
 
 **Export Source ZIP** uses the same safe, sorted snapshot collector but does not include `.typstry/project.json`, toolchain compatibility, or integrity metadata. It is a convenience archive and carries no reproducible-rendering guarantee.
+
+## Migration from folders and source ZIPs
+
+Existing project folders remain valid Typstry workspaces. A legacy/source ZIP is not treated as a version-bound project: extract it with the operating system, open the extracted folder, select and test the intended toolchain, set the main file, then choose **File > Export Typstry Project**. This creates a new `.typstry` archive with explicit toolchain and integrity metadata. Typstry does not infer or promise compatibility for an ordinary folder or ZIP.
+
+## Desktop association and OS-open routing
+
+Packaged installers register `.typstry` as **Typstry Project** with MIME type `application/vnd.typstry.project` and the Typstry application icon. Typstry intentionally does not claim `.typ` or `.typst` files. Cold-launch arguments and warm single-instance events enter one native queue, which accepts existing `.typstry` files only, canonicalizes and deduplicates them, focuses the existing window, and invokes the same preflight/import controller as the File menu.
+
+The installer acceptance procedure is documented in [PACKAGED_PROJECT_IMPORT_TESTS.md](PACKAGED_PROJECT_IMPORT_TESTS.md).

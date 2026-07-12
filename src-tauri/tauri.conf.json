@@ -34,7 +34,21 @@
     ],
     "resources": {
       "resources/examples/": "examples/"
-    }
+    },
+    "fileAssociations": [
+      {
+        "ext": ["typstry"],
+        "name": "Typstry Project",
+        "description": "Version-bound Typstry project archive",
+        "mimeType": "application/vnd.typstry.project",
+        "role": "Editor",
+        "rank": "Owner",
+        "exportedType": {
+          "identifier": "com.typstry.project",
+          "conformsTo": ["public.data", "public.archive"]
+        }
+      }
+    ]
   },
   "identifier": "com.typstry.editor"
 }

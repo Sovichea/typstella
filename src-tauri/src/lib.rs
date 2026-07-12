@@ -2,7 +2,7 @@ use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{
@@ -261,8 +261,9 @@ fn copy_workspace_file(source: String, dest: String) -> Result<(), String> {
         .map_err(|e| format!("Failed to copy: {}", e))
 }
 
+use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     Arc, Mutex,
 };
 use std::time::Instant;
@@ -288,6 +289,111 @@ struct LspState {
     generation: AtomicU64,
     tx: Mutex<Option<mpsc::Sender<String>>>,
     process: Mutex<Option<tokio::process::Child>>,
+}
+
+#[derive(Default)]
+struct PendingProjectImports {
+    paths: Mutex<Vec<PathBuf>>,
+}
+
+#[derive(Default)]
+struct ProjectImportOperations {
+    cancellations: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+#[tauri::command]
+fn cancel_typstry_project_import(
+    state: tauri::State<'_, ProjectImportOperations>,
+    operation_id: String,
+) {
+    if let Ok(operations) = state.cancellations.lock() {
+        if let Some(cancelled) = operations.get(&operation_id) {
+            cancelled.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+impl PendingProjectImports {
+    fn from_process_args() -> Self {
+        let pending = Self::default();
+        for argument in std::env::args_os().skip(1) {
+            pending.push(PathBuf::from(argument));
+        }
+        pending
+    }
+
+    fn push(&self, candidate: PathBuf) {
+        if !candidate
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|value| value.eq_ignore_ascii_case("typstry"))
+        {
+            return;
+        }
+        let path = dunce::canonicalize(&candidate).unwrap_or(candidate);
+        if !path.is_file() {
+            return;
+        }
+        let key = project_import_path_key(&path);
+        if let Ok(mut paths) = self.paths.lock() {
+            if !paths
+                .iter()
+                .any(|existing| project_import_path_key(existing) == key)
+            {
+                paths.push(path);
+            }
+        }
+    }
+
+    fn take(&self) -> Vec<String> {
+        self.paths
+            .lock()
+            .map(|mut paths| {
+                paths
+                    .drain(..)
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+fn project_import_path_key(path: &Path) -> String {
+    let value = path.to_string_lossy().replace('\\', "/");
+    if cfg!(windows) {
+        value.to_lowercase()
+    } else {
+        value
+    }
+}
+
+#[tauri::command]
+fn take_pending_project_imports(state: tauri::State<'_, PendingProjectImports>) -> Vec<String> {
+    state.take()
+}
+
+#[cfg(test)]
+mod project_open_queue_tests {
+    use super::PendingProjectImports;
+
+    #[test]
+    fn accepts_only_existing_typstry_files_and_deduplicates_canonical_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let archive = directory.path().join("គម្រោង test.typstry");
+        let source = directory.path().join("main.typ");
+        std::fs::write(&archive, b"archive").unwrap();
+        std::fs::write(&source, b"source").unwrap();
+        let queue = PendingProjectImports::default();
+        queue.push(archive.clone());
+        queue.push(directory.path().join(".").join("គម្រោង test.typstry"));
+        queue.push(source);
+        queue.push(directory.path().join("missing.typstry"));
+
+        let paths = queue.take();
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].ends_with("គម្រោង test.typstry"));
+        assert!(queue.take().is_empty());
+    }
 }
 
 #[derive(Clone, Default)]
@@ -1808,12 +1914,20 @@ async fn import_typstry_project(
     destination_path: String,
     expected_manifest_sha256: String,
     allow_incompatible_toolchain: bool,
+    operation_id: String,
+    operations: tauri::State<'_, ProjectImportOperations>,
 ) -> Result<project_archive::ImportedProject, String> {
     let data_dir = app_handle
         .path()
         .app_local_data_dir()
         .map_err(|error| format!("Failed to get data dir: {error}"))?;
-    tauri::async_runtime::spawn_blocking(move || {
+    let cancelled = Arc::new(AtomicBool::new(false));
+    operations
+        .cancellations
+        .lock()
+        .map_err(|_| "Project import cancellation state is unavailable.".to_string())?
+        .insert(operation_id.clone(), cancelled.clone());
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let inspection = project_archive::inspect_typstry_project(Path::new(&archive_path))?;
         let state = toolchain::project_toolchain_state(
             &data_dir,
@@ -1828,14 +1942,19 @@ async fn import_typstry_project(
                     .to_string(),
             );
         }
-        project_archive::import_typstry_project(
+        project_archive::import_typstry_project_cancellable(
             Path::new(&archive_path),
             Path::new(&destination_path),
             &expected_manifest_sha256,
+            || cancelled.load(Ordering::Relaxed),
         )
     })
     .await
-    .map_err(|error| format!("Project import task failed: {error}"))?
+    .map_err(|error| format!("Project import task failed: {error}"))?;
+    if let Ok(mut active) = operations.cancellations.lock() {
+        active.remove(&operation_id);
+    }
+    result
 }
 
 #[tauri::command]
@@ -1869,7 +1988,23 @@ pub fn run() {
         registry_start,
     );
     let setup_timings = startup_timings.clone();
+    let pending_project_imports = PendingProjectImports::from_process_args();
     tauri::Builder::default()
+        .manage(pending_project_imports)
+        .manage(ProjectImportOperations::default())
+        .plugin(tauri_plugin_single_instance::init(
+            |app, arguments, _working_directory| {
+                let pending = app.state::<PendingProjectImports>();
+                for argument in arguments.into_iter().skip(1) {
+                    pending.push(PathBuf::from(argument));
+                }
+                let _ = app.emit("typstry-project-open-requested", ());
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            },
+        ))
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1924,7 +2059,9 @@ pub fn run() {
             export_typstry_project,
             inspect_typstry_project,
             import_typstry_project,
+            cancel_typstry_project_import,
             select_project_toolchain,
+            take_pending_project_imports,
             save_workspace_file,
             create_workspace_dir,
             rename_workspace_file,

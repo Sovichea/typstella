@@ -167,6 +167,8 @@ export class TypstryWorkspaceController {
   private pinnedLspMainPath: string | null = null;
   private pinnedMainFilePath: string | null = null;
   private workspaceRootPath: string | null = null;
+  private recommendedWorkspaceToolchain: { tinymistVersion: string; typstVersion: string } | null = null;
+  private selectedWorkspaceToolchain: { tinymistVersion: string; typstVersion: string } | null = null;
   private currentVersion = 1;
   private isLoadingFile = false;
   private lspReady = false;
@@ -184,6 +186,7 @@ export class TypstryWorkspaceController {
   private lastKhmerRenderPrepState: boolean | undefined = undefined;
   private lastPreviewRenderMode: PreviewRefreshStyle | undefined = undefined;
   private workspaceChangeQueue: Promise<void> = Promise.resolve();
+  private projectImportQueue: Promise<void> = Promise.resolve();
   private pdfPreviewGeneration = 0;
   private pdfSyncPreviewTaskKey: string | null = null;
   private pdfSyncRegisteredTaskId: string | null = null;
@@ -212,7 +215,16 @@ export class TypstryWorkspaceController {
     setSelectedVersion: version => this.settingsController.update(settings => {
       settings.toolchain.tinymistVersion = version;
     }),
-    onToolchainChanged: status => this.handleToolchainChanged(status)
+    onToolchainChanged: status => {
+      if (this.workspaceRootPath && status.tinymistVersion && status.typstVersion) {
+        this.selectedWorkspaceToolchain = {
+          tinymistVersion: status.tinymistVersion,
+          typstVersion: status.typstVersion
+        };
+        this.saveWorkspaceState();
+      }
+      return this.handleToolchainChanged(status);
+    }
   });
 
   private editorInstance!: EditorView;
@@ -414,6 +426,7 @@ export class TypstryWorkspaceController {
 
     this.toolchainController.setStatus(toolchain ?? { typstVersion: null, typstSource: null, tinymistVersion: null, tinymistSource: null, lspAvailable: false, message: "" });
     await this.timeStartup("initialize Tinymist LSP", () => this.initLsp(Boolean(toolchain?.lspAvailable)));
+    await this.drainPendingProjectImports();
     this.recordStartupTiming("frontend startup", "frontend bootstrap including LSP", this.startupStart);
   }
 
@@ -3177,7 +3190,9 @@ export class TypstryWorkspaceController {
         foldRanges: tab.foldRanges
       })),
       inputContainerWidthPct: inputContainer?.style.width ? parseFloat(inputContainer.style.width) : DEFAULT_INPUT_WIDTH_PCT,
-      explorerSidebarWidthPx: explorerSidebar?.style.width ? parseInt(explorerSidebar.style.width, 10) : DEFAULT_EXPLORER_WIDTH_PX
+      explorerSidebarWidthPx: explorerSidebar?.style.width ? parseInt(explorerSidebar.style.width, 10) : DEFAULT_EXPLORER_WIDTH_PX,
+      recommendedToolchain: this.recommendedWorkspaceToolchain,
+      selectedToolchain: this.selectedWorkspaceToolchain
     });
   }
 
@@ -3639,6 +3654,7 @@ export class TypstryWorkspaceController {
     }
     await invoke("cleanup_workspace_preview_files", { workspaceRootPath: selected });
     this.workspaceRootPath = selected;
+    await this.restoreWorkspaceToolchain(selected);
     await this.prepareRenderProjectIfNeeded();
     await this.explorer.loadWorkspace(selected);
     await this.workspaceWatcher.start(selected);
@@ -3670,6 +3686,26 @@ export class TypstryWorkspaceController {
     await this.restoreWorkspaceState(selected);
     // Reload explorer tree to make sure the restored pinned main file color/format is rendered
     await this.explorer.loadWorkspace(selected);
+  }
+
+  private async restoreWorkspaceToolchain(workspacePath: string): Promise<void> {
+    const stored = this.workspaceStateStore.load(workspacePath);
+    this.recommendedWorkspaceToolchain = stored?.recommendedToolchain ?? null;
+    this.selectedWorkspaceToolchain = stored?.selectedToolchain ?? null;
+    if (!this.selectedWorkspaceToolchain) return;
+    try {
+      const status = await invoke<ToolchainStatus>("select_project_toolchain", {
+        tinymistVersion: this.selectedWorkspaceToolchain.tinymistVersion,
+        typstVersion: this.selectedWorkspaceToolchain.typstVersion
+      });
+      this.toolchainController.setStatus(status);
+    } catch (error) {
+      this.appendDeveloperLog({
+        kind: "warning",
+        source: "toolchain",
+        message: `Could not restore this workspace's selected toolchain: ${String(error)}`
+      });
+    }
   }
 
   private async importTypstryProject(archivePath?: string): Promise<void> {
@@ -3822,13 +3858,22 @@ export class TypstryWorkspaceController {
       if (!confirmed) return;
 
       this.setLspStatus({ kind: "starting", message: "Verifying and importing project..." });
-      const imported = await invoke<ImportedTypstryProject>("import_typstry_project", {
+      const imported = await this.runCancellableProjectImport({
         archivePath: selected,
         destinationPath,
         expectedManifestSha256: inspection.manifestSha256,
         allowIncompatibleToolchain
       });
       await this.openWorkspace(imported.workspacePath);
+      const activeToolchain = await invoke<ToolchainStatus>("get_toolchain_status").catch(() => null);
+      this.recommendedWorkspaceToolchain = {
+        tinymistVersion: imported.manifest.toolchain.tinymistVersion,
+        typstVersion: imported.manifest.toolchain.typstVersion
+      };
+      this.selectedWorkspaceToolchain = activeToolchain?.tinymistVersion && activeToolchain.typstVersion
+        ? { tinymistVersion: activeToolchain.tinymistVersion, typstVersion: activeToolchain.typstVersion }
+        : null;
+      this.saveWorkspaceState();
       if (this.workspaceRootPath && filePathKey(this.workspaceRootPath) === filePathKey(imported.workspacePath)) {
         await this.loadFile(imported.mainFilePath, { temporary: false });
         this.setLspStatus({ kind: "preview-ready", message: `Imported ${imported.manifest.project.name}` });
@@ -3841,6 +3886,38 @@ export class TypstryWorkspaceController {
     } catch (error) {
       this.setLspStatus({ kind: "error", message: `Project import failed: ${error}` });
       await message(String(error), { title: "Typstry Project Import Failed", kind: "error" });
+    }
+  }
+
+  private async runCancellableProjectImport(args: {
+    archivePath: string;
+    destinationPath: string;
+    expectedManifestSha256: string;
+    allowIncompatibleToolchain: boolean;
+  }): Promise<ImportedTypstryProject> {
+    const operationId = crypto.randomUUID();
+    const progress = document.createElement("div");
+    progress.setAttribute("role", "status");
+    progress.style.cssText = "position:fixed;right:20px;bottom:20px;z-index:10000;display:flex;gap:12px;align-items:center;padding:12px 14px;border:1px solid var(--ui-hover);border-radius:8px;background:var(--ui-bg);color:var(--ui-text);box-shadow:0 8px 24px rgba(0,0,0,.3)";
+    const label = document.createElement("span");
+    label.textContent = "Verifying and extracting Typstry project…";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", () => {
+      cancel.disabled = true;
+      label.textContent = "Cancelling import safely…";
+      void invoke("cancel_typstry_project_import", { operationId });
+    });
+    progress.append(label, cancel);
+    document.body.appendChild(progress);
+    try {
+      return await invoke<ImportedTypstryProject>("import_typstry_project", {
+        ...args,
+        operationId
+      });
+    } finally {
+      progress.remove();
     }
   }
 
@@ -3951,6 +4028,8 @@ export class TypstryWorkspaceController {
     this.pendingPdfForwardSync = null;
 
     this.workspaceRootPath = null;
+    this.recommendedWorkspaceToolchain = null;
+    this.selectedWorkspaceToolchain = null;
     this.activeFilePath = null;
     this.openTabs = [];
     this.pinnedMainFilePath = null;
@@ -4015,6 +4094,10 @@ export class TypstryWorkspaceController {
         void this.handlePdfPreviewClick(point);
       });
     }).catch(err => console.error("Error setting up Tauri preview event listeners", err));
+
+    void listen("typstry-project-open-requested", () => {
+      void this.drainPendingProjectImports();
+    });
 
     window.addEventListener("beforeunload", () => {
       if (this.pdfSyncRegisteredTaskId && this.lspClient) {
@@ -4527,6 +4610,19 @@ export class TypstryWorkspaceController {
         }
       }
     });
+  }
+
+  private async drainPendingProjectImports(): Promise<void> {
+    const paths = await invoke<string[]>("take_pending_project_imports").catch(error => {
+      console.error("Failed to read pending Typstry project imports:", error);
+      return [];
+    });
+    for (const path of paths) {
+      this.projectImportQueue = this.projectImportQueue
+        .then(() => this.importTypstryProject(path))
+        .catch(error => console.error("Queued Typstry project import failed:", error));
+    }
+    await this.projectImportQueue;
   }
 
   private mapMarkupToWysiwym(markup: string) {

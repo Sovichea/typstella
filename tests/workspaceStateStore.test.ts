@@ -20,7 +20,9 @@ describe("workspace state store", () => {
       openTabs: [],
       inputContainerWidthPct: 60,
       explorerSidebarWidthPx: 300,
-      pinnedMainFilePath: null
+      pinnedMainFilePath: null,
+      recommendedToolchain: { tinymistVersion: "0.13.10", typstVersion: "0.13.1" },
+      selectedToolchain: { tinymistVersion: "0.13.12", typstVersion: "0.13.1" }
     };
     store.save("/work", state);
     expect(store.load("/work")).toEqual(state);
@@ -37,7 +39,9 @@ describe("workspace state store", () => {
       pinnedMainFilePath: "/work/main.typ",
       openTabs: [],
       inputContainerWidthPct: 50,
-      explorerSidebarWidthPx: 250
+      explorerSidebarWidthPx: 250,
+      recommendedToolchain: null,
+      selectedToolchain: null
     })).toEqual(["/work/main.typ"]);
   });
 });

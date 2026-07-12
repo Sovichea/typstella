@@ -208,6 +208,20 @@ pub fn import_typstry_project(
     destination_path: &Path,
     expected_manifest_sha256: &str,
 ) -> Result<ImportedProject, String> {
+    import_typstry_project_cancellable(
+        archive_path,
+        destination_path,
+        expected_manifest_sha256,
+        || false,
+    )
+}
+
+pub fn import_typstry_project_cancellable(
+    archive_path: &Path,
+    destination_path: &Path,
+    expected_manifest_sha256: &str,
+    should_cancel: impl Fn() -> bool,
+) -> Result<ImportedProject, String> {
     let file = open_archive_file(archive_path)?;
     let mut archive = zip::ZipArchive::new(file)
         .map_err(|error| format!("The selected file is not a valid ZIP archive: {error}"))?;
@@ -252,6 +266,9 @@ pub fn import_typstry_project(
         .map_err(|error| format!("Failed to create import staging directory: {error}"))?;
     let mut extracted_files = HashSet::new();
     for metadata in &validated.entries {
+        if should_cancel() {
+            return Err("Project import cancelled.".to_string());
+        }
         let target = join_archive_path(staging.path(), &metadata.path);
         if metadata.is_directory {
             std::fs::create_dir_all(&target).map_err(|error| {
@@ -290,6 +307,9 @@ pub fn import_typstry_project(
         let mut written = 0_u64;
         let mut buffer = [0_u8; 64 * 1024];
         loop {
+            if should_cancel() {
+                return Err("Project import cancelled.".to_string());
+            }
             let count = entry.read(&mut buffer).map_err(|error| {
                 format!("Failed to read archive entry '{}': {error}", metadata.path)
             })?;
@@ -352,6 +372,9 @@ pub fn import_typstry_project(
         .collect::<HashSet<_>>();
     if extracted_files != declared_files {
         return Err("The archive contents do not match the integrity manifest.".to_string());
+    }
+    if should_cancel() {
+        return Err("Project import cancelled.".to_string());
     }
 
     let staged_path = staging.keep();
@@ -978,6 +1001,32 @@ mod tests {
         assert_eq!(decoded.project.main, "main.typ");
         assert_eq!(decoded.toolchain.typst_version, "0.13.1");
         assert!(!decoded.render_environment.fonts_packaged);
+    }
+
+    #[test]
+    fn cancelled_import_never_promotes_destination() {
+        let workspace = create_workspace();
+        let output = tempfile::tempdir().unwrap();
+        let archive = output.path().join("cancel.typstry");
+        export_project(workspace.path(), &archive);
+        let inspection = inspect_typstry_project(&archive).unwrap();
+        let destination = output.path().join("cancelled-project");
+
+        let error = import_typstry_project_cancellable(
+            &archive,
+            &destination,
+            &inspection.manifest_sha256,
+            || true,
+        )
+        .unwrap_err();
+
+        assert_eq!(error, "Project import cancelled.");
+        assert!(!destination.exists());
+        assert!(std::fs::read_dir(output.path()).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".typstry-import-")));
     }
 
     #[test]

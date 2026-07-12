@@ -13,6 +13,13 @@ export type StoredWorkspaceState = {
   openTabs: StoredWorkspaceTab[];
   inputContainerWidthPct: number;
   explorerSidebarWidthPx: number;
+  recommendedToolchain: StoredWorkspaceToolchain | null;
+  selectedToolchain: StoredWorkspaceToolchain | null;
+};
+
+export type StoredWorkspaceToolchain = {
+  tinymistVersion: string;
+  typstVersion: string;
 };
 
 export function workspaceRestoreCandidates(state: StoredWorkspaceState): string[] {
@@ -49,7 +56,9 @@ export class WorkspaceStateStore {
         pinnedMainFilePath: typeof value.pinnedMainFilePath === "string" ? value.pinnedMainFilePath : null,
         openTabs,
         inputContainerWidthPct: this.numberOr(value.inputContainerWidthPct, 50),
-        explorerSidebarWidthPx: this.numberOr(value.explorerSidebarWidthPx, 250)
+        explorerSidebarWidthPx: this.numberOr(value.explorerSidebarWidthPx, 250),
+        recommendedToolchain: this.toolchainOrNull(value.recommendedToolchain),
+        selectedToolchain: this.toolchainOrNull(value.selectedToolchain)
       };
     } catch {
       return null;
@@ -62,5 +71,13 @@ export class WorkspaceStateStore {
 
   private numberOr(value: unknown, fallback: number): number {
     return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+  }
+
+  private toolchainOrNull(value: unknown): StoredWorkspaceToolchain | null {
+    if (!value || typeof value !== "object") return null;
+    const toolchain = value as Record<string, unknown>;
+    return typeof toolchain.tinymistVersion === "string" && typeof toolchain.typstVersion === "string"
+      ? { tinymistVersion: toolchain.tinymistVersion, typstVersion: toolchain.typstVersion }
+      : null;
   }
 }
