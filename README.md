@@ -105,6 +105,7 @@ Typstella also treats a document as a project rather than an isolated file. A re
 - Tinymist diagnostics and managed Typst tooling.
 - Virtualized PDF preview designed for long documents and constrained memory use.
 - Main-document preview workflows for multi-file projects.
+- Explicit source-to-preview navigation through the preview toolbar or keyboard shortcut.
 - Workspace support for templates, chapters, includes, bibliography files, figures, and external assets.
 - Contributor framework for adding new complex-script languages without modifying core editor code.
 
@@ -132,6 +133,29 @@ The scalable workflow covers:
 - workspace restoration and recovery after compiler or LSP failures.
 
 The detailed architecture and trackable work are recorded in the [complex-script-first implementation plan](./docs/COMPLEX_SCRIPT_FIRST_IMPLEMENTATION_PLAN.md).
+
+## Preview synchronization
+
+Typstella keeps one live preview pinned to the configured main document, including
+while editing files imported or included by that document.
+
+Forward sync is currently a manual action so ordinary cursor movement and tab
+switching never move the preview unexpectedly. To reveal the editor cursor in
+the preview, use the **Reveal Cursor in Preview** button in the preview toolbar,
+or press:
+
+- Windows and Linux: `Ctrl+Alt+P`
+- macOS: `Cmd+Option+P`
+
+Tinymist currently resolves this action to the correct PDF page and source line,
+with the preview ripple appearing at the beginning of that line. Exact horizontal
+cursor positioning within the line is not currently supported. Typstella does
+not attempt to infer it by matching extracted PDF text because that can produce
+incorrect results for repeated text, generated content, mixed scripts, and
+complex scripts such as Khmer.
+
+See [PDF preview and source synchronization](./docs/PREVIEW_INTERCEPTION.md) for
+the implementation details and current limitations.
 
 ## Quick start
 

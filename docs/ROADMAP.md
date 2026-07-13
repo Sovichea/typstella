@@ -1,6 +1,7 @@
 # Roadmap
 
 - [ ] **v0.9.0 prerelease:** Rebuild and re-enable automatic forward sync only after rapid-click, long-paragraph, included-file, persistent data-plane, timeout, and source-offset reliability tests pass. Explicit toolbar/keyboard forward sync is available; cursor-driven scrolling remains disabled before this milestone.
+- [ ] Improve manual forward sync beyond Tinymist's current page-and-line result when the compiler can provide a reliable exact cursor x/y coordinate; do not use PDF text matching as a fallback.
 
 ## Completed
 

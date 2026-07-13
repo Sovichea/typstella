@@ -26,7 +26,17 @@ request preview scrolling.
    nearby Unicode code-point columns.
 3. Tinymist returns a PDF document position as a binary
    `jump,<page> <x> <y>` data-plane frame.
-4. Typstella scrolls the PDF viewer to that page and coordinate.
+4. Typstella scrolls the PDF viewer to the page and line position reported by Tinymist.
+
+### Known limitation
+
+Tinymist currently resolves forward sync to the beginning of the matching source
+line rather than the editor cursor's precise horizontal position. Typstella
+therefore guarantees navigation to the correct page and line, but not to the
+exact x/y position within that line. The viewer intentionally does not refine
+the result by matching extracted PDF text because that approach is unreliable
+for repeated text, generated content, mixed scripts, and complex scripts such
+as Khmer.
 
 If the source-map socket is unavailable, Typstella logs the failure and does not pretend that the sync succeeded.
 
