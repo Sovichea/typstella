@@ -1572,6 +1572,26 @@ body.typstella-resizing #preview-render-pane::after {
   background: var(--ui-hover);
 }
 
+.log-entry-cluster,
+.log-entry-locations {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.log-entry-location {
+  min-height: 22px;
+  padding-left: 56px;
+  color: var(--ui-header-text);
+  font-size: 0.9em;
+}
+
+.log-entry-location.active {
+  background: var(--ui-select);
+  box-shadow: inset 2px 0 #3db489;
+  color: var(--ui-text);
+}
+
 .log-entry-icon {
   font-size: 14px;
   line-height: 1;

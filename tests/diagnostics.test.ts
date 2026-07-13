@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Text } from "@codemirror/state";
 import { looksLikeStalePrefixDiagnostic } from "../src/editor/diagnostics";
-import { duplicatesStructuredDiagnostic } from "../src/diagnostics/logConsoleController";
+import { duplicatesStructuredDiagnostic, spellcheckConsoleGroupKey } from "../src/diagnostics/logConsoleController";
 
 describe("editor diagnostics", () => {
   test("rejects stale LSP diagnostics for a boolean literal prefix", () => {
@@ -69,5 +69,13 @@ describe("diagnostic log deduplication", () => {
       { channel: "dev", message: "file not found" },
       diagnostics
     )).toBe(false);
+  });
+});
+
+describe("spellcheck console grouping", () => {
+  test("preserves exact source spelling and case", () => {
+    const keys = ["Tyst", "typst", "TyPSt"].map(word => spellcheckConsoleGroupKey(word, false));
+    expect(new Set(keys).size).toBe(3);
+    expect(spellcheckConsoleGroupKey("typst", true)).not.toBe(spellcheckConsoleGroupKey("typst", false));
   });
 });

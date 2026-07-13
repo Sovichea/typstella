@@ -1,8 +1,18 @@
 import { createAppIcon } from "../ui/icons";
+import { filePathKey } from "../platform/paths";
 
 export type LogEntryKind = "error" | "warning" | "info" | "log" | "hint";
 export type LogEntryChannel = "lsp" | "spellcheck" | "dev";
 type LogConsoleTab = "all" | LogEntryChannel;
+
+export type LogConsoleLocationInput = {
+  filePath?: string;
+  fileName?: string;
+  line: number;
+  column: number;
+  offset?: number;
+  toOffset?: number;
+};
 
 export type LogConsoleEntryInput = {
   kind: LogEntryKind;
@@ -16,6 +26,7 @@ export type LogConsoleEntryInput = {
   toOffset?: number;
   channel?: LogEntryChannel;
   counted?: boolean;
+  locations?: LogConsoleLocationInput[];
 };
 
 type LogConsoleEntry = LogConsoleEntryInput & {
@@ -32,6 +43,10 @@ export function duplicatesStructuredDiagnostic(
   return message.length > 0 && diagnostics.some(
     diagnostic => canonicalDiagnosticMessage(diagnostic.message) === message
   );
+}
+
+export function spellcheckConsoleGroupKey(sourceText: string, ignored: boolean): string {
+  return `${ignored ? "ignored" : "unknown"}:${sourceText}`;
 }
 
 function canonicalDiagnosticMessage(message: string): string {
@@ -75,6 +90,8 @@ export class LogConsoleController {
   private diagnostics: LogConsoleEntry[] = [];
   private diagnosticsByFile = new Map<string, LogConsoleEntry[]>();
   private spellcheckIssues: LogConsoleEntry[] = [];
+  private expandedSpellcheckEntries = new Set<string>();
+  private activeSpellcheckLocation: { filePath: string; offset: number; toOffset: number } | null = null;
   private logs: LogConsoleEntry[] = [];
   private activeTab: LogConsoleTab = "all";
   private visible = false;
@@ -136,6 +153,15 @@ export class LogConsoleController {
   public setSpellcheckIssues(entries: LogConsoleEntryInput[]): void {
     this.spellcheckIssues = entries.map(entry => this.createEntry({ ...entry, channel: "spellcheck" }));
     this.render();
+  }
+
+  public setActiveSpellcheckLocation(filePath: string | null, offset?: number, toOffset?: number): void {
+    this.activeSpellcheckLocation = filePath !== null && offset !== undefined
+      ? { filePath, offset, toOffset: toOffset ?? offset }
+      : null;
+    this.body.querySelectorAll<HTMLElement>(".log-entry-location").forEach(item => {
+      item.classList.toggle("active", this.locationElementIsActive(item));
+    });
   }
 
   public appendLog(entry: LogConsoleEntryInput): void {
@@ -266,10 +292,62 @@ export class LogConsoleController {
     source.textContent = entry.source ? `typst(${entry.source})` : "";
     const location = document.createElement("span");
     location.className = "log-entry-position";
-    if (entry.line) location.textContent = `[Ln ${entry.line}, Col ${entry.column ?? 1}]`;
+    if (entry.locations?.length) {
+      location.textContent = `${entry.locations.length} location${entry.locations.length === 1 ? "" : "s"}`;
+    } else if (entry.line) {
+      location.textContent = `[Ln ${entry.line}, Col ${entry.column ?? 1}]`;
+    }
     item.append(icon, message, source, location);
-    item.addEventListener("click", () => { void this.onNavigate(entry); });
-    return item;
+    if (!entry.locations?.length) {
+      item.addEventListener("click", () => { void this.onNavigate(entry); });
+      return item;
+    }
+
+    const cluster = document.createElement("div");
+    cluster.className = "log-entry-cluster";
+    const locations = document.createElement("div");
+    const expansionKey = this.spellcheckExpansionKey(entry);
+    const initiallyExpanded = this.expandedSpellcheckEntries.has(expansionKey);
+    locations.className = `log-entry-locations${initiallyExpanded ? "" : " hidden"}`;
+    item.setAttribute("aria-expanded", String(initiallyExpanded));
+    item.addEventListener("click", () => {
+      const expanded = !locations.classList.toggle("hidden");
+      item.setAttribute("aria-expanded", String(expanded));
+      if (expanded) this.expandedSpellcheckEntries.add(expansionKey);
+      else this.expandedSpellcheckEntries.delete(expansionKey);
+    });
+    for (const occurrence of entry.locations) {
+      const occurrenceButton = document.createElement("button");
+      occurrenceButton.type = "button";
+      occurrenceButton.className = "log-entry log-entry-location";
+      occurrenceButton.dataset.filePath = occurrence.filePath ?? entry.filePath ?? "";
+      occurrenceButton.dataset.offset = String(occurrence.offset ?? "");
+      occurrenceButton.dataset.toOffset = String(occurrence.toOffset ?? occurrence.offset ?? "");
+      occurrenceButton.classList.toggle("active", this.locationElementIsActive(occurrenceButton));
+      occurrenceButton.textContent = `Ln ${occurrence.line}, Col ${occurrence.column}`;
+      occurrenceButton.addEventListener("click", () => {
+        this.setActiveSpellcheckLocation(
+          occurrence.filePath ?? entry.filePath ?? null,
+          occurrence.offset,
+          occurrence.toOffset
+        );
+        void this.onNavigate({ ...entry, ...occurrence, locations: undefined });
+      });
+      locations.appendChild(occurrenceButton);
+    }
+    cluster.append(item, locations);
+    return cluster;
+  }
+
+  private spellcheckExpansionKey(entry: LogConsoleEntry): string {
+    return `${entry.filePath ?? ""}\u0000${entry.message}`;
+  }
+
+  private locationElementIsActive(item: HTMLElement): boolean {
+    const active = this.activeSpellcheckLocation;
+    if (!active || filePathKey(item.dataset.filePath ?? "") !== filePathKey(active.filePath)) return false;
+    return Number(item.dataset.offset) === active.offset
+      && Number(item.dataset.toOffset) === active.toOffset;
   }
 
   private updateCount(): void {

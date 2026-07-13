@@ -27,7 +27,7 @@ import { WysiwymAdapter } from "./wysiwym/adapter";
 import { PreviewFrame, type PreviewClickPoint, type PreviewInteractionStatus } from "./preview/previewFrame";
 import { PreviewSyncController } from "./preview/previewSyncController";
 import { allowsStandalonePreview, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, tinymistPreviewByteColumn, usesTemplateAwareStandaloneRoot, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
-import { LogConsoleController, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
+import { LogConsoleController, spellcheckConsoleGroupKey, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
 import { EditorFontManager } from "./editor/fontManager";
 import { TabStripController } from "./editor/tabStripController";
 import { createAppIcon, updateMaximizeIcon } from "./ui/icons";
@@ -853,7 +853,10 @@ export class TypstellaWorkspaceController {
             }
             if (update.selectionSet) {
               this.spellcheckController.selectionChanged(update.docChanged);
+              this.syncSelectedSpellingLocation();
               this.documentOutlineController.setCursorPosition(update.state.selection.main.head, this.activeFilePath);
+            } else if (update.docChanged) {
+              this.logConsoleController.setActiveSpellcheckLocation(null);
             }
             if (!update.docChanged && this.shouldForwardSyncSelectionUpdate(update)) {
               this.previewSyncController.schedule(this.forwardSyncDebounceMs);
@@ -3247,23 +3250,72 @@ export class TypstellaWorkspaceController {
       return;
     }
     const doc = this.editorInstance.state.doc;
-    this.logConsoleController.setSpellcheckIssues(issues.map(issue => {
-      const offset = Math.max(0, Math.min(issue.from, doc.length));
-      const line = doc.lineAt(offset);
-      return {
-        kind: issue.ignored ? "info" : "warning",
-        channel: "spellcheck",
-        counted: !issue.ignored,
-        source: issue.provider,
-        filePath,
-        fileName: fileNameFromPath(filePath),
-        message: `${issue.ignored ? "Ignored unknown word" : "Unknown word"}: “${issue.sourceText}”`,
-        line: line.number,
-        column: offset - line.from + 1,
-        offset,
-        toOffset: Math.max(offset, Math.min(issue.to, doc.length))
+    const grouped = new Map<string, {
+      issue: SpellingIssue;
+      providers: Set<string>;
+      locations: Array<{
+        filePath: string;
+        fileName: string;
+        line: number;
+        column: number;
+        offset: number;
+        toOffset: number;
+      }>;
+      offsets: Set<string>;
+    }>();
+    for (const issue of issues) {
+      // Preserve the source spelling exactly. Case and Unicode form are part
+      // of the displayed word's identity even if providers normalize lookup.
+      const key = spellcheckConsoleGroupKey(issue.sourceText, issue.ignored);
+      const group = grouped.get(key) ?? {
+        issue,
+        providers: new Set<string>(),
+        locations: [],
+        offsets: new Set<string>()
       };
-    }));
+      group.providers.add(issue.provider);
+      const offset = Math.max(0, Math.min(issue.from, doc.length));
+      const toOffset = Math.max(offset, Math.min(issue.to, doc.length));
+      const offsetKey = `${offset}:${toOffset}`;
+      if (!group.offsets.has(offsetKey)) {
+        const line = doc.lineAt(offset);
+        group.offsets.add(offsetKey);
+        group.locations.push({
+          filePath,
+          fileName: fileNameFromPath(filePath),
+          line: line.number,
+          column: offset - line.from + 1,
+          offset,
+          toOffset
+        });
+      }
+      grouped.set(key, group);
+    }
+    this.logConsoleController.setSpellcheckIssues([...grouped.values()].map(group => ({
+      kind: group.issue.ignored ? "info" : "warning",
+      channel: "spellcheck",
+      counted: !group.issue.ignored,
+      source: [...group.providers].join(", "),
+      filePath,
+      fileName: fileNameFromPath(filePath),
+      message: `${group.issue.ignored ? "Ignored unknown word" : "Unknown word"}: “${group.issue.sourceText}”`,
+      locations: group.locations
+    })));
+    this.syncSelectedSpellingLocation();
+  }
+
+  private syncSelectedSpellingLocation(): void {
+    if (!this.activeFilePath || !this.editorInstance) {
+      this.logConsoleController.setActiveSpellcheckLocation(null);
+      return;
+    }
+    const selection = this.editorInstance.state.selection.main;
+    const issue = this.spellcheckController.issueAt(selection.from < selection.to ? selection.from : selection.head);
+    this.logConsoleController.setActiveSpellcheckLocation(
+      issue ? this.activeFilePath : null,
+      issue?.from,
+      issue?.to
+    );
   }
 
   private shouldAcceptLspDiagnostics(_uri: string, originalPath: string, version?: number): boolean {
