@@ -183,6 +183,7 @@ export class TypstellaWorkspaceController {
   private diagnosticWaitStartedAt: number | null = null;
   private openTabs: EditorTab[] = [];
   private readonly openedDocumentUris = new Set<string>();
+  private readonly preparedPreviewDocumentVersions = new Map<string, number>();
   private lastKhmerRenderPrepState: boolean | undefined = undefined;
   private lastPreviewRenderMode: PreviewRefreshStyle | undefined = undefined;
   private workspaceChangeQueue: Promise<void> = Promise.resolve();
@@ -201,6 +202,7 @@ export class TypstellaWorkspaceController {
   private pdfPreviewSourceMapTaskId: string | null = null;
   private pdfPreviewGeneratedFiles = new Map<string, { generatedPath: string; preparedText: string }>();
   private pdfPreviewTimer: number | null = null;
+  private pdfPreviewScheduleGeneration = 0;
   private pdfPreviewRunning = false;
   private queuedPdfPreviewContents: string | null = null;
   private lastPdfBase64 = "";
@@ -2064,40 +2066,95 @@ export class TypstellaWorkspaceController {
   }
 
   private async renderPdfPreview(contents: string): Promise<void> {
-    if (this.previewDisabled) return;
-    if (!this.activeFilePath || !this.lspReady || !this.lspClient) return;
+    if (this.previewDisabled) {
+      this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: "Render skipped: preview is disabled." });
+      return;
+    }
+    if (!this.activeFilePath || !this.lspReady || !this.lspClient) {
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "preview scheduler",
+        message: `Render skipped: active=${this.activeFilePath ?? "none"}; lspReady=${this.lspReady}; client=${!!this.lspClient}.`
+      });
+      return;
+    }
     if (this.pdfPreviewRunning) {
       this.queuedPdfPreviewContents = contents;
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "preview scheduler",
+        message: `Render queued behind active generation ${this.pdfPreviewGeneration}: sourceUtf16=${contents.length}.`
+      });
       return;
     }
     this.pdfPreviewRunning = true;
     const compileStartedAt = performance.now();
     const generation = ++this.pdfPreviewGeneration;
+    this.appendDeveloperLog({
+      kind: "info",
+      source: "preview scheduler",
+      message: `Render generation ${generation} started: mode=${this.settingsController.value.preview.renderMode}; active=${this.activeFilePath}; sourceUtf16=${contents.length}.`
+    });
     this.setLspStatus({ kind: "syncing", message: "Compiling PDF preview..." });
-    if (this.settingsController.value.preview.renderMode !== "on-type" || !this.previewFrame.currentUrl) {
+    if (!this.previewFrame.currentUrl) {
       this.previewFrame.setLoading("Compiling PDF preview...");
     }
     try {
       await this.flushPendingLspSync();
+      this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `Render generation ${generation}: LSP flush complete.` });
       const previewPath = await this.preparePdfPreviewExportPath(contents);
       if (!previewPath) throw new Error("No PDF preview root is available.");
+      this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `Render generation ${generation}: preview root prepared at ${previewPath}.` });
+      if (this.settingsController.value.preview.renderMode === "on-type") {
+        const preparedPaths = [...new Set([
+          previewPath,
+          ...[...this.pdfPreviewGeneratedFiles.values()].map(file => file.generatedPath)
+        ].map(nativeFilePath))];
+        await this.lspClient.notifyWorkspaceFilesChanged(
+          preparedPaths.map(path => ({ uri: filePathToUri(path), type: 2 as const }))
+        );
+        const syncedPreparedDocuments = await this.syncPreparedPreviewDocuments(previewPath);
+        this.appendDeveloperLog({
+          kind: "info",
+          source: "preview scheduler",
+          message: `Render generation ${generation}: invalidated ${preparedPaths.length} prepared file(s) and synchronized ${syncedPreparedDocuments} in-memory document(s) in Tinymist.`
+        });
+      }
       const pdf = await this.lspClient.exportPdfToMemory(previewPath);
+      this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `Render generation ${generation}: Tinymist PDF export complete.` });
       this.performanceDiagnostics.record({
         name: "preview.compile",
         milliseconds: performance.now() - compileStartedAt,
         detail: { sourceUtf16: contents.length }
       });
-      if (this.queuedPdfPreviewContents !== null && this.queuedPdfPreviewContents !== contents) return;
-      if (generation !== this.pdfPreviewGeneration) return;
+      if (this.queuedPdfPreviewContents !== null && this.queuedPdfPreviewContents !== contents) {
+        this.appendDeveloperLog({
+          kind: "info",
+          source: "preview scheduler",
+          message: `Render generation ${generation} discarded: a newer queued revision exists (queuedUtf16=${this.queuedPdfPreviewContents.length}).`
+        });
+        return;
+      }
+      if (generation !== this.pdfPreviewGeneration) {
+        this.appendDeveloperLog({
+          kind: "info",
+          source: "preview scheduler",
+          message: `Render generation ${generation} discarded: current generation is ${this.pdfPreviewGeneration}.`
+        });
+        return;
+      }
       this.setLspStatus({ kind: "preview-ready", message: "PDF Preview Ready" });
-      this.pdfPreviewSourceMapRootPath = previewPath;
-      this.pdfPreviewSourceMapTaskId = previewSessionIdentity(
+      const sourceMapTaskId = previewSessionIdentity(
         previewPath,
         previewRefreshStyle(this.settingsController.value.preview.renderMode)
       ).taskId;
-      await this.resetPdfSourceMapSession();
+      // Source-map tasks are reconciled lazily by ensurePdfSourceMapSocket.
+      // Never let optional cursor-sync lifecycle work block PDF presentation.
+      this.pdfPreviewSourceMapRootPath = previewPath;
+      this.pdfPreviewSourceMapTaskId = sourceMapTaskId;
       this.lastPdfBase64 = pdf.data!;
       await this.previewFrame.loadPdfData(pdf.data!, previewPath);
+      this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `Render generation ${generation}: PDF presentation complete.` });
       if (this.pdfPreviewFailureAt !== null) {
         this.performanceDiagnostics.record({
           name: "preview.recovery",
@@ -2113,7 +2170,14 @@ export class TypstellaWorkspaceController {
         emit("pdf-update", pdf.data!);
       }).catch(err => console.error("Error emitting pdf-update", err));
     } catch (error) {
-      if (generation !== this.pdfPreviewGeneration) return;
+      if (generation !== this.pdfPreviewGeneration) {
+        this.appendDeveloperLog({
+          kind: "warning",
+          source: "preview scheduler",
+          message: `Render generation ${generation} failed after becoming stale: ${String(error)}`
+        });
+        return;
+      }
       console.error("PDF Preview compilation failed:", JSON.stringify(error, null, 2));
       this.previewFrame.setError(
         "Preview Render Failed",
@@ -2125,6 +2189,11 @@ export class TypstellaWorkspaceController {
       this.pdfPreviewRunning = false;
       const queued = this.queuedPdfPreviewContents;
       this.queuedPdfPreviewContents = null;
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "preview scheduler",
+        message: `Render generation ${generation} released: queued=${queued !== null}; queuedChanged=${queued !== null && queued !== contents}.`
+      });
       if (queued !== null && queued !== contents) {
         void this.renderPdfPreview(queued);
       }
@@ -2183,19 +2252,76 @@ export class TypstellaWorkspaceController {
     return result.generatedEntryFile;
   }
 
+  private async syncPreparedPreviewDocuments(previewPath: string): Promise<number> {
+    if (!this.lspClient) return 0;
+    const documents = new Map<string, { path: string; text: string }>();
+    for (const file of this.pdfPreviewGeneratedFiles.values()) {
+      documents.set(filePathKey(file.generatedPath), {
+        path: file.generatedPath,
+        text: file.preparedText
+      });
+    }
+    const previewKey = filePathKey(previewPath);
+    if (!documents.has(previewKey)) {
+      const text = await invoke<string>("read_workspace_file", { path: previewPath });
+      documents.set(previewKey, { path: previewPath, text: normalizeEditorText(text) });
+    }
+
+    for (const document of documents.values()) {
+      const uri = filePathToUri(nativeFilePath(document.path));
+      const version = (this.preparedPreviewDocumentVersions.get(uri) ?? 0) + 1;
+      this.preparedPreviewDocumentVersions.set(uri, version);
+      if (this.openedDocumentUris.has(uri)) {
+        await this.lspClient.notifyTextChange(uri, document.text, version);
+      } else {
+        await this.lspClient.openTextDocument(uri, document.text, version);
+        this.openedDocumentUris.add(uri);
+      }
+    }
+    return documents.size;
+  }
+
   private schedulePdfPreview(contents: string) {
-    if (this.previewDisabled) return;
-    if (this.settingsController.value.preview.renderMode !== "on-type") return;
-    if (this.pdfPreviewTimer) window.clearTimeout(this.pdfPreviewTimer);
+    if (this.previewDisabled) {
+      this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: "On-type schedule skipped: preview is disabled." });
+      return;
+    }
+    if (this.settingsController.value.preview.renderMode !== "on-type") {
+      this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `On-type schedule skipped: mode=${this.settingsController.value.preview.renderMode}.` });
+      return;
+    }
+    if (this.pdfPreviewTimer) {
+      window.clearTimeout(this.pdfPreviewTimer);
+      this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `On-type timer ${this.pdfPreviewScheduleGeneration} replaced by a newer edit.` });
+    }
+    const scheduleGeneration = ++this.pdfPreviewScheduleGeneration;
+    const scheduledPath = this.activeFilePath;
+    this.appendDeveloperLog({
+      kind: "info",
+      source: "preview scheduler",
+      message: `On-type timer ${scheduleGeneration} scheduled: active=${scheduledPath ?? "none"}; sourceUtf16=${contents.length}; delay=250ms.`
+    });
     this.pdfPreviewTimer = window.setTimeout(() => {
       this.pdfPreviewTimer = null;
-      if (this.activeFilePath) {
+      if (this.activeFilePath && filePathKey(this.activeFilePath) === filePathKey(scheduledPath ?? "")) {
+        this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `On-type timer ${scheduleGeneration} fired.` });
         void this.renderPdfPreview(contents);
+      } else {
+        this.appendDeveloperLog({
+          kind: "info",
+          source: "preview scheduler",
+          message: `On-type timer ${scheduleGeneration} discarded: active path changed from ${scheduledPath ?? "none"} to ${this.activeFilePath ?? "none"}.`
+        });
       }
     }, 250);
   }
 
   private handleContentMutation(rawText: string) {
+    this.appendDeveloperLog({
+      kind: "info",
+      source: "preview scheduler",
+      message: `Document mutation: active=${this.activeFilePath ?? "none"}; sourceUtf16=${rawText.length}; loading=${this.isLoadingFile}; mode=${this.settingsController.value.preview.renderMode}; disabled=${this.previewDisabled}; lspReady=${this.lspReady}.`
+    });
     if (this.activeFilePath && this.activeFilePath.toLowerCase().endsWith(".typ")) {
       void this.documentOutlineController.update(
         this.activeFilePath, 
@@ -2597,24 +2723,6 @@ export class TypstellaWorkspaceController {
         this.pdfSourceMapStartup = null;
         this.pdfSourceMapStartupKey = null;
       }
-    }
-  }
-
-  private async resetPdfSourceMapSession(): Promise<void> {
-    this.pdfForwardSyncGeneration += 1;
-    this.pendingPdfForwardSync = null;
-    const startup = this.pdfSourceMapStartup;
-    if (startup) await startup.catch(() => null);
-    const registeredTaskId = this.pdfSyncRegisteredTaskId;
-    this.pdfSourceMapStartup = null;
-    this.pdfSourceMapStartupKey = null;
-    this.pdfSyncPreviewTaskKey = null;
-    this.pdfSyncRegisteredTaskId = null;
-    this.pdfSyncSocket?.close();
-    this.pdfSyncSocket = null;
-    this.pdfSyncSocketUrl = "";
-    if (registeredTaskId && this.lspClient) {
-      await this.lspClient.stopPreview(registeredTaskId).catch(() => {});
     }
   }
 
@@ -4126,6 +4234,7 @@ export class TypstellaWorkspaceController {
     this.pdfSyncSocketUrl = "";
     this.lastPdfBase64 = "";
     this.openedDocumentUris.clear();
+    this.preparedPreviewDocumentVersions.clear();
     this.externalConflictPaths.clear();
     this.clearPendingLspSync();
     this.previewSyncController.clearForward();
