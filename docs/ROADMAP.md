@@ -1,5 +1,27 @@
 # Roadmap
 
+## v0.4.x — stabilization
+
+The v0.4.x line builds on the current feature set. Its priorities are:
+
+- Bug fixes and regression prevention, especially for Unicode, Khmer, project workflows, preview, and data safety.
+- Performance, responsiveness, memory use, and startup/build optimization.
+- A limited number of minor features that extend existing workflows without introducing a new architectural track.
+- No major editor subsystem or broad language-support expansion; larger features move to v0.5.0 or later.
+
+## v0.5.0 — right-to-left writing
+
+Introduce first-class right-to-left (RTL) editing as the next major Unicode-writing milestone, covering Arabic-family scripts, Hebrew, and mixed-direction research documents.
+
+- Establish an RTL conformance suite before adding custom behavior, including Arabic and Hebrew prose, combining marks, selections, cursor movement, deletion, search, copy/paste, and multi-cursor edits.
+- Support automatic, LTR, and RTL paragraph direction without reimplementing the Unicode Bidirectional Algorithm.
+- Make mixed-direction content reliable when RTL prose contains Latin citations, URLs, numbers, equations, and Typst syntax.
+- Add direction-aware alignment and editor controls, plus explicit Unicode direction-isolate commands for ambiguous mixed-direction text.
+- Verify diagnostics, completion, spellcheck ranges, source navigation, and editor-to-preview synchronization under bidi layout.
+- Keep text direction, script-specific editing policies, language tools, and Typst rendering as separate architectural concerns.
+- Add RTL-aware font coverage and recommendations without changing the user's chosen typography automatically.
+- Preserve Khmer, Lao, other complex-script, and ordinary LTR editing behavior through regression tests.
+
 - [ ] **v0.9.0 prerelease:** Rebuild and re-enable automatic forward sync only after rapid-click, long-paragraph, included-file, persistent data-plane, timeout, and source-offset reliability tests pass. Explicit toolbar/keyboard forward sync is available; cursor-driven scrolling remains disabled before this milestone.
 - [ ] Improve manual forward sync beyond Tinymist's current page-and-line result when the compiler can provide a reliable exact cursor x/y coordinate; do not use PDF text matching as a fallback.
 
