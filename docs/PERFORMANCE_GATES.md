@@ -23,16 +23,16 @@ The canonical values live in `src/performance/diagnostics.ts`. A budget change r
 
 ## Workloads
 
-`benchmarks/fixtures/` contains deterministic one-page, 30-page, and 100-page mixed-script Typst projects. `bun run benchmark:performance` also generates a 100,000-character mixed-script source and performs 1,000 repeated incremental-range calculations. Generated PDFs and reports are written under ignored `artifacts/performance/`.
+`benchmarks/fixtures/` contains deterministic one-page, 30-page, and 100-page mixed-script Typst projects. `bun run benchmark:performance` measures five fresh compiler processes per warmed fixture, then generates a 100,000-character mixed-script source and measures ten runs of 1,000 incremental-range calculations. Generated PDFs and JSON/Markdown reports are written under ignored `artifacts/performance/`.
 
-Local Windows baseline on 2026-07-11 after compiler warmup:
+The current published, repeated-sample Windows baseline is in [the benchmark report](./BENCHMARKS.md), with raw JSON under `benchmarks/results/`. Its warm medians on 2026-07-13 were:
 
 | Workload | Result |
 |---|---:|
-| One-page Typst compile | 1,189 ms |
-| 30-page Typst compile | 1,241 ms |
-| 100-page Typst compile | 1,250 ms |
-| 1,000 incremental edits in a 100,000-character source | 109 ms total |
+| One-page Typst compile | 238.46 ms median |
+| 30-page Typst compile | 273.26 ms median |
+| 100-page Typst compile | 364.54 ms median |
+| 1,000 incremental edits in a 100,000-character source | 21.15 ms median |
 | Largest submitted spellcheck range | 32 UTF-16 units |
 
 These CLI values measure reproducibility and compiler cost, not WebView rendering latency. Runtime preview, zoom, recovery, and JavaScript heap metrics come from developer diagnostics. Total application, WebView, and GPU memory must also be sampled with the operating-system process monitor because browser heap APIs do not include GPU allocations.

@@ -22,6 +22,20 @@ Introduce first-class right-to-left (RTL) editing as the next major Unicode-writ
 - Add RTL-aware font coverage and recommendations without changing the user's chosen typography automatically.
 - Preserve Khmer, Lao, other complex-script, and ordinary LTR editing behavior through regression tests.
 
+## v0.6.0 — research productivity and discoverability
+
+Make Typsastra's document-engineering strengths easier to discover while adding broadly useful research-authoring tools. This milestone does not expand into discipline-specific computation or visual tooling.
+
+- Add table, figure, caption, equation, and matrix builders that produce clean, editable, portable Typst source.
+- Add bibliography entry management with DOI/arXiv-assisted metadata retrieval, duplicate detection, citation-key control, and ordinary `.bib` output.
+- Add a template browser with rendered previews, compatibility metadata, and a clear distinction between bundled, local, and Typst Universe templates.
+- Add project-outline restructuring for moving headings or chapters while preserving explicit file ownership, labels, references, and main-document preview context.
+- Preserve and clearly communicate the last successful preview across main-document and standalone-preview compilation failures.
+- Add a toolchain health panel showing active Typst/Tinymist versions, provenance, validation state, download status, and recovery actions.
+- Publish reproducible benchmark reports covering startup, compilation, long-document preview, project indexing/search, memory boundaries, installer size, and enabled language-provider cost.
+- Improve feature visibility with short demonstrations of complex-script editing, included-file preview ownership, source synchronization, language installation, long-document virtualization, and compiler-failure recovery.
+- Add an onboarding project that deliberately demonstrates Khmer and mixed-script editing, Unicode-safe navigation, project structure, bibliography/figure relationships, and preview behavior.
+
 - [ ] **v0.9.0 prerelease:** Rebuild and re-enable automatic forward sync only after rapid-click, long-paragraph, included-file, persistent data-plane, timeout, and source-offset reliability tests pass. Explicit toolbar/keyboard forward sync is available; cursor-driven scrolling remains disabled before this milestone.
 - [ ] Improve manual forward sync beyond Tinymist's current page-and-line result when the compiler can provide a reliable exact cursor x/y coordinate; do not use PDF text matching as a fallback.
 

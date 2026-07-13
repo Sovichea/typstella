@@ -188,6 +188,7 @@ Typsastra downloads and manages Tinymist for preview and diagnostics. A separate
 - [Preview implementation notes](./docs/PREVIEW_INTERCEPTION.md)
 - [Research-document workflows](./docs/RESEARCH_DOCUMENT_WORKFLOWS.md)
 - [Reliability and performance gates](./docs/PERFORMANCE_GATES.md)
+- [Published benchmark results](./docs/BENCHMARKS.md)
 
 ## Contributing a language
 
