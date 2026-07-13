@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { detectDocumentScript, parseTypographyBlock, renderTypographyBlock, typographyEdit } from "../src/editor/documentTypography";
+import { detectDocumentScript, parseTypographyBlock, renderTypographyBlock, typographyEdit, typographyScaleChange } from "../src/editor/documentTypography";
 
 describe("document typography", () => {
+  test("confirms only manual changes to a non-unit font scale", () => {
+    expect(typographyScaleChange(1, 1)).toBe("unchanged");
+    expect(typographyScaleChange(1.2, 1)).toBe("apply");
+    expect(typographyScaleChange(1, 1.2)).toBe("confirm");
+    expect(typographyScaleChange(1.2, 1.3)).toBe("confirm");
+  });
   const config = {
     latinFont: "Calibri",
     latinSizePt: 11,

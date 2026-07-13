@@ -189,6 +189,7 @@ export class TinymistLspClient {
   }
 
   public async restart(): Promise<void> {
+    this.rejectPendingRequests(new Error("Tinymist is restarting."));
     this.setStatus("starting", "Restarting Tinymist");
     await this.ensureTransportListeners();
     await this.transport.start(this.getWorkspaceRoot());
@@ -199,15 +200,27 @@ export class TinymistLspClient {
   }
 
   public dispose(): void {
+    this.rejectPendingRequests(new Error("Tinymist LSP client was disposed."));
     for (const unlisten of this.unlistenTransport.splice(0)) unlisten();
     this.transportListeners = null;
+  }
+
+  private rejectPendingRequests(error: Error): void {
+    for (const pending of this.pendingRequests.values()) {
+      if (pending.timeout) window.clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    this.pendingRequests.clear();
   }
 
   private ensureTransportListeners(): Promise<void> {
     if (this.transportListeners) return this.transportListeners;
     this.transportListeners = Promise.all([
       this.transport.listenStatus(status => {
-        if (status === "stopped") this.setStatus("stopped", "Tinymist stopped");
+        if (status === "stopped") {
+          this.rejectPendingRequests(new Error("Tinymist stopped before the LSP request completed."));
+          this.setStatus("stopped", "Tinymist stopped");
+        }
         else if (status === "running") this.setStatus("running", "Tinymist process running");
       }),
       this.transport.listenMessages(message => this.handleMessage(message))

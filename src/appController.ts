@@ -41,7 +41,7 @@ import { EditorToolbarController } from "./editor/toolbarController";
 import { ContextMenuController } from "./components/contextMenuController";
 import { ToolchainController, type ToolchainStatus } from "./toolchain/toolchainController";
 import { DocumentOutlineController, type DocumentHeading } from "./outline/documentOutline";
-import { parseTypographyBlock, typographyEdit, type DocumentTypography } from "./editor/documentTypography";
+import { parseTypographyBlock, typographyEdit, typographyScaleChange, type DocumentTypography } from "./editor/documentTypography";
 import { SpellcheckController, type SpellingIssue } from "./editor/spellcheck";
 import type { ImportedTypstellaProject, TypstellaProjectPreflight } from "./projectArchive";
 
@@ -213,6 +213,13 @@ export class TypstellaWorkspaceController {
   private pdfPreviewRunning = false;
   private queuedPdfPreviewContents: string | null = null;
   private queuedPdfPreviewForced = false;
+  private typographyScaleCheckTimer: number | null = null;
+  private typographyScaleCheckGeneration = 0;
+  private typographyScaleConfirmationOpen = false;
+  private suppressTypographyScaleConfirmation = false;
+  private acceptedTypographyScales = new Map<string, number>();
+  private typographyFontUpdateInProgress = false;
+  private deferredTypographyPreviewContents: string | null = null;
   private lastPdfBase64 = "";
   private pdfPreviewFailureAt: number | null = null;
   private editorScrollbarPointerActive = false;
@@ -1113,6 +1120,9 @@ export class TypstellaWorkspaceController {
     if (!tab) return;
 
     tab.path = newPath;
+    const acceptedScale = this.acceptedTypographyScales.get(filePathKey(oldPath));
+    this.acceptedTypographyScales.delete(filePathKey(oldPath));
+    if (acceptedScale !== undefined) this.acceptedTypographyScales.set(filePathKey(newPath), acceptedScale);
     if (this.activeFilePath === oldPath) {
       this.activeFilePath = newPath;
       this.explorer.setActiveFile(newPath);
@@ -1152,6 +1162,7 @@ export class TypstellaWorkspaceController {
 
     const wasActive = this.activeFilePath === path;
     this.openTabs.splice(tabIndex, 1);
+    this.acceptedTypographyScales.delete(filePathKey(path));
 
     if (wasActive) {
       const nextTab = this.openTabs[Math.min(tabIndex, this.openTabs.length - 1)] ?? null;
@@ -1236,6 +1247,10 @@ export class TypstellaWorkspaceController {
     }
 
     path = tab.path;
+    this.acceptedTypographyScales.set(
+      filePathKey(path),
+      parseTypographyBlock(tab.content)?.complexScale ?? 1
+    );
     this.spellcheckController.activateDocument(filePathKey(path));
 
     this.currentVersion = tab.version;
@@ -1786,6 +1801,9 @@ export class TypstellaWorkspaceController {
     target: "document" | "template"
   ): Promise<void> {
     if (!this.activeFilePath) return;
+    const typographyDocumentKey = filePathKey(this.activeFilePath);
+    const previousAcceptedScale = this.acceptedTypographyScales.get(typographyDocumentKey) ?? 1;
+    this.acceptedTypographyScales.set(typographyDocumentKey, config.complexScale);
     try {
       if (target === "document") {
         const editor = this.editorInstance;
@@ -1797,9 +1815,8 @@ export class TypstellaWorkspaceController {
           userEvent: "input"
         });
         await this.saveActiveFile();
-        await this.prepareWorkspaceTypographyFont(config);
-        await this.reloadWorkspaceFonts();
-        await this.refreshActivePreviewRoot();
+        const fontsChanged = await this.updateWorkspaceTypographyFont(config);
+        await this.refreshActivePreviewRoot(fontsChanged);
         editor.focus();
         return;
       }
@@ -1824,11 +1841,10 @@ export class TypstellaWorkspaceController {
             userEvent: "input"
           });
           await this.saveActiveFile();
-          await this.prepareWorkspaceTypographyFont(config);
-          await this.reloadWorkspaceFonts();
+          const fontsChanged = await this.updateWorkspaceTypographyFont(config);
           editor.focus();
           this.setLspStatus({ kind: "preview-ready", message: "Typography applied to template" });
-          await this.refreshActivePreviewRoot();
+          await this.refreshActivePreviewRoot(fontsChanged);
           return;
         }
       }
@@ -1873,11 +1889,11 @@ export class TypstellaWorkspaceController {
       }
 
       this.setLspStatus({ kind: "preview-ready", message: "Typography applied to template" });
-      await this.prepareWorkspaceTypographyFont(config);
-      await this.reloadWorkspaceFonts();
-      await this.refreshActivePreviewRoot();
+      const fontsChanged = await this.updateWorkspaceTypographyFont(config);
+      await this.refreshActivePreviewRoot(fontsChanged);
       this.editorInstance.focus();
     } catch (error) {
+      this.acceptedTypographyScales.set(typographyDocumentKey, previousAcceptedScale);
       this.appendLspLog({
         kind: "error",
         source: "typography",
@@ -1887,17 +1903,40 @@ export class TypstellaWorkspaceController {
     }
   }
 
-  private async prepareWorkspaceTypographyFont(config: DocumentTypography): Promise<void> {
-    if (!this.workspaceRootPath) return;
+  private async prepareWorkspaceTypographyFont(config: DocumentTypography): Promise<boolean> {
+    if (!this.workspaceRootPath) return false;
     if (!config.complexFont) {
-      await invoke("clear_scaled_workspace_fonts", { workspaceRootPath: this.workspaceRootPath });
-      return;
+      this.typographyFontUpdateInProgress = true;
+      return invoke<boolean>("clear_scaled_workspace_fonts", { workspaceRootPath: this.workspaceRootPath });
     }
-    await invoke("prepare_scaled_workspace_font", {
+    const request = {
       workspaceRootPath: this.workspaceRootPath,
       family: config.complexFont,
       scale: config.complexScale
-    });
+    };
+    const updateRequired = await invoke<boolean>("scaled_workspace_font_update_required", request);
+    if (!updateRequired) return false;
+    this.typographyFontUpdateInProgress = true;
+    if (Math.abs(config.complexScale - 1) > 0.0001) {
+      this.previewFrame.setLoading(`Scaling ${config.complexFont} for document typography… This one-time setup may take a moment.`);
+    } else {
+      this.previewFrame.setLoading("Removing the previous scaled typography font…");
+    }
+    const result = await invoke<{ changed: boolean }>("prepare_scaled_workspace_font", request);
+    return result.changed;
+  }
+
+  private async updateWorkspaceTypographyFont(config: DocumentTypography): Promise<boolean> {
+    let changed = false;
+    try {
+      changed = await this.prepareWorkspaceTypographyFont(config);
+      if (changed) await this.reloadWorkspaceFonts();
+    } finally {
+      this.typographyFontUpdateInProgress = false;
+    }
+    const hadDeferredPreview = this.deferredTypographyPreviewContents !== null;
+    this.deferredTypographyPreviewContents = null;
+    return changed || hadDeferredPreview;
   }
 
   private async reloadWorkspaceFonts(): Promise<void> {
@@ -1907,6 +1946,14 @@ export class TypstellaWorkspaceController {
     this.openedDocumentUris.clear();
     await this.lspClient.restart();
     this.lspReady = true;
+    this.pinnedLspMainPath = null;
+    const lspMainPath = this.previewStandalone
+      ? this.previewRootPath
+      : (this.previewMainPath ?? this.previewRootPath);
+    await this.updatePinnedMain(lspMainPath, true);
+    if (this.activeFilePath) {
+      await this.recheckActiveDocumentAfterPin(this.editorInstance.state.doc.toString());
+    }
     this.pdfSyncPreviewTaskKey = null;
     this.pdfSyncRegisteredTaskId = null;
     this.pdfSourceMapStartup = null;
@@ -2085,6 +2132,15 @@ export class TypstellaWorkspaceController {
       this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: "Render skipped: preview is disabled." });
       return;
     }
+    if (this.typographyFontUpdateInProgress) {
+      this.deferredTypographyPreviewContents = contents;
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "preview scheduler",
+        message: `Render deferred while typography fonts are updating: sourceUtf16=${contents.length}; forced=${force}.`
+      });
+      return;
+    }
     if (!this.activeFilePath || !this.lspReady || !this.lspClient) {
       this.appendDeveloperLog({
         kind: "info",
@@ -2198,6 +2254,14 @@ export class TypstellaWorkspaceController {
         emit("pdf-update", pdf.data!);
       }).catch(err => console.error("Error emitting pdf-update", err));
     } catch (error) {
+      if (this.typographyFontUpdateInProgress) {
+        this.appendDeveloperLog({
+          kind: "info",
+          source: "preview scheduler",
+          message: `Render generation ${generation} interrupted for typography font replacement.`
+        });
+        return;
+      }
       if (
         error instanceof PreviewPreparationInterrupted
         || (
@@ -2416,6 +2480,7 @@ export class TypstellaWorkspaceController {
     }
     if (!this.isLoadingFile) {
       this.updateActiveTabContent(rawText);
+      this.scheduleManualTypographyScaleCheck();
     }
 
     if (!this.isLoadingFile && this.activeFilePath && this.lspReady && this.lspClient) {
@@ -2455,6 +2520,90 @@ export class TypstellaWorkspaceController {
       && !this.previewDisabled
     ) {
       this.schedulePdfPreview(rawText);
+    }
+  }
+
+  private scheduleManualTypographyScaleCheck(): void {
+    if (this.suppressTypographyScaleConfirmation || !this.activeFilePath) return;
+    if (this.typographyScaleCheckTimer !== null) window.clearTimeout(this.typographyScaleCheckTimer);
+    const generation = ++this.typographyScaleCheckGeneration;
+    const delay = Math.max(600, this.settingsController.value.preview.syncDebounceMs);
+    this.typographyScaleCheckTimer = window.setTimeout(() => {
+      this.typographyScaleCheckTimer = null;
+      if (generation !== this.typographyScaleCheckGeneration) return;
+      void this.checkManualTypographyScaleChange();
+    }, delay);
+  }
+
+  private async checkManualTypographyScaleChange(): Promise<void> {
+    if (!this.activeFilePath || this.typographyScaleConfirmationOpen) {
+      if (this.typographyScaleConfirmationOpen) this.scheduleManualTypographyScaleCheck();
+      return;
+    }
+    const filePath = this.activeFilePath;
+    const documentKey = filePathKey(filePath);
+    const config = parseTypographyBlock(this.editorInstance.state.doc.toString());
+    if (!config) return;
+    const previousScale = this.acceptedTypographyScales.get(documentKey) ?? 1;
+    const change = typographyScaleChange(previousScale, config.complexScale);
+    if (change === "unchanged") return;
+
+    if (change === "apply") {
+      this.acceptedTypographyScales.set(documentKey, config.complexScale);
+      await this.applyManualTypographyFontChange(config, filePath);
+      return;
+    }
+
+    this.typographyScaleConfirmationOpen = true;
+    let accepted = false;
+    try {
+      accepted = await confirm(
+        `Scale ${config.complexFont ?? "the complex-script font"} to ${config.complexScale}?\n\nTypstella will generate a scaled workspace font and restart the preview compiler. This one-time process may take a moment.`,
+        { title: "Confirm Font Scaling", kind: "warning" }
+      );
+    } finally {
+      this.typographyScaleConfirmationOpen = false;
+    }
+
+    if (!this.activeFilePath || filePathKey(this.activeFilePath) !== documentKey) return;
+    const currentText = this.editorInstance.state.doc.toString();
+    const currentConfig = parseTypographyBlock(currentText);
+    if (!currentConfig || Math.abs(currentConfig.complexScale - config.complexScale) > 0.0001) {
+      this.scheduleManualTypographyScaleCheck();
+      return;
+    }
+    if (accepted) {
+      this.acceptedTypographyScales.set(documentKey, currentConfig.complexScale);
+      await this.applyManualTypographyFontChange(currentConfig, filePath);
+      return;
+    }
+
+    const edit = typographyEdit(currentText, { ...currentConfig, complexScale: previousScale });
+    this.suppressTypographyScaleConfirmation = true;
+    try {
+      this.editorInstance.dispatch({
+        changes: edit,
+        userEvent: "input.typography-scale-revert"
+      });
+    } finally {
+      this.suppressTypographyScaleConfirmation = false;
+    }
+  }
+
+  private async applyManualTypographyFontChange(config: DocumentTypography, filePath: string): Promise<void> {
+    try {
+      const fontsChanged = await this.updateWorkspaceTypographyFont(config);
+      if (!fontsChanged) return;
+      if (this.activeFilePath && filePathKey(this.activeFilePath) === filePathKey(filePath)) {
+        await this.refreshActivePreviewRoot(true);
+      }
+    } catch (error) {
+      this.appendLspLog({
+        kind: "error",
+        source: "typography",
+        message: `Unable to prepare the manually selected font scale: ${String(error)}`
+      });
+      await message(String(error), { title: "Unable to Scale Font", kind: "error" });
     }
   }
 
@@ -4334,7 +4483,11 @@ export class TypstellaWorkspaceController {
     }
 
     if (this.pdfPreviewTimer !== null) window.clearTimeout(this.pdfPreviewTimer);
+    if (this.typographyScaleCheckTimer !== null) window.clearTimeout(this.typographyScaleCheckTimer);
     this.pdfPreviewTimer = null;
+    this.typographyScaleCheckTimer = null;
+    this.typographyScaleCheckGeneration += 1;
+    this.acceptedTypographyScales.clear();
     this.pdfPreviewGeneration += 1;
     this.pdfForwardSyncGeneration += 1;
     this.queuedPdfPreviewContents = null;

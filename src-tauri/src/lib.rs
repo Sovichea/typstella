@@ -82,17 +82,43 @@ async fn prepare_scaled_workspace_font(
     family: String,
     scale: f32,
 ) -> Result<scaled_fonts::ScaledFontResult, String> {
-    stop_lsp_process(&state).await;
+    if scaled_fonts::scaled_workspace_font_update_required(
+        Path::new(&workspace_root_path),
+        &family,
+        scale,
+    )? {
+        stop_lsp_process(&state).await;
+    }
     scaled_fonts::prepare_scaled_workspace_font(Path::new(&workspace_root_path), &family, scale)
+}
+
+#[tauri::command]
+fn scaled_workspace_font_update_required(
+    workspace_root_path: String,
+    family: String,
+    scale: f32,
+) -> Result<bool, String> {
+    scaled_fonts::scaled_workspace_font_update_required(
+        Path::new(&workspace_root_path),
+        &family,
+        scale,
+    )
 }
 
 #[tauri::command]
 async fn clear_scaled_workspace_fonts(
     state: tauri::State<'_, LspState>,
     workspace_root_path: String,
-) -> Result<(), String> {
+) -> Result<bool, String> {
+    let generated_dir = Path::new(&workspace_root_path)
+        .join(".typstella")
+        .join("fonts")
+        .join("generated");
+    if !generated_dir.exists() {
+        return Ok(false);
+    }
     stop_lsp_process(&state).await;
-    scaled_fonts::clear_scaled_workspace_fonts(Path::new(&workspace_root_path))
+    scaled_fonts::clear_scaled_workspace_fonts(Path::new(&workspace_root_path)).map(|_| true)
 }
 
 #[tauri::command]
@@ -2158,6 +2184,7 @@ pub fn run() {
             get_toolchain_status,
             list_system_fonts,
             prepare_scaled_workspace_font,
+            scaled_workspace_font_update_required,
             clear_scaled_workspace_fonts,
             install_unicode_font,
             analyze_language_ranges,

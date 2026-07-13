@@ -15,6 +15,12 @@ export type DocumentTypography = {
 };
 
 export type TypographyEdit = { from: number; to: number; insert: string };
+export type TypographyScaleChange = "unchanged" | "apply" | "confirm";
+
+export function typographyScaleChange(previousScale: number, nextScale: number): TypographyScaleChange {
+  if (Math.abs(previousScale - nextScale) <= 0.0001) return "unchanged";
+  return Math.abs(nextScale - 1) <= 0.0001 ? "apply" : "confirm";
+}
 
 const blockStart = "// typstella:typography:start";
 const blockEnd = "// typstella:typography:end";
