@@ -6,23 +6,35 @@ pub mod segment;
 pub mod sourcemap;
 
 pub use mirror::{
-    mirror_project, prepare_single_in_memory_file, RenderPrepareOptions, RenderPrepareResult,
-    RenderPrepareWarning,
+    mirror_project_cancellable, prepare_single_in_memory_file, RenderPrepareOptions,
+    RenderPrepareResult, RenderPrepareWarning,
 };
 pub use segment::KhmerTextSegmenter;
 pub use sourcemap::SourceMap;
+
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static RENDER_PREPARATION_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+#[tauri::command]
+pub fn cancel_render_preparation() {
+    RENDER_PREPARATION_EPOCH.fetch_add(1, Ordering::AcqRel);
+}
 
 #[tauri::command]
 pub async fn prepare_render_project(
     options: RenderPrepareOptions,
 ) -> Result<RenderPrepareResult, String> {
+    let epoch = RENDER_PREPARATION_EPOCH.load(Ordering::Acquire);
     tokio::task::spawn_blocking(move || -> Result<RenderPrepareResult, String> {
         let segmenter = if options.enable_khmer_zws {
             Some(KhmerTextSegmenter::new()?)
         } else {
             None
         };
-        mirror_project(&options, segmenter.as_ref())
+        mirror_project_cancellable(&options, segmenter.as_ref(), || {
+            RENDER_PREPARATION_EPOCH.load(Ordering::Acquire) != epoch
+        })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -41,7 +53,11 @@ pub async fn prepare_render_file(
     file_path: String,
     source_code: String,
 ) -> Result<RenderPrepareFileResult, String> {
+    let epoch = RENDER_PREPARATION_EPOCH.load(Ordering::Acquire);
     tokio::task::spawn_blocking(move || -> Result<RenderPrepareFileResult, String> {
+        if RENDER_PREPARATION_EPOCH.load(Ordering::Acquire) != epoch {
+            return Err("Render preparation cancelled.".to_string());
+        }
         let segmenter = if options.enable_khmer_zws {
             Some(KhmerTextSegmenter::new()?)
         } else {
@@ -49,6 +65,9 @@ pub async fn prepare_render_file(
         };
         let path = std::path::Path::new(&file_path);
         let dest = prepare_single_in_memory_file(&options, segmenter.as_ref(), path, &source_code)?;
+        if RENDER_PREPARATION_EPOCH.load(Ordering::Acquire) != epoch {
+            return Err("Render preparation cancelled.".to_string());
+        }
         let prepared_text = std::fs::read_to_string(&dest).map_err(|e| e.to_string())?;
         Ok(RenderPrepareFileResult {
             generated_path: dest.to_string_lossy().to_string(),

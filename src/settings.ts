@@ -79,7 +79,7 @@ export const defaultAppSettings: AppSettings = {
     // TODO: Re-enable in prerelease v0.9.0 after improving performance and timeout reliability
     // cursorSync: true,
     cursorSync: false,
-    syncDebounceMs: 120,
+    syncDebounceMs: 500,
     highlightDurationMs: 2200,
     khmerRenderPreparation: false
   },

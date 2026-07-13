@@ -31,9 +31,10 @@ pub struct RenderPrepareResult {
     pub warnings: Vec<RenderPrepareWarning>,
 }
 
-pub fn mirror_project(
+pub fn mirror_project_cancellable(
     options: &RenderPrepareOptions,
     segmenter: Option<&KhmerTextSegmenter>,
+    is_cancelled: impl Fn() -> bool,
 ) -> Result<RenderPrepareResult, String> {
     let project_root = &options.project_root;
     let cache_root = &options.cache_root;
@@ -70,6 +71,9 @@ pub fn mirror_project(
     }
 
     for (rel_path, is_dir) in files_to_process {
+        if is_cancelled() {
+            return Err("Render preparation cancelled.".to_string());
+        }
         let src_path = project_root.join(&rel_path);
         let dest_path = render_dir.join(&rel_path);
 

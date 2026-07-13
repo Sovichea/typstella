@@ -69,6 +69,12 @@ const DEFAULT_PREVIEW_WIDTH_PCT = 100 - DEFAULT_INPUT_WIDTH_PCT;
 const DEFAULT_EXPLORER_WIDTH_PX = 250;
 const SYNC_RIPPLE_GREEN = "#3db489";
 
+class PreviewPreparationInterrupted extends Error {
+  constructor() {
+    super("Preview preparation was superseded by editor input.");
+  }
+}
+
 function isPreviewOnlyWindow(): boolean {
   return new URLSearchParams(window.location.search).get("mode") === "preview";
 }
@@ -203,6 +209,7 @@ export class TypstellaWorkspaceController {
   private pdfPreviewGeneratedFiles = new Map<string, { generatedPath: string; preparedText: string }>();
   private pdfPreviewTimer: number | null = null;
   private pdfPreviewScheduleGeneration = 0;
+  private pdfPreparationRevision = 0;
   private pdfPreviewRunning = false;
   private queuedPdfPreviewContents: string | null = null;
   private lastPdfBase64 = "";
@@ -2090,6 +2097,7 @@ export class TypstellaWorkspaceController {
     this.pdfPreviewRunning = true;
     const compileStartedAt = performance.now();
     const generation = ++this.pdfPreviewGeneration;
+    const preparationRevision = this.pdfPreparationRevision;
     this.appendDeveloperLog({
       kind: "info",
       source: "preview scheduler",
@@ -2101,9 +2109,11 @@ export class TypstellaWorkspaceController {
     }
     try {
       await this.flushPendingLspSync();
+      this.ensurePreviewPreparationCurrent(preparationRevision);
       this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `Render generation ${generation}: LSP flush complete.` });
-      const previewPath = await this.preparePdfPreviewExportPath(contents);
+      const previewPath = await this.preparePdfPreviewExportPath(contents, preparationRevision);
       if (!previewPath) throw new Error("No PDF preview root is available.");
+      this.ensurePreviewPreparationCurrent(preparationRevision);
       this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `Render generation ${generation}: preview root prepared at ${previewPath}.` });
       if (this.settingsController.value.preview.renderMode === "on-type") {
         const preparedPaths = [...new Set([
@@ -2113,7 +2123,9 @@ export class TypstellaWorkspaceController {
         await this.lspClient.notifyWorkspaceFilesChanged(
           preparedPaths.map(path => ({ uri: filePathToUri(path), type: 2 as const }))
         );
+        this.ensurePreviewPreparationCurrent(preparationRevision);
         const syncedPreparedDocuments = await this.syncPreparedPreviewDocuments(previewPath);
+        this.ensurePreviewPreparationCurrent(preparationRevision);
         this.appendDeveloperLog({
           kind: "info",
           source: "preview scheduler",
@@ -2121,6 +2133,7 @@ export class TypstellaWorkspaceController {
         });
       }
       const pdf = await this.lspClient.exportPdfToMemory(previewPath);
+      this.ensurePreviewPreparationCurrent(preparationRevision);
       this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `Render generation ${generation}: Tinymist PDF export complete.` });
       this.performanceDiagnostics.record({
         name: "preview.compile",
@@ -2170,6 +2183,20 @@ export class TypstellaWorkspaceController {
         emit("pdf-update", pdf.data!);
       }).catch(err => console.error("Error emitting pdf-update", err));
     } catch (error) {
+      if (
+        error instanceof PreviewPreparationInterrupted
+        || (
+          this.settingsController.value.preview.renderMode === "on-type"
+          && preparationRevision !== this.pdfPreparationRevision
+        )
+      ) {
+        this.appendDeveloperLog({
+          kind: "info",
+          source: "preview scheduler",
+          message: `Render generation ${generation} interrupted by editor input; waiting for the next debounce.`
+        });
+        return;
+      }
       if (generation !== this.pdfPreviewGeneration) {
         this.appendDeveloperLog({
           kind: "warning",
@@ -2200,7 +2227,16 @@ export class TypstellaWorkspaceController {
     }
   }
 
-  private async preparePdfPreviewExportPath(contents: string): Promise<string | null> {
+  private ensurePreviewPreparationCurrent(revision: number): void {
+    if (
+      this.settingsController.value.preview.renderMode === "on-type"
+      && revision !== this.pdfPreparationRevision
+    ) {
+      throw new PreviewPreparationInterrupted();
+    }
+  }
+
+  private async preparePdfPreviewExportPath(contents: string, preparationRevision = this.pdfPreparationRevision): Promise<string | null> {
     if (!this.activeFilePath) return null;
     const rootPath = this.previewStandalone ? (this.previewRootPath ?? this.activeFilePath) : (this.previewMainPath ?? this.previewRootPath ?? this.activeFilePath);
     if (!rootPath) return null;
@@ -2224,6 +2260,7 @@ export class TypstellaWorkspaceController {
       generateSourceMap: true
     };
     const result = await invoke<{ generatedEntryFile: string }>("prepare_render_project", { options });
+    this.ensurePreviewPreparationCurrent(preparationRevision);
     const tabsToOverlay = this.openTabs
       .filter(tab => tab.path.toLowerCase().endsWith(".typ"))
       .filter(tab => this.workspaceRootPath && relativeFilePath(this.workspaceRootPath, this.mapToOriginalPath(tab.path)) !== null);
@@ -2239,6 +2276,7 @@ export class TypstellaWorkspaceController {
         filePath: originalTabPath,
         sourceCode
       });
+      this.ensurePreviewPreparationCurrent(preparationRevision);
       this.pdfPreviewGeneratedFiles.set(filePathKey(originalTabPath), generated);
     }
     if (!overlaid.has(filePathKey(originalActivePath))) {
@@ -2247,6 +2285,7 @@ export class TypstellaWorkspaceController {
         filePath: originalActivePath,
         sourceCode: contents
       });
+      this.ensurePreviewPreparationCurrent(preparationRevision);
       this.pdfPreviewGeneratedFiles.set(filePathKey(originalActivePath), activeGenerated);
     }
     return result.generatedEntryFile;
@@ -2296,10 +2335,11 @@ export class TypstellaWorkspaceController {
     }
     const scheduleGeneration = ++this.pdfPreviewScheduleGeneration;
     const scheduledPath = this.activeFilePath;
+    const debounceMs = this.settingsController.value.preview.syncDebounceMs;
     this.appendDeveloperLog({
       kind: "info",
       source: "preview scheduler",
-      message: `On-type timer ${scheduleGeneration} scheduled: active=${scheduledPath ?? "none"}; sourceUtf16=${contents.length}; delay=250ms.`
+      message: `On-type timer ${scheduleGeneration} scheduled: active=${scheduledPath ?? "none"}; sourceUtf16=${contents.length}; delay=${debounceMs}ms.`
     });
     this.pdfPreviewTimer = window.setTimeout(() => {
       this.pdfPreviewTimer = null;
@@ -2313,14 +2353,20 @@ export class TypstellaWorkspaceController {
           message: `On-type timer ${scheduleGeneration} discarded: active path changed from ${scheduledPath ?? "none"} to ${this.activeFilePath ?? "none"}.`
         });
       }
-    }, 250);
+    }, debounceMs);
   }
 
   private handleContentMutation(rawText: string) {
+    if (!this.isLoadingFile) {
+      this.pdfPreparationRevision += 1;
+      if (this.settingsController.value.preview.renderMode === "on-type") {
+        void invoke("cancel_render_preparation").catch(() => {});
+      }
+    }
     this.appendDeveloperLog({
       kind: "info",
       source: "preview scheduler",
-      message: `Document mutation: active=${this.activeFilePath ?? "none"}; sourceUtf16=${rawText.length}; loading=${this.isLoadingFile}; mode=${this.settingsController.value.preview.renderMode}; disabled=${this.previewDisabled}; lspReady=${this.lspReady}.`
+      message: `Document mutation: active=${this.activeFilePath ?? "none"}; sourceUtf16=${rawText.length}; loading=${this.isLoadingFile}; preparationRevision=${this.pdfPreparationRevision}; mode=${this.settingsController.value.preview.renderMode}; disabled=${this.previewDisabled}; lspReady=${this.lspReady}.`
     });
     if (this.activeFilePath && this.activeFilePath.toLowerCase().endsWith(".typ")) {
       void this.documentOutlineController.update(

@@ -23,7 +23,8 @@ mod segmentation;
 mod toolchain;
 use examples::prepare_examples_workspace;
 use render_prepare::{
-    map_generated_to_source, map_source_to_generated, prepare_render_file, prepare_render_project,
+    cancel_render_preparation, map_generated_to_source, map_source_to_generated,
+    prepare_render_file, prepare_render_project,
 };
 use segmentation::{
     analyze_language_ranges, complete_language_word, get_provider_capabilities,
@@ -2174,6 +2175,7 @@ pub fn run() {
             send_lsp_message,
             prepare_render_project,
             prepare_render_file,
+            cancel_render_preparation,
             map_generated_to_source,
             map_source_to_generated,
             fetch_loopback_resource,

@@ -28,7 +28,7 @@ Open Settings from **File → Settings**, the status bar, or `Ctrl + ,`. Changes
   "preview": {
     "renderMode": "on-type",
     "cursorSync": true,
-    "syncDebounceMs": 120,
+    "syncDebounceMs": 500,
     "highlightDurationMs": 2200,
     "khmerRenderPreparation": false
   },
@@ -47,6 +47,8 @@ The Toolchain panel installs stable Tinymist releases and shows each release's e
 ## Preview
 
 `renderMode` accepts `"on-type"` or `"on-save"`. Imported files preview through their configured main document. The former standalone-preview directive is disabled for v1.0 and tracked for redesign in the v1.x plan.
+
+`syncDebounceMs` controls the quiet period before on-type cache preparation and PDF compilation. Increasing it reduces editor contention while typing quickly; the default is 500 ms.
 
 Forward cursor sync is temporarily disabled. Its reliability redesign and re-enablement are scheduled for the v0.9.0 prerelease.
 
