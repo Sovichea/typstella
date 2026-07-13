@@ -12,6 +12,7 @@ import {
 } from "./documentTypography";
 
 type EditorMode = "CODE" | "WYSIWYM";
+const typographyChoiceStorageKey = "typstella-last-document-typography";
 
 export type EditorToolbarDependencies = {
   getMode: () => EditorMode;
@@ -66,6 +67,7 @@ export class EditorToolbarController {
     complexScript: "khmer",
     complexScale: 1
   };
+  private rememberedTypography: DocumentTypography | null = null;
 
   constructor(private readonly dependencies: EditorToolbarDependencies) {}
 
@@ -123,6 +125,7 @@ export class EditorToolbarController {
   }
 
   private async initializeTypographyControls(): Promise<void> {
+    this.rememberedTypography = this.loadRememberedTypography();
     this.populateScriptOptions();
     try {
       const catalog = await invoke<{ all: string[]; scripts: Record<string, string[]> }>("list_system_fonts");
@@ -201,17 +204,18 @@ export class EditorToolbarController {
   private syncTypographyControls(): void {
     const text = this.dependencies.getEditor().state.doc.toString();
     const existing = parseTypographyBlock(text);
+    const preferred = existing ?? this.rememberedTypography;
     const detected = detectDocumentScript(text);
-    const script = existing?.complexFont
-      ? documentScripts.find(candidate => candidate.id === existing.complexScript) ?? detected ?? documentScripts[0]
+    const script = preferred
+      ? documentScripts.find(candidate => candidate.id === preferred.complexScript) ?? detected ?? documentScripts[0]
       : detected ?? documentScripts[0];
     const defaultLatinFont = this.systemFontFamilies.find(family => family === "Calibri")
       ?? this.systemFontFamilies.find(family => family === "MiSans Latin")
       ?? this.systemFontFamilies[0]
       ?? null;
-    const latinFont = existing ? existing.latinFont : defaultLatinFont;
-    const preferredComplexFont = existing
-      ? existing.complexFont
+    const latinFont = preferred ? preferred.latinFont : defaultLatinFont;
+    const preferredComplexFont = preferred
+      ? preferred.complexFont
       : preferredInstalledFamily(script, this.scriptFontFamilies[script.id] ?? []);
     const supportedFonts = this.populateComplexFontOptions(script.id, preferredComplexFont);
     const complexFont = preferredComplexFont === null
@@ -222,18 +226,18 @@ export class EditorToolbarController {
         ?? null;
     this.typographyDefaults = {
       latinFont,
-      latinSizePt: existing?.latinSizePt ?? 11,
+      latinSizePt: preferred?.latinSizePt ?? 11,
       complexFont,
       complexScript: script.id,
-      complexScale: existing?.complexScale ?? 1
+      complexScale: preferred?.complexScale ?? 1
     };
     const latinEnable = document.getElementById("toolbar-latin-enable") as HTMLInputElement | null;
     if (latinEnable) {
-      latinEnable.checked = existing ? existing.latinFont !== null : true;
+      latinEnable.checked = preferred ? preferred.latinFont !== null : true;
     }
     const complexEnable = document.getElementById("toolbar-complex-enable") as HTMLInputElement | null;
     if (complexEnable) {
-      complexEnable.checked = existing ? existing.complexFont !== null : true;
+      complexEnable.checked = preferred ? preferred.complexFont !== null : true;
     }
     this.setTypographyControl("toolbar-latin-font", latinFont ?? "");
     this.setTypographyControl("toolbar-latin-size", String(this.typographyDefaults.latinSizePt));
@@ -315,7 +319,45 @@ export class EditorToolbarController {
     };
     void this.dependencies.applyTypography(config, target);
     this.typographyDefaults = config;
+    this.rememberedTypography = config;
+    this.saveRememberedTypography(config);
     this.closeDropdowns();
+  }
+
+  private loadRememberedTypography(): DocumentTypography | null {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(typographyChoiceStorageKey) ?? "null");
+      if (!value || typeof value !== "object") return null;
+      const candidate = value as Partial<DocumentTypography>;
+      const validFont = (font: unknown): font is string | null => font === null || typeof font === "string";
+      if (
+        !validFont(candidate.latinFont)
+        || !validFont(candidate.complexFont)
+        || typeof candidate.latinSizePt !== "number"
+        || !Number.isFinite(candidate.latinSizePt)
+        || typeof candidate.complexScale !== "number"
+        || !Number.isFinite(candidate.complexScale)
+        || typeof candidate.complexScript !== "string"
+        || !documentScripts.some(script => script.id === candidate.complexScript)
+      ) return null;
+      return {
+        latinFont: candidate.latinFont,
+        latinSizePt: this.boundedTypographyNumber(String(candidate.latinSizePt), 6, 96, 11),
+        complexFont: candidate.complexFont,
+        complexScript: candidate.complexScript,
+        complexScale: this.boundedTypographyNumber(String(candidate.complexScale), 0.5, 2, 1)
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private saveRememberedTypography(config: DocumentTypography): void {
+    try {
+      localStorage.setItem(typographyChoiceStorageKey, JSON.stringify(config));
+    } catch {
+      // Typography application should still work when browser storage is unavailable.
+    }
   }
 
   private boundedTypographyNumber(value: string, min: number, max: number, fallback: number): number {
