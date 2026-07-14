@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { confirm, message } from "@tauri-apps/plugin-dialog";
 import { cloneDefaultAppSettings, normalizeAppSettings, type AppSettings, type ThemeName } from "./settings";
 import {
+  unicodeEditorFonts,
   unicodeFontPreferenceOptions,
 } from "./editor/fontCatalog";
 import {
@@ -319,6 +320,41 @@ export class SettingsController {
       ...unicodeFontPreferenceOptions,
       ...[...fallbackFamilies].sort().map(family => ({ id: family, label: family }))
     ]);
+    this.populateUnicodeFontOverrides([...fallbackFamilies].sort());
+  }
+
+  private populateUnicodeFontOverrides(families: readonly string[]): void {
+    const container = document.getElementById("settings-unicode-fonts");
+    if (!container) return;
+    const rows = unicodeEditorFonts.map(candidate => {
+      const label = document.createElement("label");
+      label.textContent = candidate.language;
+      const select = document.createElement("select");
+      select.setAttribute("aria-label", `${candidate.language} editor fallback`);
+      select.replaceChildren(
+        ...[
+          { id: "", label: "Use default policy" },
+          { id: "auto", label: `Automatic (${candidate.label})` },
+          { id: "none", label: "No fallback" },
+          ...families.map(family => ({ id: family, label: family }))
+        ].map(option => {
+          const element = document.createElement("option");
+          element.value = option.id;
+          element.textContent = option.label;
+          return element;
+        })
+      );
+      select.value = this.settings.editor.unicodeFonts[candidate.id] ?? "";
+      select.addEventListener("change", () => this.update(settings => {
+        if (select.value === "") delete settings.editor.unicodeFonts[candidate.id];
+        else settings.editor.unicodeFonts[candidate.id] = select.value;
+      }));
+      const row = document.createElement("div");
+      row.className = "settings-unicode-font-row";
+      row.append(label, select);
+      return row;
+    });
+    container.replaceChildren(...rows);
   }
 
   private populateLanguageProviders(): void {
@@ -556,6 +592,13 @@ export class SettingsController {
         && !this.systemFonts.all.some(family => family.toLocaleLowerCase() === selectedFallback.toLocaleLowerCase())) {
         this.settings.editor.unicodeFont = "auto";
         this.scheduleSave();
+      }
+      for (const [id, preference] of Object.entries(this.settings.editor.unicodeFonts)) {
+        if (preference !== "auto" && preference !== "none"
+          && !this.systemFonts.all.some(family => family.toLocaleLowerCase() === preference.toLocaleLowerCase())) {
+          delete this.settings.editor.unicodeFonts[id];
+          this.scheduleSave();
+        }
       }
       this.populateFontOptions();
       this.populatePanel();

@@ -28,7 +28,7 @@ export const unicodeEditorFonts = [
   { id: "noto-sans-jp", label: "Noto Sans JP", language: "Japanese", fontFamily: "Noto Sans JP", pattern: /[\u3040-\u30FF\u31F0-\u31FF]/u, bundled: false },
   { id: "noto-sans-kr", label: "Noto Sans KR", language: "Korean", fontFamily: "Noto Sans KR", pattern: /[\u1100-\u11FF\u3130-\u318F\uAC00-\uD7AF]/u, bundled: false },
   { id: "mi-sans-latin", label: "MiSans Latin", language: "Greek and Cyrillic", fontFamily: "MiSans Latin", pattern: /[\u0370-\u052F\u1C80-\u1C8F\u1D00-\u1D7F\u1F00-\u1FFF\u2C60-\u2C7F\u2DE0-\u2DFF\uA640-\uA69F\uAB30-\uAB6F]/u, bundled: true },
-  { id: "mi-sans", label: "MiSans", language: "Chinese", fontFamily: "MiSans", pattern: /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u{20000}-\u{3134F}]/u, bundled: false }
+  { id: "noto-sans-sc", label: "Noto Sans SC", language: "Chinese", fontFamily: "Noto Sans SC", pattern: /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u{20000}-\u{3134F}]/u, bundled: false }
 ] as const;
 
 export type UnicodeEditorFontId = typeof unicodeEditorFonts[number]["id"];
@@ -86,11 +86,11 @@ function quoteFamily(family: string): string {
   return `"${family.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-export function codeEditorFontStack(id: CodeEditorFontId, unicodeFamily?: string): string {
+export function codeEditorFontStack(id: CodeEditorFontId, unicodeFamilies: readonly string[] = []): string {
   const selected = normalizeCodeEditorFont(id);
   const families = [
     selected === "monospace" ? selected : quoteFamily(selected),
-    unicodeFamily ? quoteFamily(unicodeFamily) : null,
+    ...unicodeFamilies.map(quoteFamily),
     "ui-monospace",
     "SFMono-Regular",
     "Consolas",
@@ -102,5 +102,9 @@ export function codeEditorFontStack(id: CodeEditorFontId, unicodeFamily?: string
 }
 
 export function detectUnicodeEditorFont(text: string) {
-  return unicodeEditorFonts.find(font => font.pattern.test(text)) ?? null;
+  return detectUnicodeEditorFonts(text)[0] ?? null;
+}
+
+export function detectUnicodeEditorFonts(text: string) {
+  return unicodeEditorFonts.filter(font => font.pattern.test(text));
 }

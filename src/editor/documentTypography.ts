@@ -9,9 +9,13 @@ export type DocumentScript = {
 export type DocumentTypography = {
   latinFont: string | null;
   latinSizePt: number;
-  complexFont: string | null;
-  complexScript: string;
-  complexScale: number;
+  fallbacks: DocumentFontFallback[];
+};
+
+export type DocumentFontFallback = {
+  script: string;
+  family: string;
+  scale: number;
 };
 
 export type TypographyEdit = { from: number; to: number; insert: string };
@@ -56,10 +60,15 @@ function countMatches(text: string, pattern: RegExp): number {
 }
 
 export function detectDocumentScript(text: string): DocumentScript | null {
+  return detectDocumentScripts(text)[0] ?? null;
+}
+
+export function detectDocumentScripts(text: string): DocumentScript[] {
   return documentScripts
     .map(script => ({ script, count: countMatches(text, script.pattern) }))
     .filter(candidate => candidate.count > 0)
-    .sort((left, right) => right.count - left.count)[0]?.script ?? null;
+    .sort((left, right) => right.count - left.count)
+    .map(candidate => candidate.script);
 }
 
 export function preferredInstalledFamily(script: DocumentScript, families: readonly string[]): string | null {
@@ -84,14 +93,16 @@ function decimal(value: number): string {
 
 export function renderTypographyBlock(config: DocumentTypography): string {
   const lines = [blockStart];
-  if (config.complexFont) {
-    lines.push(`// typsastra:complex-font ${JSON.stringify({
-      family: config.complexFont,
-      script: config.complexScript,
-      scale: Math.max(0.5, Math.min(2, config.complexScale))
-    })}`);
+  const fallbacks = config.fallbacks.map(fallback => ({
+    family: fallback.family,
+    script: fallback.script,
+    scale: Math.max(0.5, Math.min(2, fallback.scale))
+  }));
+  if (fallbacks.length > 0) {
+    lines.push(`// typsastra:font-fallbacks ${JSON.stringify(fallbacks)}`);
   }
-  const fonts = [config.latinFont, config.complexFont].filter((font): font is string => !!font);
+  const fonts = [config.latinFont, ...fallbacks.map(fallback => fallback.family)]
+    .filter((font): font is string => !!font);
   if (fonts.length > 0) {
     const fontValue = fonts.length === 1
       ? `"${escapeTypstString(fonts[0])}"`
@@ -107,32 +118,57 @@ export function parseTypographyBlock(text: string): DocumentTypography | null {
   const end = start >= 0 ? text.indexOf(blockEnd, start) : -1;
   if (start < 0 || end < 0) return null;
   const block = text.slice(start, end);
-  const metadata = /\/\/ typsastra:complex-font (\{[^\r\n]+\})/.exec(block);
-  let complexMetadata: { family?: string; script?: string; scale?: number } | null = null;
-  if (metadata) {
-    try { complexMetadata = JSON.parse(metadata[1]); } catch { return null; }
-  }
-  const stack = block.match(/#set text\(font: \("((?:\\.|[^"])*)", "((?:\\.|[^"])*)"\), size: (-?\d+(?:\.\d+)?)pt\)/);
+  const metadata = /\/\/ typsastra:font-fallbacks (\[[^\r\n]+\])/.exec(block);
+  const legacyMetadata = /\/\/ typsastra:complex-font (\{[^\r\n]+\})/.exec(block);
+  let fallbacks: DocumentFontFallback[] = [];
+  try {
+    const raw: unknown = metadata ? JSON.parse(metadata[1]) : legacyMetadata ? [JSON.parse(legacyMetadata[1])] : [];
+    if (!Array.isArray(raw)) return null;
+    fallbacks = raw.flatMap(item => {
+      if (!item || typeof item !== "object") return [];
+      const candidate = item as Partial<DocumentFontFallback>;
+      if (typeof candidate.family !== "string" || typeof candidate.script !== "string") return [];
+      if (!documentScripts.some(script => script.id === candidate.script)) return [];
+      return [{
+        family: candidate.family,
+        script: candidate.script,
+        scale: typeof candidate.scale === "number" && Number.isFinite(candidate.scale)
+          ? Math.max(0.5, Math.min(2, candidate.scale))
+          : 1
+      }];
+    });
+  } catch { return null; }
+  const stack = block.match(/#set text\(font: \(([^\r\n]+)\), size: (-?\d+(?:\.\d+)?)pt\)/);
   const single = block.match(/#set text\(font: "((?:\\.|[^"])*)", size: (-?\d+(?:\.\d+)?)pt\)/);
   const legacyComplex = block.match(/#show regex\("\\p\{([^}]+)\}\+"\): set text\(font: "((?:\\.|[^"])*)", size: 1em ([+-]) (\d+(?:\.\d+)?)pt\)/);
   if (!stack && !single && !legacyComplex) return null;
   const legacyScript = legacyComplex
     ? documentScripts.find(candidate => candidate.unicodeProperty === legacyComplex[1])
     : null;
-  const latinSizePt = Number(stack?.[3] ?? single?.[2] ?? 11);
-  const complexFont = complexMetadata?.family
-    ?? (stack ? unescapeTypstString(stack[2]) : null)
-    ?? (legacyComplex ? unescapeTypstString(legacyComplex[2]) : null);
+  const latinSizePt = Number(stack?.[2] ?? single?.[2] ?? 11);
+  const stackFonts = stack
+    ? [...stack[1].matchAll(/"((?:\\.|[^"])*)"/g)].map(match => unescapeTypstString(match[1]))
+    : [];
   const legacyAdjustment = legacyComplex
     ? Number(legacyComplex[4]) * (legacyComplex[3] === "-" ? -1 : 1)
     : 0;
-  return {
-    latinFont: stack ? unescapeTypstString(stack[1]) : single && !complexMetadata ? unescapeTypstString(single[1]) : null,
-    latinSizePt,
-    complexFont,
-    complexScript: complexMetadata?.script ?? legacyScript?.id ?? documentScripts[0].id,
-    complexScale: complexMetadata?.scale ?? Math.max(0.5, Math.min(2, (latinSizePt + legacyAdjustment) / latinSizePt))
-  };
+  if (fallbacks.length === 0 && legacyComplex && legacyScript) {
+    fallbacks = [{
+      family: unescapeTypstString(legacyComplex[2]),
+      script: legacyScript.id,
+      scale: Math.max(0.5, Math.min(2, (latinSizePt + legacyAdjustment) / latinSizePt))
+    }];
+  }
+  if (fallbacks.length === 0 && stackFonts.length > 1) {
+    fallbacks = [{ family: stackFonts[1], script: documentScripts[0].id, scale: 1 }];
+  }
+  const singleFont = single ? unescapeTypstString(single[1]) : null;
+  const latinFont = stackFonts.length > fallbacks.length
+    ? stackFonts[0]
+    : singleFont && !fallbacks.some(fallback => fallback.family === singleFont)
+      ? singleFont
+      : null;
+  return { latinFont, latinSizePt, fallbacks };
 }
 
 export function typographyEdit(text: string, config: DocumentTypography): TypographyEdit {

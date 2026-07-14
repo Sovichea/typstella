@@ -19,13 +19,14 @@ describe("editor font catalog", () => {
     expect(detectUnicodeEditorFont("\u041A\u0438\u0440\u0438\u043B\u043B\u0438\u0446\u0430")?.id).toBe("mi-sans-latin");
     expect(detectUnicodeEditorFont("\u0627\u0644\u0639\u0631\u0628\u064A\u0629")?.id).toBe("mi-sans-arabic");
     expect(detectUnicodeEditorFont("\u0E44\u0E17\u0E22")?.id).toBe("mi-sans-thai");
+    expect(detectUnicodeEditorFont("\u4e2d\u6587")?.id).toBe("noto-sans-sc");
     expect(detectUnicodeEditorFont("fran\u00E7ais")).toBeNull();
     expect(unicodeEditorFonts.find(font => font.id === "mi-sans-khmer")?.bundled).toBe(false);
     expect(unicodeEditorFonts.find(font => font.id === "mi-sans-latin")?.bundled).toBe(true);
   });
 
   test("places an explicit Unicode fallback after the selected code font", () => {
-    expect(codeEditorFontStack("Fira Mono", "MiSans Khmer").startsWith('"Fira Mono", "MiSans Khmer"')).toBe(true);
+    expect(codeEditorFontStack("Fira Mono", ["MiSans Khmer"]).startsWith('"Fira Mono", "MiSans Khmer"')).toBe(true);
   });
 
   test("keeps system complex-script fallbacks in the editor stack", () => {

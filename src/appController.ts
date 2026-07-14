@@ -42,7 +42,7 @@ import { EditorToolbarController } from "./editor/toolbarController";
 import { ContextMenuController } from "./components/contextMenuController";
 import { ToolchainController, type ToolchainStatus } from "./toolchain/toolchainController";
 import { DocumentOutlineController, type DocumentHeading } from "./outline/documentOutline";
-import { parseTypographyBlock, typographyEdit, typographyScaleChange, type DocumentTypography } from "./editor/documentTypography";
+import { parseTypographyBlock, typographyEdit, type DocumentFontFallback, type DocumentTypography } from "./editor/documentTypography";
 import { SpellcheckController, type SpellingIssue } from "./editor/spellcheck";
 import type { ImportedTypsastraProject, TypsastraProjectPreflight } from "./projectArchive";
 
@@ -235,7 +235,7 @@ export class TypsastraWorkspaceController {
   private typographyScaleCheckGeneration = 0;
   private typographyScaleConfirmationOpen = false;
   private suppressTypographyScaleConfirmation = false;
-  private acceptedTypographyScales = new Map<string, number>();
+  private acceptedTypographyScales = new Map<string, DocumentFontFallback[]>();
   private typographyFontUpdateInProgress = false;
   private deferredTypographyPreviewContents: string | null = null;
   private lastPdfBase64 = "";
@@ -626,7 +626,7 @@ export class TypsastraWorkspaceController {
     document.documentElement.style.setProperty("--editor-font-size", `${appearance.editorFontSize}px`);
     document.documentElement.style.setProperty("--editor-line-height", String(appearance.editorLineHeight));
     this.forwardSyncDebounceMs = preview.syncDebounceMs;
-    this.editorFontManager.configure(editor.codeFont, editor.unicodeFont);
+    this.editorFontManager.configure(editor.codeFont, editor.unicodeFont, editor.unicodeFonts);
     this.spellcheckController.setEnabledProviders(editor.languageProviders);
     this.spellcheckController.setEnabled(editor.spellcheck);
     this.spellcheckController.setUserDictionary(editor.userDictionary);
@@ -1273,7 +1273,7 @@ export class TypsastraWorkspaceController {
     path = tab.path;
     this.acceptedTypographyScales.set(
       filePathKey(path),
-      parseTypographyBlock(tab.content)?.complexScale ?? 1
+      parseTypographyBlock(tab.content)?.fallbacks.map(fallback => ({ ...fallback })) ?? []
     );
     this.spellcheckController.activateDocument(filePathKey(path));
 
@@ -1834,8 +1834,8 @@ export class TypsastraWorkspaceController {
   ): Promise<void> {
     if (!this.activeFilePath) return;
     const typographyDocumentKey = filePathKey(this.activeFilePath);
-    const previousAcceptedScale = this.acceptedTypographyScales.get(typographyDocumentKey) ?? 1;
-    this.acceptedTypographyScales.set(typographyDocumentKey, config.complexScale);
+    const previousAcceptedScale = this.acceptedTypographyScales.get(typographyDocumentKey) ?? [];
+    this.acceptedTypographyScales.set(typographyDocumentKey, config.fallbacks.map(fallback => ({ ...fallback })));
     try {
       if (target === "document") {
         const editor = this.editorInstance;
@@ -1937,25 +1937,25 @@ export class TypsastraWorkspaceController {
 
   private async prepareWorkspaceTypographyFont(config: DocumentTypography): Promise<boolean> {
     if (!this.workspaceRootPath) return false;
-    if (!config.complexFont) {
-      this.typographyFontUpdateInProgress = true;
-      return invoke<boolean>("clear_scaled_workspace_fonts", { workspaceRootPath: this.workspaceRootPath });
-    }
-    const request = {
+    const scaled = config.fallbacks.filter(fallback => Math.abs(fallback.scale - 1) > 0.0001);
+    const updateRequired = await invoke<boolean>("scaled_workspace_font_set_update_required", {
       workspaceRootPath: this.workspaceRootPath,
-      family: config.complexFont,
-      scale: config.complexScale
-    };
-    const updateRequired = await invoke<boolean>("scaled_workspace_font_update_required", request);
+      fonts: scaled
+    });
     if (!updateRequired) return false;
     this.typographyFontUpdateInProgress = true;
-    if (Math.abs(config.complexScale - 1) > 0.0001) {
-      this.previewFrame.setLoading(`Scaling ${config.complexFont} for document typography… This one-time setup may take a moment.`);
-    } else {
-      this.previewFrame.setLoading("Removing the previous scaled typography font…");
+    let changed = await invoke<boolean>("clear_scaled_workspace_fonts", { workspaceRootPath: this.workspaceRootPath });
+    if (scaled.length === 0) return changed;
+    this.previewFrame.setLoading(`Scaling ${scaled.length} document fallback font${scaled.length === 1 ? "" : "s"}… This one-time setup may take a moment.`);
+    for (const fallback of scaled) {
+      const result = await invoke<{ changed: boolean }>("prepare_scaled_workspace_font", {
+        workspaceRootPath: this.workspaceRootPath,
+        family: fallback.family,
+        scale: fallback.scale
+      });
+      changed ||= result.changed;
     }
-    const result = await invoke<{ changed: boolean }>("prepare_scaled_workspace_font", request);
-    return result.changed;
+    return changed;
   }
 
   private async updateWorkspaceTypographyFont(config: DocumentTypography): Promise<boolean> {
@@ -2603,12 +2603,23 @@ export class TypsastraWorkspaceController {
     const documentKey = filePathKey(filePath);
     const config = parseTypographyBlock(this.editorInstance.state.doc.toString());
     if (!config) return;
-    const previousScale = this.acceptedTypographyScales.get(documentKey) ?? 1;
-    const change = typographyScaleChange(previousScale, config.complexScale);
-    if (change === "unchanged") return;
+    const previousFallbacks = this.acceptedTypographyScales.get(documentKey) ?? [];
+    const signature = (fallbacks: DocumentFontFallback[]) => JSON.stringify(fallbacks.map(fallback => ({
+      family: fallback.family,
+      script: fallback.script,
+      scale: Number(fallback.scale.toFixed(4))
+    })));
+    if (signature(previousFallbacks) === signature(config.fallbacks)) return;
+    const requiresConfirmation = config.fallbacks.some(fallback => {
+      if (Math.abs(fallback.scale - 1) <= 0.0001) return false;
+      const previous = previousFallbacks.find(candidate =>
+        candidate.script === fallback.script && candidate.family === fallback.family
+      );
+      return !previous || Math.abs(previous.scale - fallback.scale) > 0.0001;
+    });
 
-    if (change === "apply") {
-      this.acceptedTypographyScales.set(documentKey, config.complexScale);
+    if (!requiresConfirmation) {
+      this.acceptedTypographyScales.set(documentKey, config.fallbacks.map(fallback => ({ ...fallback })));
       await this.applyManualTypographyFontChange(config, filePath);
       return;
     }
@@ -2617,7 +2628,7 @@ export class TypsastraWorkspaceController {
     let accepted = false;
     try {
       accepted = await confirm(
-        `Scale ${config.complexFont ?? "the complex-script font"} to ${config.complexScale}?\n\nTypsastra will generate a scaled workspace font and restart the preview compiler. This one-time process may take a moment.`,
+        `Apply these document font scales?\n\n${config.fallbacks.map(fallback => `${fallback.family}: ${fallback.scale}×`).join("\n")}\n\nTypsastra will generate scaled workspace fonts and restart the preview compiler.`,
         { title: "Confirm Font Scaling", kind: "warning" }
       );
     } finally {
@@ -2627,17 +2638,25 @@ export class TypsastraWorkspaceController {
     if (!this.activeFilePath || filePathKey(this.activeFilePath) !== documentKey) return;
     const currentText = this.editorInstance.state.doc.toString();
     const currentConfig = parseTypographyBlock(currentText);
-    if (!currentConfig || Math.abs(currentConfig.complexScale - config.complexScale) > 0.0001) {
+    if (!currentConfig || signature(currentConfig.fallbacks) !== signature(config.fallbacks)) {
       this.scheduleManualTypographyScaleCheck();
       return;
     }
     if (accepted) {
-      this.acceptedTypographyScales.set(documentKey, currentConfig.complexScale);
+      this.acceptedTypographyScales.set(documentKey, currentConfig.fallbacks.map(fallback => ({ ...fallback })));
       await this.applyManualTypographyFontChange(currentConfig, filePath);
       return;
     }
 
-    const edit = typographyEdit(currentText, { ...currentConfig, complexScale: previousScale });
+    const edit = typographyEdit(currentText, {
+      ...currentConfig,
+      fallbacks: currentConfig.fallbacks.map(fallback => ({
+        ...fallback,
+        scale: previousFallbacks.find(candidate =>
+          candidate.script === fallback.script && candidate.family === fallback.family
+        )?.scale ?? 1
+      }))
+    });
     this.suppressTypographyScaleConfirmation = true;
     try {
       this.editorInstance.dispatch({
@@ -5158,7 +5177,8 @@ export class TypsastraWorkspaceController {
             : await invoke<string>("read_workspace_file", { path: mainFilePath });
           const typography = parseTypographyBlock(mainSource);
           const declaredFontFamilies = typography
-            ? [typography.latinFont, typography.complexFont].filter((font): font is string => !!font)
+            ? [typography.latinFont, ...typography.fallbacks.map(fallback => fallback.family)]
+              .filter((font): font is string => !!font)
             : [];
           const manifest = await invoke<{ renderEnvironment: { fontsPackaged: boolean } }>("export_typsastra_project", {
             workspacePath: this.workspaceRootPath,

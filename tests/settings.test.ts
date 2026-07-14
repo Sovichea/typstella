@@ -10,6 +10,7 @@ describe("application settings", () => {
     expect(settings.developerLogs).toEqual(defaultAppSettings.developerLogs);
     expect(settings.editor.codeFont).toBe("Fira Mono");
     expect(settings.editor.unicodeFont).toBe("auto");
+    expect(settings.editor.unicodeFonts).toEqual({});
     expect(settings.editor.wordWrap).toBe(defaultAppSettings.editor.wordWrap);
     expect(settings.editor.spellcheck).toBe(true);
     expect(settings.editor.wordCompletion).toBe(true);
@@ -52,6 +53,17 @@ describe("application settings", () => {
 
   test("migrates the former Typst version selection", () => {
     expect(normalizeAppSettings({ toolchain: { typstVersion: "0.14.2" } }).toolchain.tinymistVersion).toBe("0.14.2");
+  });
+
+  test("keeps independent per-script editor fallbacks", () => {
+    const settings = normalizeAppSettings({ editor: {
+      unicodeFont: "auto",
+      unicodeFonts: { "mi-sans-khmer": "Noto Sans Khmer", "mi-sans-lao": "none" }
+    } });
+    expect(settings.editor.unicodeFonts).toEqual({
+      "mi-sans-khmer": "Noto Sans Khmer",
+      "mi-sans-lao": "none"
+    });
   });
 
   test("keeps developer log category selections independently", () => {

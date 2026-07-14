@@ -12,9 +12,7 @@ import {
 const config = {
   latinFont: "MiSans Latin",
   latinSizePt: 11,
-  complexFont: "MiSans Khmer",
-  complexScript: "khmer",
-  complexScale: 1
+  fallbacks: [{ family: "MiSans Khmer", script: "khmer", scale: 1 }]
 };
 
 describe("template typography", () => {

@@ -34,6 +34,7 @@ export type AppSettings = {
   editor: {
     codeFont: CodeEditorFontId;
     unicodeFont: UnicodeFontPreference;
+    unicodeFonts: Record<string, UnicodeFontPreference>;
     wordWrap: boolean;
     tabSize: 2 | 4 | 8;
     lineNumbers: boolean;
@@ -80,6 +81,7 @@ export const defaultAppSettings: AppSettings = {
   editor: {
     codeFont: "Fira Mono",
     unicodeFont: "auto",
+    unicodeFonts: {},
     wordWrap: true,
     tabSize: 2,
     lineNumbers: true,
@@ -136,6 +138,13 @@ function previewRenderMode(value: unknown): PreviewRenderMode {
     : defaultAppSettings.preview.renderMode;
 }
 
+function unicodeFontPreferences(value: unknown): Record<string, UnicodeFontPreference> {
+  const preferences = objectValue(value);
+  return Object.fromEntries(Object.entries(preferences)
+    .filter(([id]) => /^[a-z0-9-]+$/.test(id))
+    .map(([id, preference]) => [id, normalizeUnicodeFontPreference(preference)]));
+}
+
 export function normalizeAppSettings(value: unknown): AppSettings {
   const root = objectValue(value);
   const appearance = objectValue(root.appearance);
@@ -170,6 +179,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     editor: {
       codeFont: normalizeCodeEditorFont(editor.codeFont),
       unicodeFont: normalizeUnicodeFontPreference(editor.unicodeFont),
+      unicodeFonts: unicodeFontPreferences(editor.unicodeFonts),
       wordWrap: booleanValue(editor.wordWrap, defaultAppSettings.editor.wordWrap),
       tabSize,
       lineNumbers: booleanValue(editor.lineNumbers, defaultAppSettings.editor.lineNumbers),

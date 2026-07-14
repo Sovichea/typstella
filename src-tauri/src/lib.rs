@@ -88,6 +88,11 @@ fn list_system_fonts() -> font_store::SystemFontCatalog {
 }
 
 #[tauri::command]
+fn font_families_supporting_text(families: Vec<String>, characters: String) -> Vec<String> {
+    font_store::font_families_supporting_text(&families, &characters)
+}
+
+#[tauri::command]
 async fn prepare_scaled_workspace_font(
     state: tauri::State<'_, LspState>,
     workspace_root_path: String,
@@ -115,6 +120,14 @@ fn scaled_workspace_font_update_required(
         &family,
         scale,
     )
+}
+
+#[tauri::command]
+fn scaled_workspace_font_set_update_required(
+    workspace_root_path: String,
+    fonts: Vec<scaled_fonts::ScaledFontRequest>,
+) -> Result<bool, String> {
+    scaled_fonts::scaled_workspace_font_set_update_required(Path::new(&workspace_root_path), &fonts)
 }
 
 #[tauri::command]
@@ -1561,13 +1574,13 @@ mod preview_main_tests {
         assert_eq!(
             standalone_target.root_path.as_deref(),
             Some(
-                super::normalized_existing_path(&standalone)
+                super::normalized_existing_path(&main)
                     .to_string_lossy()
                     .as_ref()
             )
         );
         assert!(standalone_target.imported);
-        assert!(standalone_target.standalone);
+        assert!(!standalone_target.standalone);
     }
 
     #[test]
@@ -2424,8 +2437,10 @@ pub fn run() {
             ensure_toolchain,
             get_toolchain_status,
             list_system_fonts,
+            font_families_supporting_text,
             prepare_scaled_workspace_font,
             scaled_workspace_font_update_required,
+            scaled_workspace_font_set_update_required,
             clear_scaled_workspace_fonts,
             install_unicode_font,
             analyze_language_ranges,

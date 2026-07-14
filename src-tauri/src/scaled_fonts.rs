@@ -13,6 +13,13 @@ pub struct ScaledFontResult {
     pub changed: bool,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScaledFontRequest {
+    pub family: String,
+    pub scale: f32,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ScaledFontManifest<'a> {
@@ -53,16 +60,28 @@ fn current_manifest(generated_dir: &Path) -> Option<StoredScaledFontManifest> {
         .then_some(manifest)
 }
 
+fn generated_family_dir(workspace_root: &Path, family: &str) -> PathBuf {
+    workspace_root
+        .join(".typsastra")
+        .join("fonts")
+        .join("generated")
+        .join(safe_file_stem(&family.to_ascii_lowercase()))
+}
+
 pub fn scaled_workspace_font_update_required(
     workspace_root: &Path,
     family: &str,
     scale: f32,
 ) -> Result<bool, String> {
     validate_request(workspace_root, family, scale)?;
-    let generated_dir = workspace_root
+    let generated_root = workspace_root
         .join(".typsastra")
         .join("fonts")
         .join("generated");
+    if generated_root.join("manifest.json").is_file() {
+        return Ok(true);
+    }
+    let generated_dir = generated_family_dir(workspace_root, family);
     if (scale - 1.0).abs() <= 0.0001 {
         return Ok(generated_dir.exists());
     }
@@ -70,6 +89,48 @@ pub fn scaled_workspace_font_update_required(
         return Ok(true);
     };
     Ok(!manifest.family.eq_ignore_ascii_case(family) || (manifest.scale - scale).abs() > 0.0001)
+}
+
+pub fn scaled_workspace_font_set_update_required(
+    workspace_root: &Path,
+    requests: &[ScaledFontRequest],
+) -> Result<bool, String> {
+    let generated_root = workspace_root
+        .join(".typsastra")
+        .join("fonts")
+        .join("generated");
+    if generated_root.join("manifest.json").is_file() {
+        return Ok(true);
+    }
+    let desired: std::collections::BTreeMap<String, f32> = requests
+        .iter()
+        .filter(|request| (request.scale - 1.0).abs() > 0.0001)
+        .map(|request| {
+            validate_request(workspace_root, &request.family, request.scale)?;
+            Ok((request.family.to_lowercase(), request.scale))
+        })
+        .collect::<Result<_, String>>()?;
+    let mut current = std::collections::BTreeMap::new();
+    if generated_root.is_dir() {
+        for entry in fs::read_dir(&generated_root)
+            .map_err(|error| format!("Failed to inspect {}: {error}", generated_root.display()))?
+        {
+            let path = entry.map_err(|error| error.to_string())?.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let Some(manifest) = current_manifest(&path) else {
+                return Ok(true);
+            };
+            current.insert(manifest.family.to_lowercase(), manifest.scale);
+        }
+    }
+    Ok(desired.len() != current.len()
+        || desired.iter().any(|(family, scale)| {
+            current
+                .get(family)
+                .is_none_or(|current_scale| (current_scale - scale).abs() > 0.0001)
+        }))
 }
 
 fn safe_file_stem(value: &str) -> String {
@@ -120,7 +181,12 @@ pub fn prepare_scaled_workspace_font(
     validate_request(workspace_root, family, scale)?;
 
     let fonts_dir = workspace_root.join(".typsastra").join("fonts");
-    let generated_dir = fonts_dir.join("generated");
+    let generated_root = fonts_dir.join("generated");
+    if generated_root.join("manifest.json").is_file() {
+        fs::remove_dir_all(&generated_root)
+            .map_err(|error| format!("Failed to migrate {}: {error}", generated_root.display()))?;
+    }
+    let generated_dir = generated_family_dir(workspace_root, family);
     if !scaled_workspace_font_update_required(workspace_root, family, scale)? {
         let generated_files = current_manifest(&generated_dir)
             .map(|manifest| manifest.files)
@@ -138,6 +204,13 @@ pub fn prepare_scaled_workspace_font(
             .map_err(|error| format!("Failed to replace {}: {error}", generated_dir.display()))?;
     }
     if (scale - 1.0).abs() <= 0.0001 {
+        if generated_root.is_dir()
+            && fs::read_dir(&generated_root)
+                .map(|mut entries| entries.next().is_none())
+                .unwrap_or(false)
+        {
+            let _ = fs::remove_dir(&generated_root);
+        }
         return Ok(ScaledFontResult {
             directory: generated_dir,
             family: family.to_string(),
@@ -267,7 +340,7 @@ mod tests {
     #[test]
     fn unit_scale_removes_previous_scaled_output_once() {
         let workspace = tempfile::tempdir().unwrap();
-        let generated = workspace.path().join(".typsastra/fonts/generated");
+        let generated = generated_family_dir(workspace.path(), "MiSans Khmer");
         fs::create_dir_all(&generated).unwrap();
         fs::write(generated.join("old.ttf"), b"font").unwrap();
         fs::write(
@@ -296,7 +369,7 @@ mod tests {
     #[test]
     fn matching_generated_font_is_reused() {
         let workspace = tempfile::tempdir().unwrap();
-        let generated = workspace.path().join(".typsastra/fonts/generated");
+        let generated = generated_family_dir(workspace.path(), "MiSans Khmer");
         fs::create_dir_all(&generated).unwrap();
         fs::write(generated.join("cached.ttf"), b"font").unwrap();
         fs::write(
@@ -317,5 +390,69 @@ mod tests {
         let result = prepare_scaled_workspace_font(workspace.path(), "MiSans Khmer", 1.2).unwrap();
         assert!(!result.changed);
         assert_eq!(result.generated_files, vec!["cached.ttf"]);
+    }
+
+    #[test]
+    fn removing_one_scaled_family_preserves_the_others() {
+        let workspace = tempfile::tempdir().unwrap();
+        for (family, scale) in [("MiSans Khmer", 1.2), ("MiSans Lao", 1.1)] {
+            let generated = generated_family_dir(workspace.path(), family);
+            fs::create_dir_all(&generated).unwrap();
+            fs::write(generated.join("cached.ttf"), b"font").unwrap();
+            fs::write(
+                generated.join("manifest.json"),
+                serde_json::json!({
+                    "version": 1,
+                    "family": family,
+                    "scale": scale,
+                    "files": ["cached.ttf"]
+                })
+                .to_string(),
+            )
+            .unwrap();
+        }
+
+        prepare_scaled_workspace_font(workspace.path(), "MiSans Khmer", 1.0).unwrap();
+        assert!(!generated_family_dir(workspace.path(), "MiSans Khmer").exists());
+        assert!(generated_family_dir(workspace.path(), "MiSans Lao").exists());
+        assert!(
+            !scaled_workspace_font_update_required(workspace.path(), "MiSans Lao", 1.1).unwrap()
+        );
+    }
+
+    #[test]
+    fn scaled_family_set_detects_additions_and_removals() {
+        let workspace = tempfile::tempdir().unwrap();
+        let generated = generated_family_dir(workspace.path(), "MiSans Khmer");
+        fs::create_dir_all(&generated).unwrap();
+        fs::write(generated.join("cached.ttf"), b"font").unwrap();
+        fs::write(
+            generated.join("manifest.json"),
+            serde_json::json!({
+                "version": 1,
+                "family": "MiSans Khmer",
+                "scale": 1.2,
+                "files": ["cached.ttf"]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let matching = [ScaledFontRequest {
+            family: "MiSans Khmer".into(),
+            scale: 1.2,
+        }];
+        assert!(!scaled_workspace_font_set_update_required(workspace.path(), &matching).unwrap());
+        assert!(scaled_workspace_font_set_update_required(workspace.path(), &[]).unwrap());
+        let added = [
+            ScaledFontRequest {
+                family: "MiSans Khmer".into(),
+                scale: 1.2,
+            },
+            ScaledFontRequest {
+                family: "MiSans Lao".into(),
+                scale: 1.1,
+            },
+        ];
+        assert!(scaled_workspace_font_set_update_required(workspace.path(), &added).unwrap());
     }
 }

@@ -53,13 +53,6 @@ struct DirectDownloadSpec {
 
 const DOWNLOADS: &[DownloadSpec] = &[
     DownloadSpec {
-        id: "mi-sans",
-        family: "MiSans",
-        archive: "MiSans",
-        regular_file: "MiSans-Regular.ttf",
-        bold_file: "MiSans-Bold.ttf",
-    },
-    DownloadSpec {
         id: "mi-sans-arabic",
         family: "MiSans Arabic",
         archive: "MiSans_Arabic",
@@ -138,6 +131,7 @@ const DIRECT_DOWNLOADS: &[DirectDownloadSpec] = &[
     DirectDownloadSpec { id: "noto-sans-ethiopic", family: "Noto Sans Ethiopic", url: "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansethiopic/NotoSansEthiopic%5Bwdth%2Cwght%5D.ttf", file_name: "NotoSansEthiopic-Variable.ttf" },
     DirectDownloadSpec { id: "noto-sans-jp", family: "Noto Sans JP", url: "https://raw.githubusercontent.com/google/fonts/main/ofl/notosansjp/NotoSansJP%5Bwght%5D.ttf", file_name: "NotoSansJP-Variable.ttf" },
     DirectDownloadSpec { id: "noto-sans-kr", family: "Noto Sans KR", url: "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf", file_name: "NotoSansKR-Variable.ttf" },
+    DirectDownloadSpec { id: "noto-sans-sc", family: "Noto Sans SC", url: "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf", file_name: "NotoSansSC-Variable.ttf" },
 ];
 
 #[derive(Serialize)]
@@ -344,6 +338,47 @@ pub fn list_system_fonts() -> SystemFontCatalog {
             .map(|(script, families)| (script, families.into_iter().collect()))
             .collect(),
     }
+}
+
+pub fn font_families_supporting_text(families: &[String], characters: &str) -> Vec<String> {
+    let required: Vec<char> = characters
+        .chars()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    if required.is_empty() {
+        return Vec::new();
+    }
+    let requested: BTreeSet<String> = families
+        .iter()
+        .map(|family| family.to_lowercase())
+        .collect();
+    let mut supported = BTreeSet::new();
+    let mut database = fontdb::Database::new();
+    database.load_system_fonts();
+    for face in database.faces() {
+        let matching: Vec<String> = face
+            .families
+            .iter()
+            .map(|(family, _)| family)
+            .filter(|family| requested.contains(&family.to_lowercase()))
+            .cloned()
+            .collect();
+        if matching.is_empty() {
+            continue;
+        }
+        let covers_text = database
+            .with_face_data(face.id, |data, face_index| {
+                ttf_parser::Face::parse(data, face_index)
+                    .map(|parsed| parsed_face_supports_samples(&parsed, &required))
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        if covers_text {
+            supported.extend(matching);
+        }
+    }
+    supported.into_iter().collect()
 }
 
 fn valid_font(bytes: &[u8]) -> bool {

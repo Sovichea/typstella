@@ -4,7 +4,7 @@ import { undo, redo } from "@codemirror/commands";
 import { openSearchPanel } from "@codemirror/search";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  detectDocumentScript,
+  detectDocumentScripts,
   documentScripts,
   parseTypographyBlock,
   preferredInstalledFamily,
@@ -63,16 +63,16 @@ export class EditorToolbarController {
   private typographyDefaults: DocumentTypography = {
     latinFont: "MiSans Latin",
     latinSizePt: 11,
-    complexFont: "MiSans Latin",
-    complexScript: "khmer",
-    complexScale: 1
+    fallbacks: []
   };
   private rememberedTypography: DocumentTypography | null = null;
+  private coverageGeneration = 0;
 
   constructor(private readonly dependencies: EditorToolbarDependencies) {}
 
   public initialize(): void {
     void this.initializeTypographyControls();
+    document.addEventListener("typsastra:system-fonts-changed", () => void this.initializeTypographyControls());
     document.getElementById("toolbar-typography-apply")?.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
@@ -83,16 +83,15 @@ export class EditorToolbarController {
       event.stopPropagation();
       this.applyDocumentTypography("template");
     });
-    document.getElementById("toolbar-complex-script")?.addEventListener("change", event => {
-      const scriptId = (event.currentTarget as HTMLSelectElement).value;
-      this.populateComplexFontOptions(scriptId);
-      this.updateScriptHint(scriptId, null);
+    document.getElementById("toolbar-add-fallback")?.addEventListener("click", event => {
+      event.preventDefault();
+      const used = new Set(this.fallbackRows().map(row => this.rowScript(row).value));
+      const script = documentScripts.find(candidate => !used.has(candidate.id)) ?? documentScripts[0];
+      this.fallbackContainer()?.append(this.createFallbackRow({ script: script.id, family: "", scale: 1 }));
       this.updateTypographyAvailability();
     });
     document.getElementById("toolbar-latin-font")?.addEventListener("change", () => this.updateTypographyAvailability());
-    document.getElementById("toolbar-complex-font")?.addEventListener("change", () => this.updateTypographyAvailability());
     document.getElementById("toolbar-latin-enable")?.addEventListener("change", () => this.updateTypographyAvailability());
-    document.getElementById("toolbar-complex-enable")?.addEventListener("change", () => this.updateTypographyAvailability());
     this.toolbar.addEventListener("pointerdown", event => {
       const target = event.target as HTMLElement;
       if (target.closest("[data-tool]") || target.closest(".toolbar-dropdown-btn")) event.preventDefault();
@@ -126,7 +125,6 @@ export class EditorToolbarController {
 
   private async initializeTypographyControls(): Promise<void> {
     this.rememberedTypography = this.loadRememberedTypography();
-    this.populateScriptOptions();
     try {
       const catalog = await invoke<{ all: string[]; scripts: Record<string, string[]> }>("list_system_fonts");
       this.systemFontFamilies = [...new Set(catalog.all)].sort((left, right) => left.localeCompare(right));
@@ -138,25 +136,12 @@ export class EditorToolbarController {
     this.syncTypographyControls();
   }
 
-  private populateScriptOptions(): void {
-    const select = document.getElementById("toolbar-complex-script") as HTMLSelectElement | null;
-    if (!select) return;
-    select.replaceChildren(...documentScripts.map(script => {
-      const option = document.createElement("option");
-      option.value = script.id;
-      option.textContent = script.label;
-      return option;
-    }));
-  }
-
   private populateDocumentFontOptions(): void {
     const latin = document.getElementById("toolbar-latin-font") as HTMLSelectElement | null;
     if (latin) latin.replaceChildren(
       this.emptyFontOption("Do not set Latin font"),
       ...this.fontOptions(this.systemFontFamilies)
     );
-    const script = (document.getElementById("toolbar-complex-script") as HTMLSelectElement | null)?.value ?? documentScripts[0].id;
-    this.populateComplexFontOptions(script, this.typographyDefaults.complexFont);
   }
 
   private emptyFontOption(label: string): HTMLOptionElement {
@@ -175,9 +160,31 @@ export class EditorToolbarController {
     });
   }
 
-  private populateComplexFontOptions(scriptId: string, preferredFont?: string | null): string[] {
-    const select = document.getElementById("toolbar-complex-font") as HTMLSelectElement | null;
-    const supported = [...new Set(this.scriptFontFamilies[scriptId] ?? [])]
+  private supportedFonts(scriptId: string): string[] {
+    return [...new Set(this.scriptFontFamilies[scriptId] ?? [])]
+      .sort((left, right) => left.localeCompare(right));
+  }
+
+  private fallbackContainer(): HTMLElement | null {
+    return document.getElementById("toolbar-font-fallbacks");
+  }
+
+  private fallbackRows(): HTMLElement[] {
+    return Array.from(this.fallbackContainer()?.querySelectorAll<HTMLElement>(".toolbar-font-fallback-row") ?? []);
+  }
+
+  private rowScript(row: HTMLElement): HTMLSelectElement {
+    return row.querySelector<HTMLSelectElement>("[data-fallback-script]")!;
+  }
+
+  private populateRowFonts(
+    row: HTMLElement,
+    scriptId: string,
+    preferredFont?: string | null,
+    coverageFamilies?: readonly string[]
+  ): string[] {
+    const select = row.querySelector<HTMLSelectElement>("[data-fallback-font]");
+    const supported = [...new Set(coverageFamilies ?? this.scriptFontFamilies[scriptId] ?? [])]
       .sort((left, right) => left.localeCompare(right));
     if (!select) return supported;
     const previous = preferredFont === null ? "" : preferredFont ?? select.value;
@@ -197,95 +204,136 @@ export class EditorToolbarController {
       select.value = "";
     }
     select.disabled = false;
+    const hint = row.querySelector<HTMLElement>("[data-fallback-hint]");
+    if (hint) hint.textContent = supported.length > 0
+      ? `${supported.length} compatible installed font${supported.length === 1 ? "" : "s"}.`
+      : "No compatible installed font.";
     this.updateTypographyAvailability();
     return supported;
+  }
+
+  private createFallbackRow(fallback: { script: string; family: string; scale: number }, detected = false): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "toolbar-font-fallback-row";
+    const script = document.createElement("select");
+    script.dataset.fallbackScript = "";
+    script.replaceChildren(...documentScripts.map(candidate => {
+      const option = document.createElement("option");
+      option.value = candidate.id;
+      option.textContent = candidate.label;
+      return option;
+    }));
+    script.value = fallback.script;
+    const font = document.createElement("select");
+    font.dataset.fallbackFont = "";
+    const scale = document.createElement("input");
+    scale.dataset.fallbackScale = "";
+    scale.type = "number";
+    scale.min = "0.5";
+    scale.max = "2";
+    scale.step = "0.01";
+    scale.value = String(fallback.scale);
+    scale.setAttribute("aria-label", "Script font scale");
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "toolbar-remove-fallback";
+    remove.textContent = "Remove";
+    const hint = document.createElement("div");
+    hint.dataset.fallbackHint = "";
+    hint.className = "toolbar-typography-hint";
+    row.append(script, font, scale, remove, hint);
+    this.populateRowFonts(row, fallback.script, fallback.family || undefined);
+    if (detected) hint.textContent = `Detected ${documentScripts.find(item => item.id === fallback.script)?.label}. ${hint.textContent}`;
+    script.addEventListener("change", () => {
+      this.populateRowFonts(row, script.value);
+      this.updateTypographyAvailability();
+    });
+    font.addEventListener("change", () => this.updateTypographyAvailability());
+    remove.addEventListener("click", () => {
+      row.remove();
+      this.updateTypographyAvailability();
+    });
+    return row;
+  }
+
+  private async refineFallbackCoverage(text: string): Promise<void> {
+    const generation = ++this.coverageGeneration;
+    await Promise.all(this.fallbackRows().map(async row => {
+      const scriptId = this.rowScript(row).value;
+      const script = documentScripts.find(candidate => candidate.id === scriptId);
+      if (!script) return;
+      script.pattern.lastIndex = 0;
+      const characters = [...new Set([...text.matchAll(script.pattern)].map(match => match[0]))].join("");
+      if (!characters) return;
+      const selected = row.querySelector<HTMLSelectElement>("[data-fallback-font]")?.value ?? "";
+      try {
+        const families = await invoke<string[]>("font_families_supporting_text", {
+          families: this.systemFontFamilies,
+          characters
+        });
+        if (generation !== this.coverageGeneration || !row.isConnected || this.rowScript(row).value !== scriptId) return;
+        this.populateRowFonts(row, scriptId, selected, families);
+        const hint = row.querySelector<HTMLElement>("[data-fallback-hint]");
+        if (hint) hint.textContent = families.length > 0
+          ? `${families.length} installed font${families.length === 1 ? "" : "s"} cover every ${script.label} character used.`
+          : `No installed font covers every ${script.label} character used.`;
+      } catch (error) {
+        console.warn(`Unable to inspect ${script.label} font coverage.`, error);
+      }
+    }));
   }
 
   private syncTypographyControls(): void {
     const text = this.dependencies.getEditor().state.doc.toString();
     const existing = parseTypographyBlock(text);
     const preferred = existing ?? this.rememberedTypography;
-    const detected = detectDocumentScript(text);
-    const script = preferred
-      ? documentScripts.find(candidate => candidate.id === preferred.complexScript) ?? detected ?? documentScripts[0]
-      : detected ?? documentScripts[0];
+    const detected = detectDocumentScripts(text);
     const defaultLatinFont = this.systemFontFamilies.find(family => family === "Calibri")
       ?? this.systemFontFamilies.find(family => family === "MiSans Latin")
       ?? this.systemFontFamilies[0]
       ?? null;
     const latinFont = preferred ? preferred.latinFont : defaultLatinFont;
-    const preferredComplexFont = preferred
-      ? preferred.complexFont
-      : preferredInstalledFamily(script, this.scriptFontFamilies[script.id] ?? []);
-    const supportedFonts = this.populateComplexFontOptions(script.id, preferredComplexFont);
-    const complexFont = preferredComplexFont === null
-      ? null
-      : supportedFonts.find(family => family === preferredComplexFont)
-        ?? preferredInstalledFamily(script, supportedFonts)
-        ?? supportedFonts[0]
-        ?? null;
+    const fallbacks = preferred?.fallbacks ?? detected.map(script => ({
+      script: script.id,
+      family: preferredInstalledFamily(script, this.supportedFonts(script.id)) ?? this.supportedFonts(script.id)[0] ?? "",
+      scale: 1
+    }));
     this.typographyDefaults = {
       latinFont,
       latinSizePt: preferred?.latinSizePt ?? 11,
-      complexFont,
-      complexScript: script.id,
-      complexScale: preferred?.complexScale ?? 1
+      fallbacks
     };
     const latinEnable = document.getElementById("toolbar-latin-enable") as HTMLInputElement | null;
     if (latinEnable) {
       latinEnable.checked = preferred ? preferred.latinFont !== null : true;
     }
-    const complexEnable = document.getElementById("toolbar-complex-enable") as HTMLInputElement | null;
-    if (complexEnable) {
-      complexEnable.checked = preferred ? preferred.complexFont !== null : true;
-    }
     this.setTypographyControl("toolbar-latin-font", latinFont ?? "");
     this.setTypographyControl("toolbar-latin-size", String(this.typographyDefaults.latinSizePt));
-    this.setTypographyControl("toolbar-complex-script", script.id);
-    this.setTypographyControl("toolbar-complex-font", complexFont ?? "");
-    this.setTypographyControl("toolbar-complex-adjustment", String(this.typographyDefaults.complexScale));
-    this.updateScriptHint(script.id, detected?.id === script.id ? detected.label : null);
+    this.fallbackContainer()?.replaceChildren(...fallbacks.map(fallback =>
+      this.createFallbackRow(fallback, detected.some(script => script.id === fallback.script))
+    ));
+    void this.refineFallbackCoverage(text);
     this.updateTypographyAvailability();
   }
 
   private updateTypographyAvailability(): void {
     const latinEnable = document.getElementById("toolbar-latin-enable") as HTMLInputElement | null;
-    const complexEnable = document.getElementById("toolbar-complex-enable") as HTMLInputElement | null;
-
     const latin = document.getElementById("toolbar-latin-font") as HTMLSelectElement | null;
-    const complex = document.getElementById("toolbar-complex-font") as HTMLSelectElement | null;
     const latinSize = document.getElementById("toolbar-latin-size") as HTMLInputElement | null;
-    const complexScript = document.getElementById("toolbar-complex-script") as HTMLSelectElement | null;
-    const complexAdjustment = document.getElementById("toolbar-complex-adjustment") as HTMLInputElement | null;
     const apply = document.getElementById("toolbar-typography-apply") as HTMLButtonElement | null;
     const applyTemplate = document.getElementById("toolbar-typography-apply-template") as HTMLButtonElement | null;
 
     const isLatinEnabled = latinEnable?.checked ?? true;
-    const isComplexEnabled = complexEnable?.checked ?? true;
 
     if (latin) latin.disabled = !isLatinEnabled;
     if (latinSize) latinSize.disabled = !isLatinEnabled || !latin?.value;
 
-    if (complexScript) complexScript.disabled = !isComplexEnabled;
-    if (complex) complex.disabled = !isComplexEnabled;
-    if (complexAdjustment) complexAdjustment.disabled = !isComplexEnabled || !complex?.value;
-
     if (apply) {
       const hasLatin = isLatinEnabled && !!latin?.value;
-      const hasComplex = isComplexEnabled && !!complex?.value;
+      const hasComplex = this.fallbackRows().some(row => !!row.querySelector<HTMLSelectElement>("[data-fallback-font]")?.value);
       apply.disabled = !hasLatin && !hasComplex;
       if (applyTemplate) applyTemplate.disabled = apply.disabled;
     }
-  }
-
-  private updateScriptHint(scriptId: string, detectedLabel: string | null): void {
-    const hint = document.getElementById("toolbar-complex-script-hint");
-    if (!hint) return;
-    const count = this.scriptFontFamilies[scriptId]?.length ?? 0;
-    const prefix = detectedLabel ? `Detected ${detectedLabel}. ` : "";
-    hint.textContent = count > 0
-      ? `${prefix}${count} compatible installed font${count === 1 ? "" : "s"}.`
-      : `${prefix}No installed font provides the required glyph coverage.`;
   }
 
   private setTypographyControl(id: string, value: string): void {
@@ -303,19 +351,23 @@ export class EditorToolbarController {
   private applyDocumentTypography(target: "document" | "template"): void {
     const value = (id: string) => (document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null)?.value ?? "";
     const latinEnable = document.getElementById("toolbar-latin-enable") as HTMLInputElement | null;
-    const complexEnable = document.getElementById("toolbar-complex-enable") as HTMLInputElement | null;
     const isLatinEnabled = latinEnable?.checked ?? true;
-    const isComplexEnabled = complexEnable?.checked ?? true;
 
     const latinFont = isLatinEnabled ? (value("toolbar-latin-font") || null) : null;
-    const complexFont = isComplexEnabled ? (value("toolbar-complex-font") || null) : null;
-    if (!latinFont && !complexFont) return;
+    const fallbacks = this.fallbackRows().flatMap(row => {
+      const family = row.querySelector<HTMLSelectElement>("[data-fallback-font]")?.value ?? "";
+      if (!family) return [];
+      return [{
+        family,
+        script: this.rowScript(row).value,
+        scale: this.boundedTypographyNumber(row.querySelector<HTMLInputElement>("[data-fallback-scale]")?.value ?? "1", 0.5, 2, 1)
+      }];
+    });
+    if (!latinFont && fallbacks.length === 0) return;
     const config: DocumentTypography = {
       latinFont,
       latinSizePt: this.boundedTypographyNumber(value("toolbar-latin-size"), 6, 96, this.typographyDefaults.latinSizePt),
-      complexFont,
-      complexScript: value("toolbar-complex-script") || this.typographyDefaults.complexScript,
-      complexScale: this.boundedTypographyNumber(value("toolbar-complex-adjustment"), 0.5, 2, 1)
+      fallbacks
     };
     void this.dependencies.applyTypography(config, target);
     this.typographyDefaults = config;
@@ -328,24 +380,33 @@ export class EditorToolbarController {
     try {
       const value: unknown = JSON.parse(localStorage.getItem(typographyChoiceStorageKey) ?? "null");
       if (!value || typeof value !== "object") return null;
-      const candidate = value as Partial<DocumentTypography>;
+      const candidate = value as Partial<DocumentTypography> & {
+        complexFont?: string | null;
+        complexScript?: string;
+        complexScale?: number;
+      };
       const validFont = (font: unknown): font is string | null => font === null || typeof font === "string";
       if (
         !validFont(candidate.latinFont)
-        || !validFont(candidate.complexFont)
         || typeof candidate.latinSizePt !== "number"
         || !Number.isFinite(candidate.latinSizePt)
-        || typeof candidate.complexScale !== "number"
-        || !Number.isFinite(candidate.complexScale)
-        || typeof candidate.complexScript !== "string"
-        || !documentScripts.some(script => script.id === candidate.complexScript)
       ) return null;
+      const rawFallbacks = Array.isArray(candidate.fallbacks)
+        ? candidate.fallbacks
+        : candidate.complexFont && candidate.complexScript
+          ? [{ family: candidate.complexFont, script: candidate.complexScript, scale: candidate.complexScale ?? 1 }]
+          : [];
+      const fallbacks = rawFallbacks.flatMap(fallback =>
+        fallback && typeof fallback.family === "string"
+          && typeof fallback.script === "string"
+          && documentScripts.some(script => script.id === fallback.script)
+          ? [{ family: fallback.family, script: fallback.script, scale: this.boundedTypographyNumber(String(fallback.scale), 0.5, 2, 1) }]
+          : []
+      );
       return {
         latinFont: candidate.latinFont,
         latinSizePt: this.boundedTypographyNumber(String(candidate.latinSizePt), 6, 96, 11),
-        complexFont: candidate.complexFont,
-        complexScript: candidate.complexScript,
-        complexScale: this.boundedTypographyNumber(String(candidate.complexScale), 0.5, 2, 1)
+        fallbacks
       };
     } catch {
       return null;

@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { editorFontCompartment } from "./extensions";
 import {
   codeEditorFontStack,
-  detectUnicodeEditorFont,
+  detectUnicodeEditorFonts,
   unicodeEditorFonts,
   type CodeEditorFontId,
   type UnicodeFontPreference
@@ -19,9 +19,9 @@ const declinedStorageKey = "typsastra-declined-unicode-fonts";
 export class EditorFontManager {
   private codeFont: CodeEditorFontId = "Fira Mono";
   private unicodePreference: UnicodeFontPreference = "auto";
+  private unicodePreferences: Record<string, UnicodeFontPreference> = {};
   private documentText = "";
-  private activeCandidate: UnicodeFontCandidate | null = null;
-  private activeNoticeId: string | null = null;
+  private activeCandidates: UnicodeFontCandidate[] = [];
   private appliedStack = "";
   private showSettingsAction = false;
   private dismissDeclines = false;
@@ -37,13 +37,13 @@ export class EditorFontManager {
     this.download.addEventListener("click", () => {
       if (this.showSettingsAction) {
         document.dispatchEvent(new CustomEvent("typsastra:open-settings", { detail: { panel: "editor" } }));
-      } else if (this.activeCandidate) {
-        void this.installAndApply(this.activeCandidate);
+      } else if (this.activeCandidates.length > 0) {
+        void this.installAndApply(this.activeCandidates);
       }
     });
     this.dismiss.addEventListener("click", () => {
-      if (this.dismissDeclines && this.activeNoticeId) {
-        this.markDeclined(this.activeNoticeId);
+      if (this.dismissDeclines && this.activeCandidates.length > 0) {
+        this.activeCandidates.forEach(candidate => this.markDeclined(candidate.id));
         this.renderDeclined();
       } else {
         this.hide();
@@ -52,9 +52,14 @@ export class EditorFontManager {
     void this.refreshSystemFonts();
   }
 
-  public configure(codeFont: CodeEditorFontId, unicodeFont: UnicodeFontPreference): void {
+  public configure(
+    codeFont: CodeEditorFontId,
+    unicodeFont: UnicodeFontPreference,
+    unicodeFonts: Record<string, UnicodeFontPreference> = {}
+  ): void {
     this.codeFont = codeFont;
     this.unicodePreference = unicodeFont;
+    this.unicodePreferences = unicodeFonts;
     this.refresh();
   }
 
@@ -75,48 +80,42 @@ export class EditorFontManager {
   }
 
   private refresh(): void {
-    if (this.unicodePreference === "none") {
-      this.activeCandidate = null;
-      this.activeNoticeId = null;
-      this.hide();
-      this.applyStack();
-      return;
+    const detected = detectUnicodeEditorFonts(this.documentText);
+    const families: string[] = [];
+    const missing: UnicodeFontCandidate[] = [];
+    for (const candidate of detected) {
+      const preference = this.unicodePreferences[candidate.id] ?? this.unicodePreference;
+      if (preference === "none") continue;
+      const family = preference === "auto" ? candidate.fontFamily : preference;
+      families.push(family);
+      if (preference === "auto" && !candidate.bundled && !this.systemFamilies.has(family.toLocaleLowerCase())) {
+        missing.push(candidate);
+      }
     }
-    if (this.unicodePreference !== "auto") {
-      this.activeCandidate = null;
-      this.activeNoticeId = null;
-      this.hide();
-      this.applyStack(this.unicodePreference);
-      return;
+    if (detected.length === 0 && this.unicodePreference !== "auto" && this.unicodePreference !== "none") {
+      families.push(this.unicodePreference);
     }
-
-    const candidate = detectUnicodeEditorFont(this.documentText);
-    this.activeCandidate = candidate;
-    if (!candidate) {
-      this.activeNoticeId = null;
-      this.applyStack();
+    this.applyStack(families);
+    this.activeCandidates = missing;
+    if (missing.length === 0) {
       this.hide();
       return;
     }
-    this.activeNoticeId = candidate.id;
-    if (candidate.bundled || this.systemFamilies.has(candidate.fontFamily.toLocaleLowerCase())) {
-      this.hide();
-      this.applyStack(candidate.fontFamily);
-      return;
-    }
-    this.applyStack(candidate.fontFamily);
-    if (this.declinedIds().has(candidate.id)) {
+    const declined = this.declinedIds();
+    this.activeCandidates = missing.filter(candidate => !declined.has(candidate.id));
+    if (this.activeCandidates.length === 0) {
       this.hide();
       return;
     }
-    this.renderPrompt(candidate);
+    this.renderPrompt(this.activeCandidates);
   }
 
-  private renderPrompt(candidate: UnicodeFontCandidate): void {
+  private renderPrompt(candidates: UnicodeFontCandidate[]): void {
     this.showSettingsAction = false;
     this.dismissDeclines = true;
-    this.text.textContent = `${candidate.language} text detected. Download and install ${candidate.label} for consistent Unicode rendering?`;
-    this.download.textContent = `Install ${candidate.label}`;
+    const languages = candidates.map(candidate => candidate.language).join(", ");
+    this.text.textContent = `${languages} text detected. Install ${candidates.length === 1 ? candidates[0].label : `${candidates.length} recommended fallback fonts`} for consistent Unicode rendering?`;
+    this.download.textContent = candidates.length === 1 ? `Install ${candidates[0].label}` : "Install recommended fonts";
     this.download.disabled = false;
     this.download.classList.remove("hidden");
     this.dismiss.textContent = "Not now";
@@ -135,19 +134,19 @@ export class EditorFontManager {
     this.dismiss.setAttribute("aria-label", "Close font notice");
   }
 
-  private renderDownloading(candidate: UnicodeFontCandidate): void {
+  private renderDownloading(candidates: UnicodeFontCandidate[]): void {
     this.showSettingsAction = false;
     this.dismissDeclines = false;
-    this.text.textContent = `Downloading and installing ${candidate.label} for the current user...`;
+    this.text.textContent = `Downloading and installing ${candidates.length === 1 ? candidates[0].label : `${candidates.length} fallback fonts`} for the current user...`;
     this.download.classList.add("hidden");
     this.dismiss.classList.add("hidden");
     this.breadcrumb.classList.remove("hidden");
   }
 
-  private renderApplied(candidate: UnicodeFontCandidate): void {
+  private renderApplied(candidates: UnicodeFontCandidate[]): void {
     this.showSettingsAction = false;
     this.dismissDeclines = false;
-    this.text.textContent = `${candidate.label} was installed for the current user and selected automatically.`;
+    this.text.textContent = `${candidates.length === 1 ? candidates[0].label : `${candidates.length} fallback fonts`} ${candidates.length === 1 ? "was" : "were"} installed and selected automatically.`;
     this.download.classList.add("hidden");
     this.dismiss.textContent = "Close";
     this.dismiss.setAttribute("aria-label", "Close font notice");
@@ -175,21 +174,27 @@ export class EditorFontManager {
     localStorage.setItem(declinedStorageKey, JSON.stringify([...declined]));
   }
 
-  private async installAndApply(candidate: UnicodeFontCandidate): Promise<void> {
-    if (this.activeCandidate?.id !== candidate.id) return;
-    this.renderDownloading(candidate);
+  private async installAndApply(candidates: UnicodeFontCandidate[]): Promise<void> {
+    if (candidates.some(candidate => !this.activeCandidates.some(active => active.id === candidate.id))) return;
+    this.renderDownloading(candidates);
     try {
-      const installed = await invoke<InstalledFont>("install_unicode_font", { fontId: candidate.id });
-      this.systemFamilies.add(installed.family.toLocaleLowerCase());
-      await document.fonts.load(`16px "${installed.family}"`);
-      if (this.activeCandidate?.id !== candidate.id) return;
-      this.applyStack(installed.family);
-      this.renderApplied(candidate);
+      for (const candidate of candidates) {
+        const installed = await invoke<InstalledFont>("install_unicode_font", { fontId: candidate.id });
+        this.systemFamilies.add(installed.family.toLocaleLowerCase());
+        await document.fonts.load(`16px "${installed.family}"`);
+      }
+      if (candidates.some(candidate => !this.activeCandidates.some(active => active.id === candidate.id))) return;
+      this.applyStack(detectUnicodeEditorFonts(this.documentText).flatMap(candidate => {
+        const preference = this.unicodePreferences[candidate.id] ?? this.unicodePreference;
+        if (preference === "none") return [];
+        return [preference === "auto" ? candidate.fontFamily : preference];
+      }));
+      this.renderApplied(candidates);
       document.dispatchEvent(new Event("typsastra:system-fonts-changed"));
     } catch (error) {
       this.showSettingsAction = false;
       this.dismissDeclines = false;
-      this.text.textContent = `Could not install ${candidate.label}: ${String(error)}`;
+      this.text.textContent = `Could not install the recommended fallback fonts: ${String(error)}`;
       this.download.textContent = "Retry";
       this.download.disabled = false;
       this.download.classList.remove("hidden");
@@ -199,14 +204,14 @@ export class EditorFontManager {
     }
   }
 
-  private applyStack(unicodeFamily?: string): void {
-    const stack = codeEditorFontStack(this.codeFont, unicodeFamily);
-    const uiStack = [...new Set(["MiSans Latin", unicodeFamily].filter((family): family is string => !!family))]
+  private applyStack(unicodeFamilies: readonly string[] = []): void {
+    const stack = codeEditorFontStack(this.codeFont, unicodeFamilies);
+    const uiStack = [...new Set(["MiSans Latin", ...unicodeFamilies])]
       .map(family => `"${family.replace(/"/g, '\\"')}"`)
       .join(", ");
     document.documentElement.style.setProperty("--ui-font", uiStack);
     document.documentElement.style.setProperty("--editor-code-font", stack);
-    document.documentElement.style.setProperty("--editor-unicode-font", unicodeFamily ? `"${unicodeFamily}"` : "sans-serif");
+    document.documentElement.style.setProperty("--editor-unicode-font", unicodeFamilies.length > 0 ? uiStack : "sans-serif");
     if (this.appliedStack === stack) return;
     this.appliedStack = stack;
     this.getEditorView()?.dispatch({ effects: editorFontCompartment.reconfigure(editorFontTheme(stack)) });
