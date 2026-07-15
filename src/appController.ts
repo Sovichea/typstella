@@ -902,6 +902,10 @@ export class TypsastraWorkspaceController {
             } else if (update.docChanged) {
               this.logConsoleController.setActiveSpellcheckLocation(null);
             }
+            if (update.viewportChanged) {
+              const topVisiblePosition = update.view.lineBlockAtHeight(update.view.scrollDOM.scrollTop).from;
+              this.documentOutlineController.setCursorPosition(topVisiblePosition, this.activeFilePath);
+            }
             if (!update.docChanged && this.shouldForwardSyncSelectionUpdate(update)) {
               this.previewSyncController.schedule(this.forwardSyncDebounceMs);
             }

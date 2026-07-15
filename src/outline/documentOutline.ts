@@ -175,6 +175,7 @@ export class DocumentOutlineController {
   private readonly collapsed = new Set<string>();
   private cursor = 0;
   private activePath: string | null = null;
+  private activeHeadingKey: string | null = null;
   private selectedHeadingId: string | null = null;
 
   constructor(
@@ -215,6 +216,7 @@ export class DocumentOutlineController {
     this.flatHeadings = [];
     this.cursor = 0;
     this.activePath = null;
+    this.activeHeadingKey = null;
     this.selectedHeadingId = null;
     this.collapsed.clear();
     this.render();
@@ -230,6 +232,9 @@ export class DocumentOutlineController {
         active = heading;
       }
     }
+    const activeKey = active ? `${active.filePath}\0${active.id}` : null;
+    if (activeKey === this.activeHeadingKey) return;
+    this.activeHeadingKey = activeKey;
     this.container.querySelectorAll<HTMLElement>(".outline-item.active").forEach(item => {
       item.classList.remove("active");
     });
@@ -273,6 +278,7 @@ export class DocumentOutlineController {
   }
 
   private render(): void {
+    this.activeHeadingKey = null;
     const count = document.getElementById("document-outline-count");
     if (count) count.textContent = String(this.flatHeadings.length);
     if (!this.headings.length) {

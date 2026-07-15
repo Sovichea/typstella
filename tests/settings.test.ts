@@ -55,6 +55,11 @@ describe("application settings", () => {
     expect(normalizeAppSettings({ toolchain: { typstVersion: "0.14.2" } }).toolchain.tinymistVersion).toBe("0.14.2");
   });
 
+  test("keeps Typsastra green light and dark theme selections", () => {
+    expect(normalizeAppSettings({ appearance: { theme: "typsastraLight" } }).appearance.theme).toBe("typsastraLight");
+    expect(normalizeAppSettings({ appearance: { theme: "typsastraDark" } }).appearance.theme).toBe("typsastraDark");
+  });
+
   test("keeps independent per-script editor fallbacks", () => {
     const settings = normalizeAppSettings({ editor: {
       unicodeFont: "auto",

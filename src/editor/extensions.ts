@@ -364,6 +364,8 @@ export function getThemeExtension(themeName: string): Extension {
     const baseExtensions = [];
     
     switch (themeName) {
+        case "typsastraLight": baseExtensions.push(uiwThemes.githubLight); break;
+        case "typsastraDark": baseExtensions.push(uiwThemes.githubDark); break;
         case "githubLight": baseExtensions.push(uiwThemes.githubLight); break;
         case "githubDark": baseExtensions.push(uiwThemes.githubDark); break;
         case "dracula": baseExtensions.push(uiwThemes.dracula); break;
@@ -390,6 +392,7 @@ type ThemeColorVariables = {
   border: string;
   hover: string;
   select: string;
+  accent?: string;
   autocompleteSelect?: string;
   autocompleteSelectText?: string;
   header: string;
@@ -447,6 +450,38 @@ const darkEditorVisibility = {
 
 const themeColors: Record<string, ThemeColorVariables> = {
   default: { bg: "#fcfcfc", text: "#333333", border: "#e0e0e0", hover: "#e4e6f1", select: "#d7e8f5", header: "#616161", mode: "light", monospace: "#005cc5", ...lightEditorVisibility },
+  typsastraLight: {
+    bg: "#f7faf8", text: "#24352e", border: "#cedbd4", hover: "#e8f1ec", select: "#d8ebe1", accent: "#23865f", header: "#5b6f64", mode: "light", monospace: "#167a57",
+    ...lightEditorVisibility,
+    autocompleteSelect: "#23865f",
+    cursor: "#167a57",
+    cursorContrast: "#9c3f71",
+    cursorGlow: "rgba(22, 122, 87, 0.48)",
+    cursorContrastGlow: "rgba(156, 63, 113, 0.36)",
+    selection: "rgba(35, 134, 95, 0.20)",
+    selectionFocus: "rgba(35, 134, 95, 0.29)",
+    selectionOutline: "rgba(35, 134, 95, 0.38)",
+    bracketMatchOutline: "#23865f",
+    brackets: ["#167a57", "#7656a8", "#247ba0", "#b26a1f", "#b33a3a"],
+    functionColor: "#167a57",
+    variableColor: "#7656a8"
+  },
+  typsastraDark: {
+    bg: "#17211d", text: "#d8e5de", border: "#34463d", hover: "#202e28", select: "#294137", accent: "#45bf8a", header: "#8fa69a", mode: "dark", monospace: "#69d3a6",
+    ...darkEditorVisibility,
+    autocompleteSelect: "#32986d",
+    cursor: "#69d3a6",
+    cursorContrast: "#f28fbd",
+    cursorGlow: "rgba(105, 211, 166, 0.72)",
+    cursorContrastGlow: "rgba(242, 143, 189, 0.62)",
+    selection: "rgba(69, 191, 138, 0.24)",
+    selectionFocus: "rgba(69, 191, 138, 0.34)",
+    selectionOutline: "rgba(105, 211, 166, 0.42)",
+    bracketMatchOutline: "#69d3a6",
+    brackets: ["#69d3a6", "#c7a0f3", "#75c8e8", "#e8b56a", "#f28b82"],
+    functionColor: "#69d3a6",
+    variableColor: "#c7a0f3"
+  },
   githubLight: { bg: "#ffffff", text: "#24292f", border: "#d0d7de", hover: "#f3f4f6", select: "#ddf4ff", header: "#57606a", mode: "light", monospace: "#0550ae", ...lightEditorVisibility, functionColor: "#0969da", variableColor: "#6639ba" },
   githubDark: { bg: "#0d1117", text: "#c9d1d9", border: "#30363d", hover: "#161b22", select: "#21262d", header: "#8b949e", mode: "dark", monospace: "#a5d6ff", ...darkEditorVisibility },
   dracula: {
@@ -511,6 +546,7 @@ export async function applyUIThemeVariables(themeName: string) {
     document.documentElement.style.setProperty("--ui-border", colors.border);
     document.documentElement.style.setProperty("--ui-hover", colors.hover);
     document.documentElement.style.setProperty("--ui-select", colors.select);
+    document.documentElement.style.setProperty("--ui-accent-color", colors.accent ?? colors.functionColor);
     document.documentElement.style.setProperty(
         "--autocomplete-select-bg",
         colors.autocompleteSelect ?? (colors.mode === "dark" ? "#3b82f6" : "#0969da")

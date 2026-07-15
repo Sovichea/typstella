@@ -1,5 +1,7 @@
 export const themeNames = [
   "default",
+  "typsastraLight",
+  "typsastraDark",
   "githubLight",
   "githubDark",
   "oneDark",

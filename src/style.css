@@ -37,6 +37,7 @@
   --ui-text: #333333;
   --ui-hover: #e4e6f1;
   --ui-select: #d7e8f5;
+  --ui-accent-color: #005cc5;
   --autocomplete-select-bg: #0969da;
   --autocomplete-select-text: #ffffff;
   --ui-header-text: #616161;
@@ -353,6 +354,7 @@ html {
 .outline-list .outline-list { padding-left: 14px; }
 .outline-node { display: block; min-width: 0; }
 .outline-item {
+  position: relative;
   height: 24px;
   display: flex;
   align-items: center;
@@ -360,12 +362,23 @@ html {
   color: var(--ui-text);
 }
 .outline-item:hover { background: var(--ui-hover); }
-.outline-item.active { background: var(--ui-select); }
+.outline-item.active { background: color-mix(in srgb, var(--ui-accent-color) 10%, var(--ui-bg)); }
 .outline-item.keyboard-selected {
-  background: var(--ui-hover);
-  box-shadow: inset 2px 0 var(--editor-function-color, #007fd4);
+  background: transparent;
+  box-shadow: none;
 }
-.outline-item.active.keyboard-selected { background: var(--ui-select); }
+.outline-item.keyboard-selected::after {
+  content: "";
+  position: absolute;
+  inset: 0px 0px;
+  border: 1px solid var(--ui-accent-color);
+  border-radius: 2px;
+  pointer-events: none;
+  display: none;
+}
+.outline-item.active.keyboard-selected {
+  background: color-mix(in srgb, var(--ui-accent-color) 10%, var(--ui-bg));
+}
 .outline-disclosure,
 .outline-label {
   height: 24px;
@@ -2061,6 +2074,7 @@ body.typsastra-resizing #input-container-wrapper::after {
 }
 
 .tree-item {
+  position: relative;
   display: flex;
   align-items: center;
   height: 22px;
@@ -2077,14 +2091,34 @@ body.typsastra-resizing #input-container-wrapper::after {
 }
 
 .tree-item.selected {
-  background-color: var(--ui-select);
+  background: transparent;
+  box-shadow: none;
   color: var(--ui-text);
 }
 
+.tree-item.selected::after {
+  content: "";
+  position: absolute;
+  inset: 0px 0px;
+  border: 1px solid var(--ui-accent-color);
+  border-radius: 2px;
+  pointer-events: none;
+  display: none;
+}
+
 .tree-item.active-file {
-  background-color: var(--ui-select);
-  box-shadow: inset 2px 0 #3db489;
+  background: color-mix(in srgb, var(--ui-accent-color) 10%, var(--ui-bg));
   color: var(--ui-text);
+}
+
+.tree-item.active-file.selected {
+  background: color-mix(in srgb, var(--ui-accent-color) 10%, var(--ui-bg));
+  box-shadow: none;
+}
+
+.workspace-explorer-section:focus-within .tree-item.selected::after,
+.outline-section:focus-within .outline-item.keyboard-selected::after {
+  display: block;
 }
 
 .tree-item:focus {
@@ -2102,7 +2136,7 @@ body.typsastra-resizing #input-container-wrapper::after {
 #input-container-wrapper:focus-within,
 #preview-container-wrapper:focus-within,
 #log-console:focus-within {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--editor-function-color, #007fd4) 42%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-accent-color) 42%, transparent);
 }
 
 .tree-chevron,
@@ -2636,7 +2670,7 @@ button.welcome-item:disabled {
   font-weight: 700 !important;
 }
 .tree-item.pinned-main .tree-text {
-  color: #3db489;
+  color: var(--ui-accent-color);
 }
 
 .preview-disabled-placeholder {
@@ -2756,17 +2790,17 @@ button.welcome-item:disabled {
   left: 0;
   z-index: 10;
   background: var(--ui-hover);
-  border-left: 3px solid #3db489 !important;
+  border-left: 3px solid var(--ui-accent-color) !important;
   border-right: 1px solid var(--ui-border);
   box-shadow: 2px 0 5px rgba(0, 0, 0, 0.12);
 }
 
 .editor-tab.pinned-main-tab .editor-tab-title {
-  color: #3db489;
+  color: var(--ui-accent-color);
   font-weight: bold;
 }
 
 .editor-tab.pinned-main-tab.active {
   background: var(--ui-bg);
-  box-shadow: inset 0 2px 0 #3db489, 2px 0 5px rgba(0, 0, 0, 0.12);
+  box-shadow: inset 0 2px 0 var(--ui-accent-color), 2px 0 5px rgba(0, 0, 0, 0.12);
 }
