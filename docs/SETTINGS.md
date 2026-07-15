@@ -28,7 +28,7 @@ Open Settings from **File → Settings**, the status bar, or `Ctrl + ,`. Changes
   "preview": {
     "renderMode": "on-type",
     "cursorSync": true,
-    "syncDebounceMs": 500,
+    "syncDebounceMs": 100,
     "highlightDurationMs": 2200,
     "khmerRenderPreparation": false
   },

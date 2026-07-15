@@ -46,10 +46,10 @@
   --autocomplete-select-bg: #0969da;
   --autocomplete-select-text: #ffffff;
   --ui-header-text: #616161;
-  --editor-cursor-color: #005cc5;
+  --editor-cursor-color: #3db489;
   --editor-cursor-contrast-color: #d73a49;
   --editor-cursor-shadow: rgba(255, 255, 255, 0.95);
-  --editor-cursor-glow: rgba(0, 92, 197, 0.45);
+  --editor-cursor-glow: rgba(61, 180, 137, 0.45);
   --editor-cursor-contrast-shadow: rgba(255, 255, 255, 0.95);
   --editor-cursor-contrast-glow: rgba(215, 58, 73, 0.35);
   --editor-selection-color: rgba(3, 102, 214, 0.22);

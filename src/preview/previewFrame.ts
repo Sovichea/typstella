@@ -22,6 +22,11 @@ export type PreviewMemorySnapshot = {
 
 import { PERFORMANCE_BUDGETS, type PerformanceMetric } from "../performance/diagnostics";
 import { pagesToEvict } from "./virtualization";
+import {
+  TYPSASTRA_GREEN,
+  TYPSASTRA_GREEN_RIPPLE_FILL,
+  TYPSASTRA_GREEN_RIPPLE_SHADOW
+} from "../ui/brandColors";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 
@@ -45,7 +50,6 @@ const MAX_OUTPUT_SCALE = 2;
 // The viewer has 20px padding on each side. Keep an additional gutter for the
 // vertical scrollbar and fractional layout rounding so fit mode never overflows.
 const FIT_PADDING_PX = 56;
-const FORWARD_SYNC_GREEN = "#3db489";
 
 export class PreviewFrame {
   private iframe: HTMLIFrameElement | null = null;
@@ -332,7 +336,7 @@ export class PreviewFrame {
       .pdf-page-canvas{position:absolute;inset:0;display:block;width:100%;height:100%}
       .textLayer{position:absolute;inset:0;overflow:hidden;line-height:1;opacity:1;--scale-factor:1;pointer-events:none;user-select:none}
       .textLayer span,.textLayer br{position:absolute;color:transparent;white-space:pre;transform-origin:0 0}
-      .forward-sync-ripple{position:fixed;z-index:2147483647;box-sizing:border-box;width:18px;height:18px;margin:-9px 0 0 -9px;border:2px solid ${FORWARD_SYNC_GREEN};border-radius:999px;background:rgba(61,180,137,.16);box-shadow:0 0 0 0 rgba(61,180,137,.34);pointer-events:none;animation:typsastra-forward-ripple 900ms ease-out forwards}
+      .forward-sync-ripple{position:fixed;z-index:2147483647;box-sizing:border-box;width:18px;height:18px;margin:-9px 0 0 -9px;border:2px solid ${TYPSASTRA_GREEN};border-radius:999px;background:${TYPSASTRA_GREEN_RIPPLE_FILL};box-shadow:0 0 0 0 ${TYPSASTRA_GREEN_RIPPLE_SHADOW};pointer-events:none;animation:typsastra-forward-ripple 900ms ease-out forwards}
       @keyframes typsastra-forward-ripple{0%{opacity:0;transform:scale(.55);box-shadow:0 0 0 0 rgba(61,180,137,.38)}12%{opacity:1}100%{opacity:0;transform:scale(3.1);box-shadow:0 0 0 14px rgba(61,180,137,0)}}
       .annotation-link{position:absolute;display:block}
       ::selection{background:rgba(0,120,215,.35)}

@@ -4,8 +4,8 @@ import { tags } from "@lezer/highlight";
 import { codeEditorFontStack } from "./fontCatalog";
 
 export const baseEditorLayoutTheme = EditorView.theme({
-  "&": { 
-      height: "100%", 
+  "&": {
+      height: "100%",
       fontSize: "var(--editor-font-size, 14px)",
       lineHeight: "var(--editor-line-height, 1.7)"
   },
@@ -26,21 +26,21 @@ export const baseEditorLayoutTheme = EditorView.theme({
   ".cm-line": { padding: "0 12px", overflow: "visible !important" },
   ".cm-gutters": { borderRight: "1px solid var(--ui-border)" },
   ".cm-cursor, .cm-dropCursor": {
-      borderLeftColor: "var(--editor-cursor-color, #005cc5) !important",
-      borderLeftWidth: "3px !important",
-      filter: "drop-shadow(0 0 2px var(--editor-cursor-shadow, rgba(255, 255, 255, 0.95))) drop-shadow(0 0 5px var(--editor-cursor-glow, rgba(0, 92, 197, 0.45)))"
+      borderLeftColor: "var(--editor-cursor-color, #3db489) !important",
+      borderLeftWidth: "2px !important",
+      filter: "drop-shadow(0 0 2px var(--editor-cursor-shadow, rgba(255, 255, 255, 0.95))) drop-shadow(0 0 5px var(--editor-cursor-glow, rgba(61, 180, 137, 0.45)))"
   },
   ".cm-focused .cm-cursor": {
       animation: "typsastra-cursor-pulse 1.05s steps(1) infinite"
   },
   "@keyframes typsastra-cursor-pulse": {
       "0%, 45%": {
-          borderLeftColor: "var(--editor-cursor-color, #005cc5)",
-          filter: "drop-shadow(0 0 2px var(--editor-cursor-shadow, rgba(255, 255, 255, 0.95))) drop-shadow(0 0 5px var(--editor-cursor-glow, rgba(0, 92, 197, 0.45)))"
+          borderLeftColor: "var(--editor-cursor-color, #3db489)",
+          filter: "drop-shadow(0 0 2px var(--editor-cursor-shadow, rgba(255, 255, 255, 0.95))) drop-shadow(0 0 5px var(--editor-cursor-glow, rgba(61, 180, 137, 0.45)))"
       },
       "46%, 100%": {
-          borderLeftColor: "var(--editor-cursor-contrast-color, #d73a49)",
-          filter: "drop-shadow(0 0 2px var(--editor-cursor-contrast-shadow, rgba(255, 255, 255, 0.95))) drop-shadow(0 0 5px var(--editor-cursor-contrast-glow, rgba(215, 58, 73, 0.35)))"
+          borderLeftColor: "var(--editor-cursor-color, #3db489)",
+          filter: "drop-shadow(0 0 2px var(--editor-cursor-shadow, rgba(255, 255, 255, 0.95))) drop-shadow(0 0 5px var(--editor-cursor-glow, rgba(61, 180, 137, 0.45)))"
       }
   },
   ".cm-selectionBackground, .cm-content ::selection": {

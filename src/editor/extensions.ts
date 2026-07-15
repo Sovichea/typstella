@@ -22,6 +22,7 @@ import { typstFunctionFoldService } from "./folding";
 import { deleteNextGrapheme, deletePreviousGrapheme, graphemeSelectionBoundaryFilter, moveNextGrapheme, movePreviousGrapheme, selectNextGrapheme, selectPreviousGrapheme } from "./grapheme";
 import { editingPolicyRegistry } from "./editingPolicies/registry";
 import { showInvisibleCharacters } from "./invisibles";
+import { TYPSASTRA_GREEN, TYPSASTRA_GREEN_GLOW } from "../ui/brandColors";
 
 export const themeCompartment = new Compartment();
 export const wrapCompartment = new Compartment();
@@ -557,10 +558,10 @@ export async function applyUIThemeVariables(themeName: string) {
     );
     document.documentElement.style.setProperty("--ui-header-text", colors.header);
     document.documentElement.style.setProperty("--ui-monospace-color", colors.monospace);
-    document.documentElement.style.setProperty("--editor-cursor-color", colors.cursor);
+    document.documentElement.style.setProperty("--editor-cursor-color", TYPSASTRA_GREEN);
     document.documentElement.style.setProperty("--editor-cursor-contrast-color", colors.cursorContrast);
     document.documentElement.style.setProperty("--editor-cursor-shadow", colors.cursorShadow);
-    document.documentElement.style.setProperty("--editor-cursor-glow", colors.cursorGlow);
+    document.documentElement.style.setProperty("--editor-cursor-glow", TYPSASTRA_GREEN_GLOW);
     document.documentElement.style.setProperty("--editor-cursor-contrast-shadow", colors.cursorContrastShadow);
     document.documentElement.style.setProperty("--editor-cursor-contrast-glow", colors.cursorContrastGlow);
     document.documentElement.style.setProperty("--editor-selection-color", colors.selection);

@@ -32,6 +32,11 @@ import { LogConsoleController, spellcheckConsoleGroupKey, type LogConsoleEntryIn
 import { EditorFontManager } from "./editor/fontManager";
 import { TabStripController } from "./editor/tabStripController";
 import { createAppIcon, updateMaximizeIcon } from "./ui/icons";
+import {
+  TYPSASTRA_GREEN,
+  TYPSASTRA_GREEN_RIPPLE_FILL,
+  TYPSASTRA_GREEN_RIPPLE_SHADOW
+} from "./ui/brandColors";
 import { LayoutController } from "./layout/layoutController";
 import {
   WorkspaceStateStore,
@@ -90,7 +95,6 @@ type MemoryDiagnosticTotals = {
 const DEFAULT_INPUT_WIDTH_PCT = 50;
 const DEFAULT_PREVIEW_WIDTH_PCT = 100 - DEFAULT_INPUT_WIDTH_PCT;
 const DEFAULT_EXPLORER_WIDTH_PX = 250;
-const SYNC_RIPPLE_GREEN = "#3db489";
 
 class PreviewPreparationInterrupted extends Error {
   constructor() {
@@ -2946,10 +2950,10 @@ export class TypsastraWorkspaceController {
       width: "18px",
       height: "18px",
       margin: "-9px 0 0 -9px",
-      border: `2px solid ${SYNC_RIPPLE_GREEN}`,
+      border: `2px solid ${TYPSASTRA_GREEN}`,
       borderRadius: "999px",
-      background: "rgba(61,180,137,.16)",
-      boxShadow: "0 0 0 0 rgba(61,180,137,.34)",
+      background: TYPSASTRA_GREEN_RIPPLE_FILL,
+      boxShadow: `0 0 0 0 ${TYPSASTRA_GREEN_RIPPLE_SHADOW}`,
       pointerEvents: "none",
       zIndex: "2147483647",
       animation: "typsastra-editor-caret-ripple 900ms ease-out forwards"
@@ -5173,7 +5177,11 @@ export class TypsastraWorkspaceController {
       this.recompilePreviewManually();
     });
 
-    document.getElementById("preview-forward-sync-btn")?.addEventListener("click", () => {
+    const previewForwardSyncButton = document.getElementById("preview-forward-sync-btn");
+    previewForwardSyncButton?.addEventListener("pointerdown", event => {
+      if (event.button === 0 && this.editorInstance.hasFocus) event.preventDefault();
+    });
+    previewForwardSyncButton?.addEventListener("click", () => {
       this.revealCursorInPreviewManually();
     });
 
