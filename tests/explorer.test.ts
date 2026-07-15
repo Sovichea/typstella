@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isHiddenWorkspaceEntry, sortFileNodes, type FileNode } from "../src/components/explorer";
+import { isHiddenWorkspaceEntry, sortFileNodes, workspaceParentDirectories, workspacePathSetContains, type FileNode } from "../src/components/explorer";
 import { explorerKeyboardAction } from "../src/components/contextMenuController";
 
 describe("workspace explorer", () => {
@@ -29,6 +29,26 @@ describe("workspace explorer", () => {
     expect(explorerKeyboardAction(event("Delete"))).toBe("delete");
     expect(explorerKeyboardAction(event("c"))).toBeNull();
     expect(explorerKeyboardAction(event("Delete", { shiftKey: true }))).toBeNull();
+  });
+
+  test("matches expanded Windows directories across slash styles", () => {
+    const expanded = new Set(["C:/Research/chapters", "//server/share/figures", "/home/writer/book"]);
+    expect(workspacePathSetContains(expanded, "C:\\Research\\chapters")).toBe(true);
+    expect(workspacePathSetContains(expanded, "c:\\research\\CHAPTERS")).toBe(true);
+    expect(workspacePathSetContains(expanded, "\\\\server\\share\\figures")).toBe(true);
+    expect(workspacePathSetContains(expanded, "/home/writer/book")).toBe(true);
+    expect(workspacePathSetContains(expanded, "/HOME/writer/book")).toBe(false);
+    expect(workspacePathSetContains(expanded, "C:\\Research\\figures")).toBe(false);
+  });
+
+  test("derives reveal parents portably", () => {
+    expect(workspaceParentDirectories("C:\\Research", "C:/Research/chapters/one/main.typ"))
+      .toEqual(["C:/Research/chapters/one", "C:/Research/chapters"]);
+    expect(workspaceParentDirectories("/home/writer/book", "/home/writer/book/chapters/main.typ"))
+      .toEqual(["/home/writer/book/chapters"]);
+    expect(workspaceParentDirectories("//server/share", "\\\\server\\share\\book\\main.typ"))
+      .toEqual(["//server/share/book"]);
+    expect(workspaceParentDirectories("/home/writer/book", "/outside/main.typ")).toEqual([]);
   });
 
   test("hides Typsastra's managed workspace cache directory", () => {

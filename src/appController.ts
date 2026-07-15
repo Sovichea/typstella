@@ -1248,7 +1248,7 @@ export class TypsastraWorkspaceController {
   private async activateEditorTab(path: string, persistCurrent = true, options: ActivateEditorTabOptions = {}) {
     this.explorer.setActiveFile(path);
     if (this.workspaceRootPath) {
-      void this.explorer.revealPath(path);
+      await this.explorer.revealPath(path);
     }
     const tab = this.openTabs.find((candidate) => filePathKey(candidate.path) === filePathKey(path));
     const sameActivePath = this.activeFilePath !== null && filePathKey(this.activeFilePath) === filePathKey(path);

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { join } from "@tauri-apps/api/path";
 import { createAppIcon, type AppIconName } from "../ui/icons";
-import { filePathKey } from "../platform/paths";
+import { filePathKey, relativeFilePath } from "../platform/paths";
 
 export interface FileNode { name: string; path: string; isDirectory: boolean; children?: FileNode[]; }
 
@@ -9,6 +9,24 @@ export type ExplorerSelection = { path: string; isDirectory: boolean };
 
 export function sortFileNodes(nodes: FileNode[]): FileNode[] {
   return [...nodes].sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.name.localeCompare(b.name));
+}
+
+export function workspacePathSetContains(paths: ReadonlySet<string>, targetPath: string): boolean {
+  const targetKey = filePathKey(targetPath);
+  return [...paths].some(path => filePathKey(path) === targetKey);
+}
+
+export function workspaceParentDirectories(rootPath: string, targetPath: string): string[] {
+  const relative = relativeFilePath(rootPath, targetPath);
+  if (relative === null || relative === "") return [];
+  const components = relative.replace(/\\/g, "/").split("/").filter(Boolean);
+  components.pop();
+  const root = rootPath.replace(/\\/g, "/").replace(/\/$/, "");
+  const parents: string[] = [];
+  for (let length = components.length; length > 0; length--) {
+    parents.push(`${root}/${components.slice(0, length).join("/")}`);
+  }
+  return parents;
 }
 
 function getFileIconSvg(filename: string): string {
@@ -158,18 +176,7 @@ export class WorkspaceExplorer {
   public async revealPath(targetPath: string): Promise<void> {
     if (!this.workspaceRootPath) return;
 
-    const parents: string[] = [];
-    let current = targetPath;
-    while (true) {
-      const lastSlash = Math.max(current.lastIndexOf("/"), current.lastIndexOf("\\"));
-      if (lastSlash === -1) break;
-      const parent = current.substring(0, lastSlash);
-      if (parent.length <= this.workspaceRootPath.length) {
-        break;
-      }
-      parents.push(parent);
-      current = parent;
-    }
+    const parents = workspaceParentDirectories(this.workspaceRootPath, targetPath);
 
     const viewState = this.captureViewState();
     for (const parent of parents) {
@@ -185,9 +192,9 @@ export class WorkspaceExplorer {
       this.container.innerHTML = "";
       this.container.appendChild(this.renderTree(nodes, 0, viewState.expandedPaths, viewState.selectedPath));
 
-      const selectedEl = this.container.querySelector<HTMLElement>(
-        `[data-path="${targetPath.replace(/\\/g, "\\\\")}"]`
-      );
+      const targetKey = filePathKey(targetPath);
+      const selectedEl = [...this.container.querySelectorAll<HTMLElement>(".tree-item[data-path]")]
+        .find(item => filePathKey(item.dataset.path ?? "") === targetKey);
       if (selectedEl) {
         selectedEl.scrollIntoView({ block: "nearest", inline: "nearest" });
       }
@@ -208,7 +215,7 @@ export class WorkspaceExplorer {
 
   private async hydrateExpandedDirectories(nodes: FileNode[], expandedPaths: Set<string>): Promise<void> {
     await Promise.all(nodes.map(async node => {
-      if (!node.isDirectory || !expandedPaths.has(node.path)) return;
+      if (!node.isDirectory || !workspacePathSetContains(expandedPaths, node.path)) return;
       node.children = await this.readDirectory(node.path);
       await this.hydrateExpandedDirectories(node.children, expandedPaths);
     }));
@@ -237,7 +244,7 @@ export class WorkspaceExplorer {
 
     for (const node of nodes) {
       const li = document.createElement("li");
-      const isExpanded = node.isDirectory && expandedPaths.has(node.path);
+      const isExpanded = node.isDirectory && workspacePathSetContains(expandedPaths, node.path);
       li.className = node.isDirectory ? `tree-folder${isExpanded ? "" : " collapsed"}` : "tree-file";
 
       const label = document.createElement("div");
@@ -245,11 +252,12 @@ export class WorkspaceExplorer {
       const isActiveFile = !node.isDirectory
         && this.activeFilePath !== null
         && filePathKey(this.activeFilePath) === filePathKey(node.path);
-      label.className = `tree-item explorer-item-target${selectedPath === node.path ? " selected" : ""}${isActiveFile ? " active-file" : ""}${isPinnedMain ? " pinned-main" : ""}`;
+      const isSelected = selectedPath !== null && filePathKey(selectedPath) === filePathKey(node.path);
+      label.className = `tree-item explorer-item-target${isSelected ? " selected" : ""}${isActiveFile ? " active-file" : ""}${isPinnedMain ? " pinned-main" : ""}`;
       label.dataset.path = node.path;
       label.dataset.isDir = String(node.isDirectory);
       label.setAttribute("role", "treeitem");
-      label.setAttribute("aria-selected", String(selectedPath === node.path));
+      label.setAttribute("aria-selected", String(isSelected));
       if (isActiveFile) label.setAttribute("aria-current", "page");
       // Base padding + depth padding
       label.style.paddingLeft = `${depth * 12 + 8}px`;
