@@ -229,6 +229,177 @@ fn save_app_settings(
     Ok(path.to_string_lossy().to_string())
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceMetadataPayload {
+    project: Option<serde_json::Value>,
+    workspace: Option<serde_json::Value>,
+}
+
+fn read_optional_json(path: &Path) -> Result<Option<serde_json::Value>, String> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(path)
+        .map_err(|error| format!("Failed to read {}: {error}", path.display()))?;
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|error| format!("Invalid {}: {error}", path.display()))
+}
+
+fn write_json_atomically(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "Workspace metadata path has no parent.".to_string())?;
+    std::fs::create_dir_all(parent)
+        .map_err(|error| format!("Failed to create {}: {error}", parent.display()))?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent)
+        .map_err(|error| format!("Failed to stage {}: {error}", path.display()))?;
+    serde_json::to_writer_pretty(&mut temporary, value)
+        .map_err(|error| format!("Failed to serialize {}: {error}", path.display()))?;
+    std::io::Write::write_all(&mut temporary, b"\n")
+        .map_err(|error| format!("Failed to stage {}: {error}", path.display()))?;
+    temporary
+        .persist(path)
+        .map_err(|error| format!("Failed to replace {}: {}", path.display(), error.error))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn load_workspace_metadata(
+    workspace_root_path: String,
+) -> Result<WorkspaceMetadataPayload, String> {
+    let root = Path::new(&workspace_root_path);
+    if !root.is_dir() {
+        return Err("The workspace root does not exist.".into());
+    }
+    let metadata = root.join(".typsastra");
+    let config = read_optional_json(&metadata.join("config.json"))?;
+    let project = if config.is_some() {
+        config
+    } else {
+        read_optional_json(&metadata.join("project.json"))?.and_then(|manifest| {
+            let main_file = manifest.pointer("/project/main")?.as_str()?;
+            let tinymist_version = manifest.pointer("/toolchain/tinymistVersion")?.as_str()?;
+            let typst_version = manifest.pointer("/toolchain/typstVersion")?.as_str()?;
+            Some(serde_json::json!({
+                "schemaVersion": 1,
+                "mainFile": main_file,
+                "recommendedToolchain": {
+                    "tinymistVersion": tinymist_version,
+                    "typstVersion": typst_version
+                }
+            }))
+        })
+    };
+    Ok(WorkspaceMetadataPayload {
+        project,
+        workspace: read_optional_json(&metadata.join("workspace.json"))?,
+    })
+}
+
+#[tauri::command]
+fn save_workspace_metadata(
+    workspace_root_path: String,
+    project: serde_json::Value,
+    workspace: serde_json::Value,
+) -> Result<(), String> {
+    let root = Path::new(&workspace_root_path);
+    if !root.is_dir() {
+        return Err("The workspace root does not exist.".into());
+    }
+    let metadata = root.join(".typsastra");
+    write_json_atomically(&metadata.join("config.json"), &project)?;
+    write_json_atomically(&metadata.join("workspace.json"), &workspace)?;
+    let ignore = metadata.join(".gitignore");
+    let mut ignored = std::fs::read_to_string(&ignore).unwrap_or_default();
+    for entry in ["workspace.json", "cache/", "fonts/generated/"] {
+        if !ignored.lines().any(|line| line.trim() == entry) {
+            if !ignored.is_empty() && !ignored.ends_with('\n') {
+                ignored.push('\n');
+            }
+            ignored.push_str(entry);
+            ignored.push('\n');
+        }
+    }
+    std::fs::write(&ignore, ignored)
+        .map_err(|error| format!("Failed to write {}: {error}", ignore.display()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod workspace_metadata_tests {
+    use super::{load_workspace_metadata, save_workspace_metadata};
+
+    #[test]
+    fn persists_project_and_session_metadata_inside_workspace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path().to_string_lossy().to_string();
+        save_workspace_metadata(
+            root.clone(),
+            serde_json::json!({ "schemaVersion": 1, "mainFile": "main.typ" }),
+            serde_json::json!({ "schemaVersion": 1, "activeFile": "chapter.typ" }),
+        )
+        .unwrap();
+        let loaded = load_workspace_metadata(root.clone()).unwrap();
+        assert_eq!(loaded.project.unwrap()["mainFile"], "main.typ");
+        assert_eq!(loaded.workspace.unwrap()["activeFile"], "chapter.typ");
+        assert!(workspace.path().join(".typsastra/config.json").is_file());
+        assert!(workspace.path().join(".typsastra/workspace.json").is_file());
+        assert!(
+            std::fs::read_to_string(workspace.path().join(".typsastra/.gitignore"))
+                .unwrap()
+                .contains("workspace.json")
+        );
+
+        save_workspace_metadata(
+            root,
+            serde_json::json!({ "schemaVersion": 1, "mainFile": "moved.typ" }),
+            serde_json::json!({ "schemaVersion": 1 }),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &std::fs::read(workspace.path().join(".typsastra/config.json")).unwrap()
+            )
+            .unwrap()["mainFile"],
+            "moved.typ"
+        );
+    }
+
+    #[test]
+    fn seeds_config_from_bound_project_manifest_without_overwriting_it() {
+        let workspace = tempfile::tempdir().unwrap();
+        let metadata = workspace.path().join(".typsastra");
+        std::fs::create_dir_all(&metadata).unwrap();
+        let manifest = serde_json::json!({
+            "format": "com.typsastra.project",
+            "project": { "main": "book/main.typ" },
+            "toolchain": { "tinymistVersion": "0.15.2", "typstVersion": "0.13.1" }
+        });
+        std::fs::write(
+            metadata.join("project.json"),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+        let root = workspace.path().to_string_lossy().to_string();
+        let loaded = load_workspace_metadata(root.clone())
+            .unwrap()
+            .project
+            .unwrap();
+        assert_eq!(loaded["mainFile"], "book/main.typ");
+        save_workspace_metadata(root, loaded, serde_json::json!({ "schemaVersion": 1 })).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(
+                &std::fs::read(metadata.join("project.json")).unwrap()
+            )
+            .unwrap(),
+            manifest
+        );
+        assert!(metadata.join("config.json").is_file());
+    }
+}
+
 #[tauri::command]
 fn read_workspace_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))
@@ -310,6 +481,23 @@ fn cleanup_dir_previews(dir: &std::path::Path) {
     }
 }
 
+fn remove_cache_symlinks(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() {
+            let _ = std::fs::remove_file(&path).or_else(|_| std::fs::remove_dir(&path));
+        } else if metadata.file_type().is_dir() {
+            remove_cache_symlinks(&path);
+        }
+    }
+}
+
 #[tauri::command]
 fn cleanup_workspace_preview_files(workspace_root_path: String) -> Result<(), String> {
     let root = std::path::PathBuf::from(workspace_root_path);
@@ -317,6 +505,9 @@ fn cleanup_workspace_preview_files(workspace_root_path: String) -> Result<(), St
         return Ok(());
     }
     cleanup_dir_previews(&root);
+    // Migrate caches written by versions that linked PDF/image assets back to
+    // the project. Plain cache files keep project-folder copies safe.
+    remove_cache_symlinks(&root.join(".typsastra").join("cache"));
     Ok(())
 }
 
@@ -2460,6 +2651,8 @@ pub fn run() {
             finish_startup_initialization,
             load_app_settings,
             save_app_settings,
+            load_workspace_metadata,
+            save_workspace_metadata,
             compile_typst_document,
             check_typst_document,
             read_workspace_file,

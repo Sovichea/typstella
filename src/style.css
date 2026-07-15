@@ -398,6 +398,7 @@ html {
 .outline-empty { padding: 10px 12px; color: var(--ui-header-text); font-size: 11px; line-height: 1.4; }
 
 #workspace-viewport {
+  position: relative;
   display: flex;
   flex: 1;
   height: 100%;
@@ -2660,6 +2661,32 @@ button.welcome-item:disabled {
 .preview-only-mode #undock-preview-btn {
   display: flex !important;
 }
+
+.workspace-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--ui-text);
+  background: var(--ui-bg);
+}
+
+.workspace-loading.hidden { display: none; }
+.workspace-loading span { color: var(--ui-header-text); font-size: 12px; }
+.workspace-loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--ui-border);
+  border-top-color: var(--editor-bracket-0, #0969da);
+  border-radius: 50%;
+  animation: workspace-loading-spin .8s linear infinite;
+}
+
+@keyframes workspace-loading-spin { to { transform: rotate(360deg); } }
 
 .preview-only-mode #preview-recompile-btn,
 .preview-only-mode #preview-forward-sync-btn {

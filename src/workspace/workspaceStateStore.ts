@@ -1,3 +1,10 @@
+import { invoke } from "@tauri-apps/api/core";
+
+export type StoredWorkspaceToolchain = {
+  tinymistVersion: string;
+  typstVersion: string;
+};
+
 export type StoredWorkspaceTab = {
   path: string;
   selectionAnchor: number;
@@ -7,7 +14,32 @@ export type StoredWorkspaceTab = {
   foldRanges?: unknown[] | null;
 };
 
+export type StoredProjectState = {
+  schemaVersion: 1;
+  projectId: string;
+  mainFile: string | null;
+  recommendedToolchain: StoredWorkspaceToolchain | null;
+};
+
 export type StoredWorkspaceState = {
+  schemaVersion: 1;
+  activeFile: string | null;
+  openTabs: StoredWorkspaceTab[];
+  expandedDirectories: string[];
+  layout: {
+    inputContainerWidthPct: number;
+    explorerSidebarWidthPx: number;
+    sidebarVisible: boolean;
+  };
+  selectedToolchain: StoredWorkspaceToolchain | null;
+};
+
+export type WorkspaceMetadata = {
+  project: StoredProjectState;
+  workspace: StoredWorkspaceState;
+};
+
+export type LegacyWorkspaceState = {
   activeFilePath: string | null;
   pinnedMainFilePath: string | null;
   openTabs: StoredWorkspaceTab[];
@@ -17,67 +49,148 @@ export type StoredWorkspaceState = {
   selectedToolchain: StoredWorkspaceToolchain | null;
 };
 
-export type StoredWorkspaceToolchain = {
-  tinymistVersion: string;
-  typstVersion: string;
-};
+type MetadataPayload = { project: unknown | null; workspace: unknown | null };
 
-export function workspaceRestoreCandidates(state: StoredWorkspaceState): string[] {
-  const candidates = [state.activeFilePath, state.pinnedMainFilePath, ...state.openTabs.map(tab => tab.path)];
-  return candidates.filter((path, index): path is string =>
-    typeof path === "string" && path.length > 0 && candidates.indexOf(path) === index
-  );
+export function safeRelativeWorkspacePath(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (!normalized || normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized)) return null;
+  const segments = normalized.split("/");
+  return segments.some(segment => !segment || segment === "." || segment === "..") ? null : normalized;
+}
+
+export function workspaceRestoreCandidates(metadata: WorkspaceMetadata): string[] {
+  const candidates = [
+    metadata.workspace.activeFile,
+    metadata.project.mainFile,
+    ...metadata.workspace.openTabs.map(tab => tab.path)
+  ];
+  return candidates.filter((path, index): path is string => !!path && candidates.indexOf(path) === index);
+}
+
+export function normalizeWorkspaceMetadata(
+  payload: MetadataPayload,
+  createProjectId: () => string = () => crypto.randomUUID()
+): WorkspaceMetadata {
+  const project = objectValue(payload.project);
+  const workspace = objectValue(payload.workspace);
+  const layout = objectValue(workspace.layout);
+  const openTabs = Array.isArray(workspace.openTabs)
+    ? workspace.openTabs.flatMap(value => {
+        const tab = objectValue(value);
+        const path = safeRelativeWorkspacePath(tab.path);
+        if (!path) return [];
+        return [{
+          path,
+          selectionAnchor: numberOr(tab.selectionAnchor, 0),
+          selectionHead: numberOr(tab.selectionHead, 0),
+          scrollTop: typeof tab.scrollTop === "number" ? tab.scrollTop : undefined,
+          scrollLeft: typeof tab.scrollLeft === "number" ? tab.scrollLeft : undefined,
+          foldRanges: Array.isArray(tab.foldRanges) ? tab.foldRanges : null
+        }];
+      })
+    : [];
+  return {
+    project: {
+      schemaVersion: 1,
+      projectId: typeof project.projectId === "string" && project.projectId.length > 0
+        ? project.projectId
+        : createProjectId(),
+      mainFile: safeRelativeWorkspacePath(project.mainFile),
+      recommendedToolchain: toolchainOrNull(project.recommendedToolchain)
+    },
+    workspace: {
+      schemaVersion: 1,
+      activeFile: safeRelativeWorkspacePath(workspace.activeFile),
+      openTabs,
+      expandedDirectories: Array.isArray(workspace.expandedDirectories)
+        ? [...new Set(workspace.expandedDirectories.flatMap(path => safeRelativeWorkspacePath(path) ?? []))]
+        : [],
+      layout: {
+        inputContainerWidthPct: numberOr(layout.inputContainerWidthPct, 50),
+        explorerSidebarWidthPx: numberOr(layout.explorerSidebarWidthPx, 250),
+        sidebarVisible: typeof layout.sidebarVisible === "boolean" ? layout.sidebarVisible : true
+      },
+      selectedToolchain: toolchainOrNull(workspace.selectedToolchain)
+    }
+  };
 }
 
 export class WorkspaceStateStore {
-  public save(workspacePath: string, state: StoredWorkspaceState): void {
-    localStorage.setItem(this.key(workspacePath), JSON.stringify(state));
+  private saveQueue: Promise<void> = Promise.resolve();
+
+  public async load(workspacePath: string): Promise<WorkspaceMetadata | null> {
+    const payload = await invoke<MetadataPayload>("load_workspace_metadata", { workspaceRootPath: workspacePath });
+    if (payload.project === null && payload.workspace === null) return null;
+    return normalizeWorkspaceMetadata(payload);
   }
 
-  public load(workspacePath: string): StoredWorkspaceState | null {
+  public save(workspacePath: string, metadata: WorkspaceMetadata): Promise<void> {
+    this.saveQueue = this.saveQueue
+      .catch(() => {})
+      .then(() => invoke("save_workspace_metadata", {
+        workspaceRootPath: workspacePath,
+        project: metadata.project,
+        workspace: metadata.workspace
+      }));
+    return this.saveQueue;
+  }
+
+  public loadLegacy(workspacePath: string): LegacyWorkspaceState | null {
     try {
-      const stored = localStorage.getItem(this.key(workspacePath));
+      const stored = localStorage.getItem(this.legacyKey(workspacePath));
       if (!stored) return null;
-      const value = JSON.parse(stored) as Record<string, unknown>;
+      const value = objectValue(JSON.parse(stored));
       const openTabs = Array.isArray(value.openTabs)
-        ? value.openTabs
-            .filter((tab): tab is Record<string, unknown> => !!tab && typeof tab === "object" && typeof (tab as Record<string, unknown>).path === "string")
-            .map(tab => ({
-              path: tab.path as string,
-              selectionAnchor: this.numberOr(tab.selectionAnchor, 0),
-              selectionHead: this.numberOr(tab.selectionHead, 0),
+        ? value.openTabs.flatMap(item => {
+            const tab = objectValue(item);
+            if (typeof tab.path !== "string") return [];
+            return [{
+              path: tab.path,
+              selectionAnchor: numberOr(tab.selectionAnchor, 0),
+              selectionHead: numberOr(tab.selectionHead, 0),
               scrollTop: typeof tab.scrollTop === "number" ? tab.scrollTop : undefined,
               scrollLeft: typeof tab.scrollLeft === "number" ? tab.scrollLeft : undefined,
               foldRanges: Array.isArray(tab.foldRanges) ? tab.foldRanges : null
-            }))
+            }];
+          })
         : [];
       return {
         activeFilePath: typeof value.activeFilePath === "string" ? value.activeFilePath : null,
         pinnedMainFilePath: typeof value.pinnedMainFilePath === "string" ? value.pinnedMainFilePath : null,
         openTabs,
-        inputContainerWidthPct: this.numberOr(value.inputContainerWidthPct, 50),
-        explorerSidebarWidthPx: this.numberOr(value.explorerSidebarWidthPx, 250),
-        recommendedToolchain: this.toolchainOrNull(value.recommendedToolchain),
-        selectedToolchain: this.toolchainOrNull(value.selectedToolchain)
+        inputContainerWidthPct: numberOr(value.inputContainerWidthPct, 50),
+        explorerSidebarWidthPx: numberOr(value.explorerSidebarWidthPx, 250),
+        recommendedToolchain: toolchainOrNull(value.recommendedToolchain),
+        selectedToolchain: toolchainOrNull(value.selectedToolchain)
       };
     } catch {
       return null;
     }
   }
 
-  private key(workspacePath: string): string {
+  public removeLegacy(workspacePath: string): void {
+    localStorage.removeItem(this.legacyKey(workspacePath));
+  }
+
+  private legacyKey(workspacePath: string): string {
     return `typsastra-workspace-${workspacePath}`;
   }
+}
 
-  private numberOr(value: unknown, fallback: number): number {
-    return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-  }
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
 
-  private toolchainOrNull(value: unknown): StoredWorkspaceToolchain | null {
-    if (!value || typeof value !== "object") return null;
-    const toolchain = value as Record<string, unknown>;
-    return typeof toolchain.tinymistVersion === "string" && typeof toolchain.typstVersion === "string"
-      ? { tinymistVersion: toolchain.tinymistVersion, typstVersion: toolchain.typstVersion }
-      : null;
-  }
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function toolchainOrNull(value: unknown): StoredWorkspaceToolchain | null {
+  const toolchain = objectValue(value);
+  return typeof toolchain.tinymistVersion === "string" && typeof toolchain.typstVersion === "string"
+    ? { tinymistVersion: toolchain.tinymistVersion, typstVersion: toolchain.typstVersion }
+    : null;
 }

@@ -942,7 +942,7 @@ fn collect_directory(
                     name
                 )
             })?;
-            if is_excluded_directory(name) {
+            if is_excluded_directory(root, &path, name) {
                 continue;
             }
             collect_directory(root, &path, excluded_output, files)?;
@@ -952,6 +952,9 @@ fn collect_directory(
             }
             let archive_path = archive_path_for(root, &path)?;
             validate_archive_path(&archive_path)?;
+            if !is_exported_workspace_metadata_file(&archive_path) {
+                continue;
+            }
             let bytes = read_stable_file(&path)?;
             files.push(FileSnapshot {
                 absolute_path: path,
@@ -968,8 +971,25 @@ fn collect_directory(
     Ok(())
 }
 
-fn is_excluded_directory(name: &str) -> bool {
-    matches!(name, ".git" | ".typsastra" | "node_modules" | "target")
+fn is_excluded_directory(root: &Path, path: &Path, name: &str) -> bool {
+    if matches!(name, ".git" | "node_modules" | "target") {
+        return true;
+    }
+    let relative = path.strip_prefix(root).ok();
+    // Enter `.typsastra` itself to retain the portable settings, but never
+    // traverse its generated/internal directories (render cache, maps, fonts,
+    // or temporary outputs).
+    relative.is_some_and(|relative| {
+        relative.starts_with(".typsastra") && relative != Path::new(".typsastra")
+    })
+}
+
+fn is_exported_workspace_metadata_file(archive_path: &str) -> bool {
+    !archive_path.starts_with(".typsastra/")
+        || matches!(
+            archive_path,
+            ".typsastra/config.json" | ".typsastra/workspace.json"
+        )
 }
 
 fn archive_path_for(root: &Path, path: &Path) -> Result<String, String> {
@@ -1132,6 +1152,24 @@ mod tests {
         std::fs::write(
             workspace.path().join(".typsastra").join("cache.txt"),
             "skip",
+        )
+        .unwrap();
+        std::fs::write(
+            workspace.path().join(".typsastra").join("config.json"),
+            r#"{ "schemaVersion": 1, "mainFile": "main.typ" }"#,
+        )
+        .unwrap();
+        std::fs::write(
+            workspace.path().join(".typsastra").join("workspace.json"),
+            r#"{ "schemaVersion": 1, "activeFile": "main.typ" }"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(workspace.path().join(".typsastra/cache/render")).unwrap();
+        std::fs::write(
+            workspace
+                .path()
+                .join(".typsastra/cache/render/generated-preview.pdf"),
+            "%PDF-generated-preview",
         )
         .unwrap();
         workspace
@@ -1309,7 +1347,12 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(names[0], PROJECT_MANIFEST_PATH);
         assert!(names.contains(&"chapters/ខ្មែរ.typ".to_string()));
+        assert!(names.contains(&".typsastra/config.json".to_string()));
+        assert!(names.contains(&".typsastra/workspace.json".to_string()));
         assert!(!names.iter().any(|name| name.contains("cache.txt")));
+        assert!(!names.iter().any(
+            |name| name.contains(".typsastra/cache/") || name.contains("generated-preview.pdf")
+        ));
     }
 
     #[test]
@@ -1380,7 +1423,16 @@ mod tests {
         assert_eq!(Path::new(&imported.workspace_path), destination);
         assert!(destination.join("main.typ").is_file());
         assert!(destination.join("chapters").join("ខ្មែរ.typ").is_file());
+        assert!(destination.join(".typsastra").join("config.json").is_file());
+        assert!(destination
+            .join(".typsastra")
+            .join("workspace.json")
+            .is_file());
         assert!(!destination.join(".typsastra").join("cache.txt").exists());
+        assert!(!destination
+            .join(".typsastra")
+            .join("cache/render/generated-preview.pdf")
+            .exists());
         assert!(destination.join(PROJECT_MANIFEST_PATH).is_file());
     }
 

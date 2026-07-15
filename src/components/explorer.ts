@@ -54,10 +54,15 @@ export class WorkspaceExplorer {
     });
   }
 
-  public async loadWorkspace(rootPath: string) {
+  public expandedDirectoryPaths(): string[] {
+    return [...this.captureViewState().expandedPaths];
+  }
+
+  public async loadWorkspace(rootPath: string, initialExpandedPaths: readonly string[] = []) {
     this.workspaceRootPath = rootPath;
     const generation = ++this.loadGeneration;
     const viewState = this.captureViewState();
+    initialExpandedPaths.forEach(path => viewState.expandedPaths.add(path));
     const isFirstLoad = !this.container.querySelector(".file-tree-branch");
     if (isFirstLoad) {
       this.container.innerHTML = `<div class="explorer-loading">Scanning Workspace...</div>`;

@@ -40,6 +40,12 @@ Open Settings from **File → Settings**, the status bar, or `Ctrl + ,`. Changes
 
 Invalid or missing fields fall back to bounded defaults. Existing theme and word-wrap values from older releases are migrated from `localStorage` the first time the settings file is created.
 
+## Project-local workspace state
+
+Workspace-specific state lives under the project’s `.typsastra/` directory. `config.json` is portable and stores project identity, the relative main document, and the recommended toolchain. `workspace.json` stores the local editing session using relative paths, including tabs, cursor/scroll/fold state, explorer expansion, layout, sidebar visibility, and the selected toolchain override. The session file, cache, and generated fonts are ignored by the managed `.gitignore`; `config.json` may be committed. `.typsastra/project.json` remains reserved for the signed Typsastra project-archive manifest.
+
+Typsastra project exports include `config.json` and `workspace.json` only from this directory. Render caches, generated PDFs, maps, generated fonts, and other internal metadata are never exported.
+
 ## Toolchain
 
 The Toolchain panel installs stable Tinymist releases and shows each release's embedded Typst version. Tinymist is the only toolchain download: its embedded compiler handles diagnostics, fallback SVG compilation, and PDF export, so a separate Typst installation is not required.

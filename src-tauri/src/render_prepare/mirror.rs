@@ -108,7 +108,7 @@ pub fn mirror_project_cancellable(
                     }
                 }
             } else {
-                match link_or_copy_asset(&src_path, &dest_path) {
+                match copy_asset_to_cache(&src_path, &dest_path) {
                     Ok(copied) => {
                         if copied {
                             changed_files.push(dest_path);
@@ -117,7 +117,7 @@ pub fn mirror_project_cancellable(
                     Err(err) => {
                         warnings.push(RenderPrepareWarning {
                             file_path: src_path.clone(),
-                            message: format!("Failed to link or copy asset: {}", err),
+                            message: format!("Failed to copy asset into render cache: {}", err),
                         });
                     }
                 }
@@ -300,45 +300,23 @@ fn walk_project_dir(
     Ok(())
 }
 
-fn link_or_copy_asset(src: &Path, dest: &Path) -> Result<bool, std::io::Error> {
-    if dest.exists() {
-        if let Ok(meta) = fs::symlink_metadata(dest) {
-            if meta.file_type().is_symlink() {
-                if let Ok(target) = fs::read_link(dest) {
-                    if target == src {
+fn copy_asset_to_cache(src: &Path, dest: &Path) -> Result<bool, std::io::Error> {
+    // Cache artifacts must remain plain files. A file symlink back into the
+    // workspace can make Explorer and backup/copy tools follow the link while
+    // duplicating a project, causing the operation to hang or recurse.
+    if let Ok(meta) = fs::symlink_metadata(dest) {
+        if meta.file_type().is_symlink() {
+            fs::remove_file(dest)?;
+        } else if let (Ok(src_meta), Ok(dest_meta)) = (fs::metadata(src), fs::metadata(dest)) {
+            if src_meta.len() == dest_meta.len() {
+                if let (Ok(src_modified), Ok(dest_modified)) =
+                    (src_meta.modified(), dest_meta.modified())
+                {
+                    if src_modified <= dest_modified {
                         return Ok(false);
                     }
                 }
-                let _ = fs::remove_file(dest);
-            } else {
-                if let (Ok(src_meta), Ok(dest_meta)) = (fs::metadata(src), fs::metadata(dest)) {
-                    if src_meta.len() == dest_meta.len() {
-                        if let (Ok(src_modified), Ok(dest_modified)) =
-                            (src_meta.modified(), dest_meta.modified())
-                        {
-                            if src_modified <= dest_modified {
-                                return Ok(false);
-                            }
-                        }
-                    }
-                }
             }
-        }
-    }
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::symlink;
-        if symlink(src, dest).is_ok() {
-            return Ok(true);
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::symlink_file;
-        if symlink_file(src, dest).is_ok() {
-            return Ok(true);
         }
     }
 
@@ -441,6 +419,21 @@ fn process_typ_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copies_pdf_assets_as_regular_cache_files() {
+        let workspace = tempfile::tempdir().unwrap();
+        let source = workspace.path().join("figure.pdf");
+        let cache_file = workspace.path().join(".typsastra/cache/render/figure.pdf");
+        fs::write(&source, b"%PDF-test").unwrap();
+        fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+
+        assert!(copy_asset_to_cache(&source, &cache_file).unwrap());
+        assert_eq!(fs::read(&cache_file).unwrap(), b"%PDF-test");
+        let metadata = fs::symlink_metadata(&cache_file).unwrap();
+        assert!(metadata.file_type().is_file());
+        assert!(!metadata.file_type().is_symlink());
+    }
 
     #[test]
     fn prepares_khmer_hyphenation_boundaries_as_zws_only() {

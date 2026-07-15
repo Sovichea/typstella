@@ -33,7 +33,13 @@ import { EditorFontManager } from "./editor/fontManager";
 import { TabStripController } from "./editor/tabStripController";
 import { createAppIcon, updateMaximizeIcon } from "./ui/icons";
 import { LayoutController } from "./layout/layoutController";
-import { WorkspaceStateStore, workspaceRestoreCandidates } from "./workspace/workspaceStateStore";
+import {
+  WorkspaceStateStore,
+  normalizeWorkspaceMetadata,
+  workspaceRestoreCandidates,
+  type LegacyWorkspaceState,
+  type WorkspaceMetadata
+} from "./workspace/workspaceStateStore";
 import { RecentProjectsController } from "./workspace/recentProjectsController";
 import { WorkspaceWatcher, type WorkspaceChange } from "./workspace/workspaceWatcher";
 import { workspaceViewportState } from "./workspace/workspaceVisibility";
@@ -137,6 +143,7 @@ type ActivateEditorTabOptions = {
 type LoadFileOptions = {
   temporary?: boolean;
   preservePreviewSession?: PreviewSessionState;
+  skipPreviewActivation?: boolean;
 };
 
 function normalizeEditorText(text: string): string {
@@ -189,6 +196,8 @@ export class TypsastraWorkspaceController {
   private pinnedLspMainPath: string | null = null;
   private pinnedMainFilePath: string | null = null;
   private workspaceRootPath: string | null = null;
+  private workspaceMetadata: WorkspaceMetadata | null = null;
+  private workspaceLoading = false;
   private recommendedWorkspaceToolchain: { tinymistVersion: string; typstVersion: string } | null = null;
   private selectedWorkspaceToolchain: { tinymistVersion: string; typstVersion: string } | null = null;
   private currentVersion = 1;
@@ -531,7 +540,9 @@ export class TypsastraWorkspaceController {
     const explorerResizer = document.getElementById("explorer-resizer");
     const sidebarActivityBar = document.getElementById("sidebar-activity-bar");
     const appMenus = document.getElementById("app-menus");
-    const viewport = workspaceViewportState(this.activeFilePath, this.workspaceRootPath);
+    const loading = document.getElementById("workspace-loading");
+    const viewport = workspaceViewportState(this.activeFilePath, this.workspaceRootPath, this.workspaceLoading);
+    loading?.classList.toggle("hidden", !viewport.showLoading);
 
     if (viewport.showWelcome) {
       welcomeScreen?.classList.remove("hidden");
@@ -566,7 +577,7 @@ export class TypsastraWorkspaceController {
     if (!this.workspaceRootPath) return;
     this.sidebarVisible = !this.sidebarVisible;
     this.applySidebarVisibility();
-    this.saveWorkspaceState();
+    void this.saveWorkspaceState();
   }
 
   private restoreDefaultLayout(): void {
@@ -1594,7 +1605,8 @@ export class TypsastraWorkspaceController {
         void this.promoteToPermanent(existingTab);
       }
       await this.activateEditorTab(existingTab.path, true, {
-        preservePreviewSession: options.preservePreviewSession
+        preservePreviewSession: options.preservePreviewSession,
+        skipPreviewActivation: options.skipPreviewActivation
       });
       return;
     }
@@ -1636,7 +1648,8 @@ export class TypsastraWorkspaceController {
       this.openTabs.push(newTab);
       this.renderEditorTabs();
       await this.activateEditorTab(path, true, {
-        preservePreviewSession: options.preservePreviewSession
+        preservePreviewSession: options.preservePreviewSession,
+        skipPreviewActivation: options.skipPreviewActivation
       });
     } catch (e) {
       console.error("Failed to load file:", e);
@@ -3828,113 +3841,168 @@ export class TypsastraWorkspaceController {
     }
   }
 
-  private saveWorkspaceState() {
-    if (!this.workspaceRootPath) return;
+  private saveWorkspaceState(): Promise<void> {
+    if (!this.workspaceRootPath || !this.workspaceMetadata) return Promise.resolve();
     
     this.persistActiveTabState();
     
     const inputContainer = document.getElementById("input-container-wrapper");
     const explorerSidebar = document.getElementById("explorer-sidebar");
     
-    this.workspaceStateStore.save(this.workspaceRootPath, {
-      activeFilePath: this.activeFilePath,
-      pinnedMainFilePath: this.pinnedMainFilePath,
-      openTabs: this.openTabs.map(tab => ({
-        path: tab.path,
-        selectionAnchor: tab.selectionAnchor,
-        selectionHead: tab.selectionHead,
-        scrollTop: tab.scrollTop,
-        scrollLeft: tab.scrollLeft,
-        foldRanges: tab.foldRanges
-      })),
-      inputContainerWidthPct: inputContainer?.style.width ? parseFloat(inputContainer.style.width) : DEFAULT_INPUT_WIDTH_PCT,
-      explorerSidebarWidthPx: explorerSidebar?.style.width ? parseInt(explorerSidebar.style.width, 10) : DEFAULT_EXPLORER_WIDTH_PX,
-      recommendedToolchain: this.recommendedWorkspaceToolchain,
-      selectedToolchain: this.selectedWorkspaceToolchain
+    const relative = (path: string | null): string | null => path && this.workspaceRootPath
+      ? relativeFilePath(this.workspaceRootPath, path)?.replace(/\\/g, "/") ?? null
+      : null;
+    const metadata: WorkspaceMetadata = {
+      project: {
+        ...this.workspaceMetadata.project,
+        mainFile: relative(this.pinnedMainFilePath),
+        recommendedToolchain: this.recommendedWorkspaceToolchain
+      },
+      workspace: {
+        schemaVersion: 1,
+        activeFile: relative(this.activeFilePath),
+        openTabs: this.openTabs.flatMap(tab => {
+          const path = relative(tab.path);
+          return path ? [{
+            path,
+            selectionAnchor: tab.selectionAnchor,
+            selectionHead: tab.selectionHead,
+            scrollTop: tab.scrollTop,
+            scrollLeft: tab.scrollLeft,
+            foldRanges: tab.foldRanges
+          }] : [];
+        }),
+        expandedDirectories: this.explorer.expandedDirectoryPaths().flatMap(path => {
+          const directory = relative(path);
+          return directory ? [directory] : [];
+        }),
+        layout: {
+          inputContainerWidthPct: inputContainer?.style.width ? parseFloat(inputContainer.style.width) : DEFAULT_INPUT_WIDTH_PCT,
+          explorerSidebarWidthPx: explorerSidebar?.style.width ? parseInt(explorerSidebar.style.width, 10) : DEFAULT_EXPLORER_WIDTH_PX,
+          sidebarVisible: this.sidebarVisible
+        },
+        selectedToolchain: this.selectedWorkspaceToolchain
+      }
+    };
+    this.workspaceMetadata = metadata;
+    return this.workspaceStateStore.save(this.workspaceRootPath, metadata).catch(error => {
+      this.appendDeveloperLog({ kind: "error", source: "workspace", message: `Failed to save workspace state: ${String(error)}` });
     });
   }
 
-  private async restoreWorkspaceState(workspacePath: string) {
-    try {
-      const state = this.workspaceStateStore.load(workspacePath);
-      if (!state) return;
-      
-      if (state.inputContainerWidthPct) {
-        const inputContainer = document.getElementById("input-container-wrapper");
-        const previewContainerWrapper = document.getElementById("preview-container-wrapper");
-        if (inputContainer && previewContainerWrapper) {
-          inputContainer.style.width = `${state.inputContainerWidthPct}%`;
-          previewContainerWrapper.style.width = `${100 - state.inputContainerWidthPct}%`;
-        }
-      }
+  private migrateLegacyWorkspaceState(workspacePath: string, legacy: LegacyWorkspaceState): WorkspaceMetadata {
+    const relative = (path: string | null): string | null => path
+      ? relativeFilePath(workspacePath, path)?.replace(/\\/g, "/") ?? null
+      : null;
+    const metadata = normalizeWorkspaceMetadata({ project: null, workspace: null });
+    metadata.project.mainFile = relative(legacy.pinnedMainFilePath);
+    metadata.project.recommendedToolchain = legacy.recommendedToolchain;
+    metadata.workspace.activeFile = relative(legacy.activeFilePath);
+    metadata.workspace.openTabs = legacy.openTabs.flatMap(tab => {
+      const path = relative(tab.path);
+      return path ? [{ ...tab, path }] : [];
+    });
+    metadata.workspace.expandedDirectories = [];
+    metadata.workspace.layout = {
+      inputContainerWidthPct: legacy.inputContainerWidthPct,
+      explorerSidebarWidthPx: legacy.explorerSidebarWidthPx,
+      sidebarVisible: true
+    };
+    metadata.workspace.selectedToolchain = legacy.selectedToolchain;
+    return metadata;
+  }
 
-      if (state.pinnedMainFilePath) {
-        this.pinnedMainFilePath = state.pinnedMainFilePath;
-      }
-      
-      if (state.explorerSidebarWidthPx) {
-        const explorerSidebar = document.getElementById("explorer-sidebar");
-        if (explorerSidebar) {
-          explorerSidebar.style.width = `${state.explorerSidebarWidthPx}px`;
+  private async loadWorkspaceMetadata(workspacePath: string): Promise<WorkspaceMetadata> {
+    const stored = await this.workspaceStateStore.load(workspacePath);
+    if (stored) return stored;
+    const legacy = this.workspaceStateStore.loadLegacy(workspacePath);
+    const metadata = legacy
+      ? this.migrateLegacyWorkspaceState(workspacePath, legacy)
+      : normalizeWorkspaceMetadata({ project: null, workspace: null });
+    await this.workspaceStateStore.save(workspacePath, metadata);
+    if (legacy) this.workspaceStateStore.removeLegacy(workspacePath);
+    return metadata;
+  }
+
+  private async absoluteWorkspacePath(workspacePath: string, relativePath: string | null): Promise<string | null> {
+    return relativePath ? join(workspacePath, relativePath) : null;
+  }
+
+  private async restoreWorkspaceState(workspacePath: string, metadata: WorkspaceMetadata) {
+    try {
+      const state = metadata.workspace;
+      const project = metadata.project;
+      const inputContainer = document.getElementById("input-container-wrapper");
+      const previewContainerWrapper = document.getElementById("preview-container-wrapper");
+      inputContainer!.style.width = `${state.layout.inputContainerWidthPct}%`;
+      if (previewContainerWrapper) previewContainerWrapper.style.width = `${100 - state.layout.inputContainerWidthPct}%`;
+      this.sidebarVisible = state.layout.sidebarVisible;
+      const pinnedMainFilePath = await this.absoluteWorkspacePath(workspacePath, project.mainFile);
+      this.pinnedMainFilePath = pinnedMainFilePath
+        && await invoke<boolean>("workspace_path_exists", { path: pinnedMainFilePath })
+        ? pinnedMainFilePath
+        : null;
+      if (project.mainFile && !this.pinnedMainFilePath) metadata.project.mainFile = null;
+      const explorerSidebar = document.getElementById("explorer-sidebar");
+      if (explorerSidebar) explorerSidebar.style.width = `${state.layout.explorerSidebarWidthPx}px`;
+
+      const restoredTabs = await Promise.all(state.openTabs.map(async tabInfo => ({
+        tabInfo,
+        path: await this.absoluteWorkspacePath(workspacePath, tabInfo.path)
+      })));
+      for (const { tabInfo, path } of restoredTabs) {
+        if (!path) continue;
+        try {
+          const contents = isBinaryImagePath(path)
+            ? await invoke<string>("read_workspace_file_as_base64", { path })
+            : normalizeEditorText(await invoke<string>("read_workspace_file", { path }));
+          this.openTabs.push({
+            path,
+            content: contents,
+            savedContent: contents,
+            isDirty: false,
+            previewRootPath: null,
+            previewMainPath: null,
+            previewTaskId: null,
+            previewSessionKey: null,
+            previewImported: false,
+            previewStandalone: true,
+            previewDisabled: false,
+            version: 1,
+            latestVersion: 1,
+            selectionAnchor: tabInfo.selectionAnchor || 0,
+            selectionHead: tabInfo.selectionHead || 0,
+            scrollTop: tabInfo.scrollTop,
+            scrollLeft: tabInfo.scrollLeft,
+            foldRanges: Array.isArray(tabInfo.foldRanges) ? this.normalizeFoldRanges(tabInfo.foldRanges, contents.length) : null
+          });
+        } catch (e) {
+          console.warn("Failed to restore tab:", path, e);
         }
       }
-      
-      if (state.openTabs.length) {
-        for (const tabInfo of state.openTabs) {
-          try {
-             const contents = isBinaryImagePath(tabInfo.path)
-               ? await invoke<string>("read_workspace_file_as_base64", { path: tabInfo.path })
-               : normalizeEditorText(await invoke<string>("read_workspace_file", { path: tabInfo.path }));
-             this.openTabs.push({
-               path: tabInfo.path,
-               content: contents,
-               savedContent: contents,
-               isDirty: false,
-               previewRootPath: null,
-               previewMainPath: null,
-               previewTaskId: null,
-               previewSessionKey: null,
-               previewImported: false,
-               previewStandalone: true,
-               previewDisabled: false,
-               version: 1,
-               latestVersion: 1,
-               selectionAnchor: tabInfo.selectionAnchor || 0,
-               selectionHead: tabInfo.selectionHead || 0,
-               scrollTop: tabInfo.scrollTop,
-               scrollLeft: tabInfo.scrollLeft,
-               foldRanges: Array.isArray(tabInfo.foldRanges)
-                 ? this.normalizeFoldRanges(tabInfo.foldRanges, contents.length)
-                 : null
-             });
-          } catch(e) {
-             console.warn("Failed to restore tab:", tabInfo.path, e);
-          }
-        }
-        this.renderEditorTabs();
-      }
+      this.renderEditorTabs();
 
       if (this.openTabs.length === 0) {
-        for (const candidate of workspaceRestoreCandidates(state)) {
-          if (await invoke<boolean>("workspace_path_exists", { path: candidate })) {
-            await this.loadFile(candidate);
+        for (const candidate of workspaceRestoreCandidates(metadata)) {
+          const path = await this.absoluteWorkspacePath(workspacePath, candidate);
+          if (path && await invoke<boolean>("workspace_path_exists", { path })) {
+            await this.loadFile(path, { skipPreviewActivation: true });
             return;
           }
         }
       }
-      
-      if (state.activeFilePath) {
-        const activeTab = this.openTabs.find(t => filePathKey(t.path) === filePathKey(state.activeFilePath!));
-        if (activeTab) {
-          await this.activateEditorTab(activeTab.path, false, { skipPreviewActivation: !this.lspReady });
-        } else if (this.openTabs.length > 0) {
-          await this.activateEditorTab(this.openTabs[0].path, false, { skipPreviewActivation: !this.lspReady });
-        }
+
+      const activeFilePath = await this.absoluteWorkspacePath(workspacePath, state.activeFile);
+      if (activeFilePath) {
+        const activeTab = this.openTabs.find(tab => filePathKey(tab.path) === filePathKey(activeFilePath));
+        if (activeTab) await this.activateEditorTab(activeTab.path, false, { skipPreviewActivation: true });
+        else if (this.openTabs.length > 0) await this.activateEditorTab(this.openTabs[0].path, false, { skipPreviewActivation: true });
       } else if (this.openTabs.length > 0) {
-         await this.activateEditorTab(this.openTabs[0].path, false, { skipPreviewActivation: !this.lspReady });
+        await this.activateEditorTab(this.openTabs[0].path, false, { skipPreviewActivation: true });
       }
-    } catch(e) {
+    } catch (e) {
       console.warn("Failed to restore workspace state:", e);
+      throw e;
     }
   }
 
@@ -4413,46 +4481,89 @@ export class TypsastraWorkspaceController {
       const closed = await this.closeProject();
       if (!closed) return;
     }
-    await invoke("cleanup_workspace_preview_files", { workspaceRootPath: selected });
-    this.workspaceRootPath = selected;
-    await this.restoreWorkspaceToolchain(selected);
-    await this.prepareRenderProjectIfNeeded();
-    await this.explorer.loadWorkspace(selected);
-    await this.workspaceWatcher.start(selected);
+    this.workspaceLoading = true;
     this.updateWorkspaceViewportVisibility();
-    this.recentProjectsController.add(selected);
-    if (this.lspClient) {
-      this.setLspStatus({ kind: "starting", message: "Connecting to new workspace root..." });
+    try {
+      await invoke("cleanup_workspace_preview_files", { workspaceRootPath: selected });
+      this.workspaceRootPath = selected;
       this.lspReady = false;
-      this.openedDocumentUris.clear();
-      try {
-        await this.lspClient.restart();
-        this.lspReady = true;
-        this.pdfSyncPreviewTaskKey = null;
-        this.pdfSyncRegisteredTaskId = null;
-        this.pdfSourceMapStartup = null;
-        this.pdfSourceMapStartupKey = null;
-        this.pdfSyncSocket?.close();
-        this.pdfSyncSocket = null;
-        this.pdfSyncSocketUrl = "";
-      } catch (error) {
+      this.workspaceMetadata = await this.loadWorkspaceMetadata(selected);
+      await this.restoreWorkspaceToolchain(this.workspaceMetadata);
+      const expandedDirectories = (await Promise.all(
+        this.workspaceMetadata.workspace.expandedDirectories.map(path => this.absoluteWorkspacePath(selected, path))
+      )).filter((path): path is string => !!path);
+      await this.explorer.loadWorkspace(selected, expandedDirectories);
+      await this.restoreWorkspaceState(selected, this.workspaceMetadata);
+      if (this.activeFilePath) await this.explorer.revealPath(this.activeFilePath);
+      await this.saveWorkspaceState();
+      await this.explorer.loadWorkspace(selected);
+      await this.workspaceWatcher.start(selected);
+      this.recentProjectsController.add(selected);
+    } catch (error) {
+      this.workspaceWatcher.stop();
+      this.workspaceRootPath = null;
+      this.workspaceMetadata = null;
+      this.activeFilePath = null;
+      this.pinnedMainFilePath = null;
+      this.openTabs = [];
+      this.explorer.setActiveFile(null);
+      this.renderEditorTabs();
+      await message(String(error), { title: "Unable to Open Workspace", kind: "error" });
+      return;
+    } finally {
+      this.workspaceLoading = false;
+      this.updateWorkspaceViewportVisibility();
+    }
+    void this.startWorkspaceServices(selected);
+  }
+
+  private async startWorkspaceServices(selected: string): Promise<void> {
+    try {
+      if (this.workspaceRootPath !== selected) return;
+      await this.prepareRenderProjectIfNeeded();
+      if (this.workspaceRootPath !== selected) return;
+      if (this.lspClient) {
+        this.setLspStatus({ kind: "starting", message: "Connecting to new workspace root..." });
         this.lspReady = false;
+        this.openedDocumentUris.clear();
+        try {
+          await this.lspClient.restart();
+          if (this.workspaceRootPath !== selected) return;
+          this.lspReady = true;
+          this.pdfSyncPreviewTaskKey = null;
+          this.pdfSyncRegisteredTaskId = null;
+          this.pdfSourceMapStartup = null;
+          this.pdfSourceMapStartupKey = null;
+          this.pdfSyncSocket?.close();
+          this.pdfSyncSocket = null;
+          this.pdfSyncSocketUrl = "";
+        } catch (error) {
+          if (this.workspaceRootPath !== selected) return;
+          this.lspReady = false;
+          this.appendDeveloperLog({
+            kind: "error",
+            source: "lsp",
+            message: `Failed to restart Tinymist for workspace ${selected}: ${String(error)}`
+          });
+        }
+      }
+      if (this.workspaceRootPath === selected && this.activeFilePath) {
+        await this.refreshActivePreviewRoot(true);
+      }
+    } catch (error) {
+      if (this.workspaceRootPath === selected) {
         this.appendDeveloperLog({
           kind: "error",
-          source: "lsp",
-          message: `Failed to restart Tinymist for workspace ${selected}: ${String(error)}`
+          source: "workspace",
+          message: `Workspace services failed to start: ${String(error)}`
         });
       }
     }
-    await this.restoreWorkspaceState(selected);
-    // Reload explorer tree to make sure the restored pinned main file color/format is rendered
-    await this.explorer.loadWorkspace(selected);
   }
 
-  private async restoreWorkspaceToolchain(workspacePath: string): Promise<void> {
-    const stored = this.workspaceStateStore.load(workspacePath);
-    this.recommendedWorkspaceToolchain = stored?.recommendedToolchain ?? null;
-    this.selectedWorkspaceToolchain = stored?.selectedToolchain ?? null;
+  private async restoreWorkspaceToolchain(metadata: WorkspaceMetadata): Promise<void> {
+    this.recommendedWorkspaceToolchain = metadata.project.recommendedToolchain;
+    this.selectedWorkspaceToolchain = metadata.workspace.selectedToolchain;
     if (!this.selectedWorkspaceToolchain) return;
     try {
       const status = await invoke<ToolchainStatus>("select_project_toolchain", {
@@ -4634,9 +4745,9 @@ export class TypsastraWorkspaceController {
       this.selectedWorkspaceToolchain = activeToolchain?.tinymistVersion && activeToolchain.typstVersion
         ? { tinymistVersion: activeToolchain.tinymistVersion, typstVersion: activeToolchain.typstVersion }
         : null;
-      this.saveWorkspaceState();
       if (this.workspaceRootPath && filePathKey(this.workspaceRootPath) === filePathKey(imported.workspacePath)) {
-        await this.loadFile(imported.mainFilePath, { temporary: false });
+        await this.setPinnedMainFile(imported.mainFilePath);
+        await this.saveWorkspaceState();
         this.setLspStatus({ kind: "preview-ready", message: `Imported ${imported.manifest.project.name}` });
       } else {
         await message(`The project was imported to:\n\n${imported.workspacePath}`, {
@@ -4772,7 +4883,7 @@ export class TypsastraWorkspaceController {
       if (!shouldClose) return false;
     }
 
-    this.saveWorkspaceState();
+    await this.saveWorkspaceState();
     this.workspaceWatcher.stop();
 
     const previewTaskIds = new Set([
@@ -4801,6 +4912,8 @@ export class TypsastraWorkspaceController {
     this.queuedManualForwardSync = null;
 
     this.workspaceRootPath = null;
+    this.workspaceMetadata = null;
+    this.workspaceLoading = false;
     this.recommendedWorkspaceToolchain = null;
     this.selectedWorkspaceToolchain = null;
     this.activeFilePath = null;

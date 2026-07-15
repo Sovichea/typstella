@@ -6,7 +6,8 @@ describe("workspace viewport visibility", () => {
     expect(workspaceViewportState(null, null)).toEqual({
       showWelcome: true,
       showEditor: false,
-      showWorkspaceChrome: false
+      showWorkspaceChrome: false,
+      showLoading: false
     });
   });
 
@@ -14,7 +15,8 @@ describe("workspace viewport visibility", () => {
     expect(workspaceViewportState(null, "C:/project")).toEqual({
       showWelcome: false,
       showEditor: false,
-      showWorkspaceChrome: true
+      showWorkspaceChrome: true,
+      showLoading: false
     });
   });
 
@@ -22,7 +24,17 @@ describe("workspace viewport visibility", () => {
     expect(workspaceViewportState("C:/project/main.typ", "C:/project")).toEqual({
       showWelcome: false,
       showEditor: true,
-      showWorkspaceChrome: true
+      showWorkspaceChrome: true,
+      showLoading: false
+    });
+  });
+
+  test("hides the workspace until state restoration completes", () => {
+    expect(workspaceViewportState(null, "C:/project", true)).toEqual({
+      showWelcome: false,
+      showEditor: false,
+      showWorkspaceChrome: false,
+      showLoading: true
     });
   });
 });
