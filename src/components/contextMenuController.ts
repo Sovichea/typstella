@@ -38,6 +38,15 @@ const previewItems = `
   <div class="dropdown-separator"></div>
   <div class="dropdown-item" id="ctx-export-pdf">Export PDF</div>`;
 
+export function explorerKeyboardAction(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">): "copy" | "paste" | "delete" | null {
+  const commandModifier = (event.ctrlKey || event.metaKey) && !event.altKey;
+  const key = event.key.toLowerCase();
+  if (commandModifier && !event.shiftKey && key === "c") return "copy";
+  if (commandModifier && !event.shiftKey && key === "v") return "paste";
+  if (!event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key === "Delete") return "delete";
+  return null;
+}
+
 export class ContextMenuController {
   private targetPath = "";
   private targetIsDirectory = false;
@@ -65,6 +74,27 @@ export class ContextMenuController {
       this.show(previewItems, rect.right, rect.bottom + 4, true);
     });
     window.addEventListener("message", event => this.handlePreviewMessage(event));
+    document.getElementById("workspace-explorer-tree")?.addEventListener("keydown", event => {
+      void this.handleExplorerKeydown(event);
+    });
+  }
+
+  private async handleExplorerKeydown(event: KeyboardEvent): Promise<void> {
+    if ((event.target as HTMLElement).closest("input, textarea, [contenteditable='true']")) return;
+    const action = explorerKeyboardAction(event);
+    if (!action || event.repeat) return;
+    const selection = this.dependencies.getExplorer().selectedEntry();
+    if (action !== "paste" && !selection) return;
+    if (action === "paste" && !this.copiedFilePath) return;
+
+    this.targetPath = selection?.path ?? this.dependencies.getWorkspaceRoot() ?? "";
+    this.targetIsDirectory = selection?.isDirectory ?? true;
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (action === "copy") await this.execute("ctx-fs-copy");
+    else if (action === "paste") await this.execute("ctx-fs-paste");
+    else await this.execute("ctx-fs-delete");
   }
 
   private async execute(action: string): Promise<void> {

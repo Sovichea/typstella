@@ -361,6 +361,11 @@ html {
 }
 .outline-item:hover { background: var(--ui-hover); }
 .outline-item.active { background: var(--ui-select); }
+.outline-item.keyboard-selected {
+  background: var(--ui-hover);
+  box-shadow: inset 2px 0 var(--editor-function-color, #007fd4);
+}
+.outline-item.active.keyboard-selected { background: var(--ui-select); }
 .outline-disclosure,
 .outline-label {
   height: 24px;
@@ -2085,6 +2090,19 @@ body.typsastra-resizing #input-container-wrapper::after {
 .tree-item:focus {
   outline: 1px solid #007fd4;
   outline-offset: -1px;
+}
+
+#workspace-explorer-tree:focus,
+.outline-tree:focus {
+  outline: none;
+}
+
+.workspace-explorer-section:focus-within,
+.outline-section:focus-within,
+#input-container-wrapper:focus-within,
+#preview-container-wrapper:focus-within,
+#log-console:focus-within {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--editor-function-color, #007fd4) 42%, transparent);
 }
 
 .tree-chevron,

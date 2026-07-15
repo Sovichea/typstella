@@ -5,6 +5,8 @@ import { filePathKey } from "../platform/paths";
 
 export interface FileNode { name: string; path: string; isDirectory: boolean; children?: FileNode[]; }
 
+export type ExplorerSelection = { path: string; isDirectory: boolean };
+
 export function sortFileNodes(nodes: FileNode[]): FileNode[] {
   return [...nodes].sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.name.localeCompare(b.name));
 }
@@ -41,7 +43,80 @@ export class WorkspaceExplorer {
     private container: HTMLElement,
     private onFileSelected: (filePath: string, options?: { temporary?: boolean }) => void,
     private isPinnedMainFile?: (filePath: string) => boolean
-  ) {}
+  ) {
+    this.container.tabIndex = 0;
+    this.container.setAttribute("role", "tree");
+    this.container.setAttribute("aria-label", "Workspace Explorer");
+    this.container.addEventListener("pointerdown", event => {
+      if (!(event.target as HTMLElement).closest("input, textarea")) {
+        this.container.focus({ preventScroll: true });
+      }
+    });
+    this.container.addEventListener("focus", () => this.ensureKeyboardSelection());
+    this.container.addEventListener("keydown", event => void this.handleKeyboardNavigation(event));
+  }
+
+  public selectedEntry(): ExplorerSelection | null {
+    const item = this.container.querySelector<HTMLElement>(".tree-item.selected[data-path]");
+    const path = item?.dataset.path;
+    return path ? { path, isDirectory: item.dataset.isDir === "true" } : null;
+  }
+
+  private visibleItems(): HTMLElement[] {
+    return [...this.container.querySelectorAll<HTMLElement>(".tree-item[data-path]")]
+      .filter(item => item.getClientRects().length > 0);
+  }
+
+  private selectItem(item: HTMLElement): void {
+    this.container.querySelectorAll<HTMLElement>(".tree-item.selected").forEach(current => {
+      current.classList.remove("selected");
+      current.setAttribute("aria-selected", "false");
+    });
+    item.classList.add("selected");
+    item.setAttribute("aria-selected", "true");
+    item.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+
+  private ensureKeyboardSelection(): void {
+    if (this.selectedEntry()) return;
+    const item = this.container.querySelector<HTMLElement>(".tree-item.active-file[data-path]")
+      ?? this.visibleItems()[0];
+    if (item) this.selectItem(item);
+  }
+
+  private async handleKeyboardNavigation(event: KeyboardEvent): Promise<void> {
+    if ((event.target as HTMLElement).closest("input, textarea")) return;
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)) return;
+    this.ensureKeyboardSelection();
+    const items = this.visibleItems();
+    const selected = this.container.querySelector<HTMLElement>(".tree-item.selected[data-path]");
+    if (!selected || !items.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const index = Math.max(0, items.indexOf(selected));
+    if (event.key === "ArrowUp") this.selectItem(items[Math.max(0, index - 1)]);
+    else if (event.key === "ArrowDown") this.selectItem(items[Math.min(items.length - 1, index + 1)]);
+    else if (event.key === "Home") this.selectItem(items[0]);
+    else if (event.key === "End") this.selectItem(items[items.length - 1]);
+    else if (event.key === "Enter") {
+      if (selected.dataset.isDir === "true") selected.click();
+      else if (selected.dataset.path) this.onFileSelected(selected.dataset.path, { temporary: false });
+    } else if (event.key === "ArrowRight" && selected.dataset.isDir === "true") {
+      const folder = selected.closest("li.tree-folder");
+      if (folder?.classList.contains("collapsed")) selected.click();
+      else if (items[index + 1]) this.selectItem(items[index + 1]);
+    } else if (event.key === "ArrowLeft") {
+      const folder = selected.closest("li.tree-folder");
+      if (selected.dataset.isDir === "true" && folder && !folder.classList.contains("collapsed")) {
+        selected.click();
+      } else {
+        const parent = selected.closest("li")?.parentElement?.closest("li.tree-folder")
+          ?.querySelector<HTMLElement>(":scope > .tree-item[data-path]");
+        if (parent) this.selectItem(parent);
+      }
+    }
+  }
 
   public setActiveFile(filePath: string | null): void {
     this.activeFilePath = filePath;
@@ -173,6 +248,8 @@ export class WorkspaceExplorer {
       label.className = `tree-item explorer-item-target${selectedPath === node.path ? " selected" : ""}${isActiveFile ? " active-file" : ""}${isPinnedMain ? " pinned-main" : ""}`;
       label.dataset.path = node.path;
       label.dataset.isDir = String(node.isDirectory);
+      label.setAttribute("role", "treeitem");
+      label.setAttribute("aria-selected", String(selectedPath === node.path));
       if (isActiveFile) label.setAttribute("aria-current", "page");
       // Base padding + depth padding
       label.style.paddingLeft = `${depth * 12 + 8}px`;
@@ -205,7 +282,7 @@ export class WorkspaceExplorer {
 
       if (!node.isDirectory) {
         label.addEventListener("click", () => {
-          document.querySelectorAll('.tree-item.selected').forEach(el => el.classList.remove('selected'));
+          this.container.querySelectorAll('.tree-item.selected').forEach(el => el.classList.remove('selected'));
           label.classList.add('selected');
           this.onFileSelected(node.path, { temporary: true });
         });
@@ -222,6 +299,8 @@ export class WorkspaceExplorer {
         }
 
         label.addEventListener("click", async () => {
+          this.container.querySelectorAll(".tree-item.selected").forEach(item => item.classList.remove("selected"));
+          label.classList.add("selected");
           const expanding = li.classList.contains("collapsed");
           li.classList.toggle("collapsed", !expanding);
           chevronContainer.classList.toggle("collapsed", !expanding);

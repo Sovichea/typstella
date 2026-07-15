@@ -175,6 +175,7 @@ export class DocumentOutlineController {
   private readonly collapsed = new Set<string>();
   private cursor = 0;
   private activePath: string | null = null;
+  private selectedHeadingId: string | null = null;
 
   constructor(
     private readonly container: HTMLElement,
@@ -188,6 +189,11 @@ export class DocumentOutlineController {
       const isCollapsed = this.section.classList.toggle("collapsed");
       toggle.setAttribute("aria-expanded", String(!isCollapsed));
     });
+    this.container.tabIndex = 0;
+    this.container.setAttribute("role", "tree");
+    this.container.setAttribute("aria-label", "Document Outline");
+    this.container.addEventListener("focus", () => this.ensureKeyboardSelection());
+    this.container.addEventListener("keydown", event => this.handleKeyboardNavigation(event));
     this.render();
   }
 
@@ -199,6 +205,7 @@ export class DocumentOutlineController {
     for (const id of this.collapsed) {
       if (!validIds.has(id)) this.collapsed.delete(id);
     }
+    if (this.selectedHeadingId && !validIds.has(this.selectedHeadingId)) this.selectedHeadingId = null;
     this.render();
     this.setCursorPosition(this.cursor);
   }
@@ -208,6 +215,7 @@ export class DocumentOutlineController {
     this.flatHeadings = [];
     this.cursor = 0;
     this.activePath = null;
+    this.selectedHeadingId = null;
     this.collapsed.clear();
     this.render();
   }
@@ -268,6 +276,7 @@ export class DocumentOutlineController {
     const count = document.getElementById("document-outline-count");
     if (count) count.textContent = String(this.flatHeadings.length);
     if (!this.headings.length) {
+      this.selectedHeadingId = null;
       const empty = document.createElement("div");
       empty.className = "outline-empty";
       empty.textContent = "No headings in the active document.";
@@ -277,6 +286,63 @@ export class DocumentOutlineController {
     this.container.replaceChildren(this.renderLevel(this.headings));
   }
 
+  private visibleRows(): HTMLElement[] {
+    return [...this.container.querySelectorAll<HTMLElement>(".outline-item[data-outline-id]")]
+      .filter(row => row.getClientRects().length > 0);
+  }
+
+  private selectRow(row: HTMLElement): void {
+    this.selectedHeadingId = row.dataset.outlineId ?? null;
+    this.container.querySelectorAll<HTMLElement>(".outline-item.keyboard-selected").forEach(current => {
+      current.classList.remove("keyboard-selected");
+      current.setAttribute("aria-selected", "false");
+    });
+    row.classList.add("keyboard-selected");
+    row.setAttribute("aria-selected", "true");
+    row.scrollIntoView({ block: "nearest" });
+  }
+
+  private ensureKeyboardSelection(): void {
+    const selected = this.selectedHeadingId
+      ? [...this.container.querySelectorAll<HTMLElement>(".outline-item[data-outline-id]")]
+          .find(row => row.dataset.outlineId === this.selectedHeadingId) ?? null
+      : null;
+    const row = selected ?? this.container.querySelector<HTMLElement>(".outline-item.active") ?? this.visibleRows()[0];
+    if (row) this.selectRow(row);
+  }
+
+  private handleKeyboardNavigation(event: KeyboardEvent): void {
+    if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'Enter'].includes(event.key)) return;
+    this.ensureKeyboardSelection();
+    const rows = this.visibleRows();
+    const selected = this.container.querySelector<HTMLElement>(".outline-item.keyboard-selected[data-outline-id]");
+    if (!selected || !rows.length) return;
+    event.preventDefault();
+    event.stopPropagation();
+
+    const index = Math.max(0, rows.indexOf(selected));
+    if (event.key === "ArrowUp") this.selectRow(rows[Math.max(0, index - 1)]);
+    else if (event.key === "ArrowDown") this.selectRow(rows[Math.min(rows.length - 1, index + 1)]);
+    else if (event.key === "Home") this.selectRow(rows[0]);
+    else if (event.key === "End") this.selectRow(rows[rows.length - 1]);
+    else if (event.key === "Enter") {
+      const heading = this.findHeading(selected.dataset.outlineId ?? "");
+      if (heading) this.onNavigate(heading);
+    } else if (event.key === "ArrowRight") {
+      const disclosure = selected.querySelector<HTMLButtonElement>(".outline-disclosure:not(.placeholder)");
+      if (disclosure?.getAttribute("aria-expanded") === "false") disclosure.click();
+      else if (rows[index + 1]) this.selectRow(rows[index + 1]);
+    } else if (event.key === "ArrowLeft") {
+      const disclosure = selected.querySelector<HTMLButtonElement>(".outline-disclosure:not(.placeholder)");
+      if (disclosure?.getAttribute("aria-expanded") === "true") disclosure.click();
+      else {
+        const parent = selected.closest("li.outline-node")?.parentElement?.closest("li.outline-node")
+          ?.querySelector<HTMLElement>(":scope > .outline-item");
+        if (parent) this.selectRow(parent);
+      }
+    }
+  }
+
   private renderLevel(headings: readonly DocumentHeading[]): HTMLUListElement {
     const list = document.createElement("ul");
     list.className = "outline-list";
@@ -284,12 +350,15 @@ export class DocumentOutlineController {
       const item = document.createElement("li");
       item.className = "outline-node";
       const row = document.createElement("div");
-      row.className = "outline-item";
+      row.className = `outline-item${this.selectedHeadingId === heading.id ? " keyboard-selected" : ""}`;
       row.dataset.outlineId = heading.id;
+      row.setAttribute("role", "treeitem");
+      row.setAttribute("aria-selected", String(this.selectedHeadingId === heading.id));
       row.title = `${heading.title} (line ${heading.line})`;
 
       const disclosure = document.createElement("button");
       disclosure.type = "button";
+      disclosure.tabIndex = -1;
       disclosure.className = "outline-disclosure";
       if (heading.children.length) {
         const isCollapsed = this.collapsed.has(heading.id);
@@ -299,6 +368,7 @@ export class DocumentOutlineController {
         disclosure.setAttribute("aria-expanded", String(!isCollapsed));
         disclosure.addEventListener("click", event => {
           event.stopPropagation();
+          this.selectedHeadingId = heading.id;
           if (this.collapsed.has(heading.id)) this.collapsed.delete(heading.id);
           else this.collapsed.add(heading.id);
           this.render();
@@ -313,9 +383,13 @@ export class DocumentOutlineController {
 
       const label = document.createElement("button");
       label.type = "button";
+      label.tabIndex = -1;
       label.className = "outline-label";
       label.textContent = heading.title;
-      label.addEventListener("click", () => this.onNavigate(heading));
+      label.addEventListener("click", () => {
+        this.selectedHeadingId = heading.id;
+        this.onNavigate(heading);
+      });
       row.append(disclosure, label);
       item.appendChild(row);
       if (heading.children.length) {
