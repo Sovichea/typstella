@@ -44,11 +44,14 @@ export const baseEditorLayoutTheme = EditorView.theme({
       }
   },
   ".cm-selectionBackground, .cm-content ::selection": {
-      backgroundColor: "var(--editor-selection-color, rgba(3, 102, 214, 0.22)) !important"
+      backgroundColor: "var(--ui-word-selection-background, rgba(3, 102, 214, 0.4)) !important"
   },
   ".cm-focused .cm-selectionBackground": {
-      backgroundColor: "var(--editor-selection-focus-color, rgba(3, 102, 214, 0.3)) !important",
-      outline: "1px solid var(--editor-selection-outline, rgba(3, 102, 214, 0.32))"
+      backgroundColor: "var(--ui-word-selection-focus-background, rgba(3, 102, 214, 0.52)) !important",
+      outline: "1px solid var(--ui-word-selection-outline, rgba(3, 102, 214, 0.72))"
+  },
+  ".cm-activeLine, .cm-activeLineGutter": {
+      backgroundColor: "var(--ui-active-line-background) !important"
   },
   ".cm-matchingBracket": {
       backgroundColor: "var(--ui-select, rgba(255, 255, 255, 0.2)) !important",
