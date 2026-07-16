@@ -162,6 +162,7 @@ impl Collector<'_> {
         if !is_text_expr(rule.target()) {
             return;
         }
+        let diagnostic = language_argument_range(node, rule.args()).unwrap_or_else(|| node.range());
         let (mut language, mut region, mut script) = style_args(rule.args());
         if language.is_none() && region.is_none() && script.is_none() {
             return;
@@ -176,7 +177,7 @@ impl Collector<'_> {
             MutationKind::SetRule,
             node.range().end..scope_end,
             node.range(),
-            node.range(),
+            diagnostic,
             language,
             region,
             script,
@@ -194,6 +195,7 @@ impl Collector<'_> {
         if !is_text_expr(set.target()) {
             return;
         }
+        let diagnostic = language_argument_range(node, set.args()).unwrap_or_else(|| node.range());
         let (mut language, mut region, mut script) = style_args(set.args());
         if language.is_none() && region.is_none() && script.is_none() {
             return;
@@ -203,7 +205,7 @@ impl Collector<'_> {
             MutationKind::ShowRule,
             node.range().end..lexical_scope_end(node),
             node.range(),
-            node.range(),
+            diagnostic,
             language,
             region,
             script,
@@ -218,6 +220,7 @@ impl Collector<'_> {
         if !is_text_expr(call.callee()) {
             return;
         }
+        let diagnostic = language_argument_range(node, call.args()).unwrap_or_else(|| node.range());
         let (mut language, mut region, mut script) = style_args(call.args());
         if language.is_none() && region.is_none() && script.is_none() {
             return;
@@ -235,7 +238,7 @@ impl Collector<'_> {
                             MutationKind::TextCall,
                             linked_body.range(),
                             node.range(),
-                            node.range(),
+                            diagnostic.clone(),
                             language.clone(),
                             region.clone(),
                             script.clone(),
@@ -252,7 +255,7 @@ impl Collector<'_> {
                                 MutationKind::TextCall,
                                 body.clone(),
                                 node.range(),
-                                node.range(),
+                                diagnostic.clone(),
                                 language.clone(),
                                 region.clone(),
                                 script.clone(),
@@ -385,6 +388,15 @@ fn style_args(
     (language, region, script)
 }
 
+fn language_argument_range(node: &LinkedNode<'_>, args: ast::Args<'_>) -> Option<Range<usize>> {
+    args.items().find_map(|arg| {
+        let Arg::Named(named) = arg else { return None };
+        (named.name().as_str() == "lang")
+            .then(|| find_node(node, named.to_untyped()).map(|linked| linked.range()))
+            .flatten()
+    })
+}
+
 fn expr_value(expr: Expr<'_>) -> ExtractedStyleValue {
     match expr {
         Expr::Str(value) => ExtractedStyleValue {
@@ -500,6 +512,20 @@ fn text_is_shadowed(node: &LinkedNode<'_>) -> bool {
                             .bindings()
                             .iter()
                             .any(|ident| ident.as_str() == "text")
+                    })
+            {
+                return true;
+            }
+            if child.kind() == SyntaxKind::ModuleImport
+                && child
+                    .get()
+                    .cast::<ast::ModuleImport>()
+                    .and_then(|import| import.imports())
+                    .is_some_and(|imports| match imports {
+                        ast::Imports::Wildcard => true,
+                        ast::Imports::Items(items) => items
+                            .iter()
+                            .any(|item| item.bound_name().as_str() == "text"),
                     })
             {
                 return true;

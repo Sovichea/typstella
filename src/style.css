@@ -38,6 +38,7 @@
   --ui-hover: #e4e6f1;
   --ui-select: #d7e8f5;
   --ui-accent-color: #005cc5;
+  --ui-warning-color: #b66a00;
   --ui-navigation-background: color-mix(in srgb, var(--ui-accent-color) 10%, var(--ui-bg));
   --ui-active-line-background: color-mix(in srgb, var(--ui-accent-color) 10%, transparent);
   --ui-word-selection-background: color-mix(in srgb, var(--ui-accent-color) 40%, var(--ui-bg));
@@ -2738,6 +2739,62 @@ button.welcome-item:disabled {
 }
 .tree-item.pinned-main .tree-text {
   color: var(--ui-accent-color);
+}
+
+.cm-language-scope-hint.downloadable,
+.cm-language-scope-hint.unsupported {
+  text-decoration: underline dotted var(--ui-warning-color);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+
+.cm-language-scope-hint.disabled {
+  text-decoration: underline dotted color-mix(in srgb, var(--ui-header-text) 75%, transparent);
+  text-underline-offset: 3px;
+}
+
+.cm-language-scope-marker {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-inline: 2px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  color: var(--ui-warning-color);
+  font: 700 10px/1 var(--font-family-sans);
+}
+
+.cm-language-scope-marker.info {
+  color: var(--ui-header-text);
+}
+
+/* Keep the language-warning lane allocated while scope analysis catches up to
+   an edit. Otherwise CodeMirror collapses and restores the gutter on every
+   keystroke, shifting the editor horizontally. */
+.cm-gutter.cm-language-scope-gutter {
+  min-width: 20px;
+}
+
+.cm-language-scope-gutter .cm-gutterElement {
+  box-sizing: border-box;
+  min-width: 20px;
+  text-align: center;
+}
+
+.settings-language-provider-controls {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  justify-items: center;
+  gap: 2px 8px;
+  flex: 0 0 auto;
+}
+
+.settings-language-provider-controls small {
+  grid-column: 2;
+  color: var(--ui-header-text);
+  font-size: 10px;
 }
 
 .preview-disabled-placeholder {

@@ -54,6 +54,7 @@ export interface EffectiveLanguageRange extends SourceRange {
   style: EffectiveLanguageStyle;
   sourceKind: MutationKind | "default" | "inherited";
   declaration?: SourceRange;
+  languageDeclaration?: SourceRange;
 }
 
 export interface ResolvedLanguageScopes {
@@ -61,6 +62,7 @@ export interface ResolvedLanguageScopes {
   revision: number;
   documentUtf16: number;
   parserVersion: string;
+  elapsedMicros: number;
   ranges: EffectiveLanguageRange[];
   proseRanges: SourceRange[];
   syntaxErrors: SourceRange[];
@@ -73,6 +75,7 @@ export type ProviderAvailability =
   | "disabled"
   | "downloadable"
   | "unsupported"
+  | "ambiguous"
   | "invalid"
   | "dynamic";
 
@@ -103,4 +106,3 @@ export interface AcceptedTermRecord {
 }
 
 export const LANGUAGE_SCOPE_CONTRACT_VERSION = 1;
-

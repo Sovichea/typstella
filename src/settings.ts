@@ -23,9 +23,13 @@ export type DeveloperLogCategory =
   | "general";
 
 export type DeveloperLogSettings = Record<DeveloperLogCategory, boolean>;
+export type CompletionLanguageSource = "keyboard" | "scope" | "manual";
+export type TerminologyEntry = { term: string; exactCase: boolean };
+export type LanguageTerminologyEntry = TerminologyEntry & { languageFamily: string };
+export type ScopedIgnoredWord = { term: string; scope: "global" | "project" | "languageFamily"; languageFamily?: string };
 
 export type AppSettings = {
-  version: 1;
+  version: 2;
   developerMode: boolean;
   developerLogs: DeveloperLogSettings;
   appearance: {
@@ -46,9 +50,15 @@ export type AppSettings = {
     spellcheck: boolean;
     wordCompletion: boolean;
     languageProviders: string[] | null;
+    embeddedSpellcheckLanguages: string[];
+    completionLanguageSource: CompletionLanguageSource;
+    manualCompletionLanguage: string | null;
     showZws: boolean;
     userDictionary: string[];
     ignoredWords: string[];
+    globalTerminology: TerminologyEntry[];
+    languageTerminology: LanguageTerminologyEntry[];
+    scopedIgnoredWords: ScopedIgnoredWord[];
     formatOnSave: boolean;
   };
   preview: {
@@ -64,7 +74,7 @@ export type AppSettings = {
 };
 
 export const defaultAppSettings: AppSettings = {
-  version: 1,
+  version: 2,
   developerMode: false,
   developerLogs: {
     preview: true,
@@ -93,9 +103,15 @@ export const defaultAppSettings: AppSettings = {
     spellcheck: true,
     wordCompletion: true,
     languageProviders: null,
+    embeddedSpellcheckLanguages: [],
+    completionLanguageSource: "keyboard",
+    manualCompletionLanguage: null,
     showZws: true,
     userDictionary: [],
     ignoredWords: [],
+    globalTerminology: [],
+    languageTerminology: [],
+    scopedIgnoredWords: [],
     formatOnSave: false
   },
   preview: {
@@ -140,6 +156,65 @@ function previewRenderMode(value: unknown): PreviewRenderMode {
     : defaultAppSettings.preview.renderMode;
 }
 
+function orderedStringList(value: unknown, limit = 64): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim()).filter((item) => item.length > 0 && item.length <= 128))].slice(0, limit);
+}
+
+function manualLanguageTag(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const [language, region, ...extra] = value.trim().replace(/_/g, "-").split("-");
+  if (extra.length || !language || !/^[a-z]{2,3}$/i.test(language)) return null;
+  if (region && !/^(?:[a-z]{2}|\d{3})$/i.test(region)) return null;
+  return region
+    ? `${language.toLowerCase()}-${/^\d{3}$/.test(region) ? region : region.toUpperCase()}`
+    : language.toLowerCase();
+}
+
+function terminologyEntries(value: unknown, limit = 2_000): TerminologyEntry[] {
+  if (!Array.isArray(value)) return [];
+  const entries = new Map<string, TerminologyEntry>();
+  for (const item of value.slice(0, limit)) {
+    const record = objectValue(item);
+    const term = typeof record.term === "string" ? record.term.trim() : "";
+    if (!term || term.length > 128 || /[\r\n\0]/.test(term)) continue;
+    const exactCase = record.exactCase !== false;
+    entries.set(`${exactCase ? "exact" : "fold"}:${term}`, { term, exactCase });
+  }
+  return [...entries.values()];
+}
+
+function languageTerminologyEntries(value: unknown): LanguageTerminologyEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 2_000).flatMap((item) => {
+    const record = objectValue(item);
+    const term = terminologyEntries([record], 1)[0];
+    const languageFamily = typeof record.languageFamily === "string"
+      && /^[a-z]{2,3}$/i.test(record.languageFamily)
+      ? record.languageFamily.toLowerCase()
+      : null;
+    return term && languageFamily ? [{ ...term, languageFamily }] : [];
+  });
+}
+
+function scopedIgnoredEntries(value: unknown): ScopedIgnoredWord[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 2_000).flatMap((item) => {
+    const record = objectValue(item);
+    const term = typeof record.term === "string" ? record.term.trim() : "";
+    const scope = record.scope;
+    if (!term || term.length > 128 || /[\r\n\0]/.test(term)
+      || (scope !== "global" && scope !== "project" && scope !== "languageFamily")) return [];
+    const languageFamily = scope === "languageFamily" && typeof record.languageFamily === "string"
+      && /^[a-z]{2,3}$/i.test(record.languageFamily)
+      ? record.languageFamily.toLowerCase()
+      : undefined;
+    if (scope === "languageFamily" && !languageFamily) return [];
+    return [{ term, scope, languageFamily }];
+  });
+}
+
 function unicodeFontPreferences(value: unknown): Record<string, UnicodeFontPreference> {
   const preferences = objectValue(value);
   return Object.fromEntries(Object.entries(preferences)
@@ -162,7 +237,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     : defaultAppSettings.editor.tabSize;
 
   return {
-    version: 1,
+    version: 2,
     developerMode: booleanValue(root.developerMode, defaultAppSettings.developerMode),
     developerLogs: {
       preview: booleanValue(developerLogs.preview, defaultAppSettings.developerLogs.preview),
@@ -191,6 +266,11 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       spellcheck: booleanValue(editor.spellcheck, defaultAppSettings.editor.spellcheck),
       wordCompletion: booleanValue(editor.wordCompletion, defaultAppSettings.editor.wordCompletion),
       languageProviders: stringListOrNull(editor.languageProviders),
+      embeddedSpellcheckLanguages: orderedStringList(editor.embeddedSpellcheckLanguages),
+      completionLanguageSource: editor.completionLanguageSource === "scope" || editor.completionLanguageSource === "manual"
+        ? editor.completionLanguageSource
+        : "keyboard",
+      manualCompletionLanguage: manualLanguageTag(editor.manualCompletionLanguage),
       showZws: booleanValue(editor.showZws, defaultAppSettings.editor.showZws),
       userDictionary: Array.isArray(editor.userDictionary)
         ? [...new Set(editor.userDictionary.filter((word): word is string => typeof word === "string" && word.trim().length > 0).map(word => word.trim()))].sort()
@@ -198,6 +278,9 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       ignoredWords: Array.isArray(editor.ignoredWords)
         ? [...new Set(editor.ignoredWords.filter((word): word is string => typeof word === "string" && word.trim().length > 0).map(word => word.trim()))].sort()
         : [],
+      globalTerminology: terminologyEntries(editor.globalTerminology),
+      languageTerminology: languageTerminologyEntries(editor.languageTerminology),
+      scopedIgnoredWords: scopedIgnoredEntries(editor.scopedIgnoredWords),
       formatOnSave: booleanValue(editor.formatOnSave, defaultAppSettings.editor.formatOnSave)
     },
     preview: {

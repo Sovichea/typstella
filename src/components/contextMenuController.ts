@@ -26,6 +26,7 @@ export type ContextMenuDependencies = {
   getSpellingSuggestions: (issue: SpellingIssue) => Promise<string[]>;
   replaceSpelling: (issue: SpellingIssue, replacement: string) => void;
   addSpellingToDictionary: (issue: SpellingIssue) => void;
+  addSpellingTerminology: (issue: SpellingIssue, scope: "global" | "project" | "languageFamily") => void;
   setSpellingIgnored: (issue: SpellingIssue, ignored: boolean) => void;
   isPinnedMainFile: (path: string) => boolean;
   setPinnedMainFile: (path: string | null) => void | Promise<void>;
@@ -126,6 +127,15 @@ export class ContextMenuController {
       case "ctx-editor-format": await this.dependencies.save(); return;
       case "ctx-spelling-add":
         if (this.spellingIssue) this.dependencies.addSpellingToDictionary(this.spellingIssue);
+        return;
+      case "ctx-spelling-add-global":
+      case "ctx-spelling-add-project":
+      case "ctx-spelling-add-language":
+        if (this.spellingIssue) {
+          const scope = action.endsWith("global") ? "global"
+            : action.endsWith("project") ? "project" : "languageFamily";
+          this.dependencies.addSpellingTerminology(this.spellingIssue, scope);
+        }
         return;
       case "ctx-spelling-ignore":
         if (this.spellingIssue) this.dependencies.setSpellingIgnored(this.spellingIssue, !this.spellingIssue.ignored);
@@ -447,7 +457,7 @@ export class ContextMenuController {
 
   private editorItems(): string {
     const spelling = this.spellingIssue
-      ? `${this.spellingSuggestions.map((suggestion, index) => `<div class="dropdown-item spelling-suggestion" id="ctx-spelling-${index}">${this.escapeHtml(suggestion)}</div>`).join("")}<div class="dropdown-item" id="ctx-spelling-add">Add “${this.escapeHtml(this.spellingIssue.sourceText)}” to dictionary</div><div class="dropdown-item" id="ctx-spelling-ignore">${this.spellingIssue.ignored ? "Stop ignoring" : "Ignore"} “${this.escapeHtml(this.spellingIssue.sourceText)}”</div><div class="dropdown-separator"></div>`
+      ? `${this.spellingSuggestions.map((suggestion, index) => `<div class="dropdown-item spelling-suggestion" id="ctx-spelling-${index}">${this.escapeHtml(suggestion)}</div>`).join("")}<div class="dropdown-item" id="ctx-spelling-add-global">Add to global terminology</div><div class="dropdown-item" id="ctx-spelling-add-project">Add to project terminology</div>${this.spellingIssue.languageFamily ? `<div class="dropdown-item" id="ctx-spelling-add-language">Add to ${this.escapeHtml(this.spellingIssue.languageFamily)} dictionary</div>` : ""}<div class="dropdown-item" id="ctx-spelling-ignore">${this.spellingIssue.ignored ? "Stop ignoring" : this.spellingIssue.languageFamily ? `Ignore in ${this.escapeHtml(this.spellingIssue.languageFamily)}` : "Ignore globally"} “${this.escapeHtml(this.spellingIssue.sourceText)}”</div><div class="dropdown-separator"></div>`
       : "";
     return `${spelling}<div class="dropdown-item" id="ctx-copy-text">Copy <span class="hotkey">Ctrl+C</span></div><div class="dropdown-item" id="ctx-paste-text">Paste <span class="hotkey">Ctrl+V</span></div><div class="dropdown-item" id="ctx-cut-text">Cut <span class="hotkey">Ctrl+X</span></div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-editor-toggle-comment">Toggle Line Comment</div><div class="dropdown-item" id="ctx-editor-format">Format Document</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-undo">Undo</div><div class="dropdown-item" id="ctx-redo">Redo</div><div class="dropdown-separator"></div><div class="dropdown-item" id="ctx-editor-select-all">Select All</div>`;
   }

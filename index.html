@@ -2277,7 +2277,17 @@
                                 ></label
                             >
                             <div class="settings-field">
-                                <label>Installed languages</label>
+                                <label for="settings-completion-language-source">Suggestion language source</label>
+                                <select id="settings-completion-language-source">
+                                    <option value="keyboard">Keyboard language</option>
+                                    <option value="scope">Typst language scope</option>
+                                    <option value="manual">Manual language</option>
+                                </select>
+                                <input id="settings-manual-completion-language" type="text" maxlength="10" placeholder="en-US" aria-label="Manual completion language" />
+                                <small>Suggestions may follow the keyboard language without changing the document's spellcheck scope. IME candidate composition always takes priority.</small>
+                            </div>
+                            <div class="settings-field">
+                                <label>Installed languages and embedded routing</label>
                                 <div class="settings-language-tools">
                                     <div
                                         id="settings-language-providers"
@@ -2304,6 +2314,11 @@
                                     row lists its actual capabilities and
                                     support depth.</small
                                 >
+                            </div>
+                            <div class="settings-field">
+                                <label>Accepted terminology</label>
+                                <div id="settings-terminology" class="settings-check-list" aria-live="polite"></div>
+                                <small>Global terms apply everywhere, project terms travel in <code>.typsastra/config.json</code>, and language terms remain isolated to one language family. Add terms from a spelling issue's context menu.</small>
                             </div>
                             <label class="settings-toggle"
                                 ><input

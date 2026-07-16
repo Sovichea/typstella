@@ -41,6 +41,18 @@ pub struct TextAnalysis {
 pub struct AnalyzeChunk {
     pub text: String,
     pub start_utf16: usize,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub content_mode: AnalyzeContentMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AnalyzeContentMode {
+    #[default]
+    TypstSource,
+    PlainText,
 }
 
 #[derive(Clone, Debug, Deserialize)]

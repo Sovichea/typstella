@@ -430,57 +430,57 @@ Exit gate: resolved ranges equal fresh full extraction for every fixture and ran
 
 ### Phase 3 — Provider resolution and missing-language UI
 
-- [ ] Build canonical installed/catalog provider indexes.
-- [ ] Implement installed, disabled, downloadable, unsupported, invalid, and dynamic states.
-- [ ] Add the ordered Embedded spellcheck languages setting and enforce one provider per foreign script.
-- [ ] Gate resolution UI on provider/catalog readiness and global spellcheck enablement.
-- [ ] Keep intentionally disabled-provider hints informational and avoid duplicating Tinymist diagnostics.
-- [ ] Add theme-aware declaration hint decorations and tooltips.
-- [ ] Add deduplicated gutter markers and accessible labels.
-- [ ] Connect install/enable actions and remove resolved hints without reopening the file.
+- [x] Build canonical installed/catalog provider indexes.
+- [x] Implement installed, disabled, downloadable, unsupported, invalid, and dynamic states.
+- [x] Add the ordered Embedded spellcheck languages setting and enforce one provider per foreign script.
+- [x] Gate resolution UI on provider/catalog readiness and global spellcheck enablement.
+- [x] Keep intentionally disabled-provider hints informational and avoid duplicating Tinymist diagnostics.
+- [x] Add theme-aware declaration hint decorations and tooltips.
+- [x] Add deduplicated gutter markers and accessible labels.
+- [x] Connect install/enable actions and remove resolved hints without reopening the file.
 
 Exit gate: unavailable primary-script runs show no spelling squiggles, eligible embedded-language runs remain checked, and installing the provider activates only the intended primary runs.
 
 ### Phase 4 — Scope-routed spellcheck and accepted terms
 
-- [ ] Split pending ranges by effective language range.
-- [ ] Add optional provider routing to analysis chunks and Rust registry requests.
-- [ ] Route primary and embedded providers by disjoint script ownership without same-script substitution.
-- [ ] Add global terminology, project terminology, and language-family dictionary stores.
-- [ ] Version and migrate application settings and `.typsastra/config.json` atomically.
-- [ ] Migrate existing `editor.userDictionary` and `editor.ignoredWords` without changing legacy behavior; require explicit scope for new ignores.
-- [ ] Validate imported project terminology bounds and render it as text only.
-- [ ] Add the `Add to…` context submenu and terminology management UI.
-- [ ] Apply exact-case terminology and provider-normalized language dictionary matching.
-- [ ] Reanalyze only affected ranges after adding, editing, or removing a term.
-- [ ] Preserve provider-by-script compatibility routing only for explicitly unresolved dynamic or inherited contexts.
-- [ ] Invalidate propagated ranges when declarations change.
-- [ ] Keep issue, suggestion, replacement, and provider-failure revision checks intact.
+- [x] Split pending ranges by effective language range.
+- [x] Add optional provider routing to analysis chunks and Rust registry requests.
+- [x] Route primary and embedded providers by disjoint script ownership without same-script substitution.
+- [x] Add global terminology, project terminology, and language-family dictionary stores.
+- [x] Version and migrate application settings and `.typsastra/config.json` atomically.
+- [x] Migrate existing `editor.userDictionary` and `editor.ignoredWords` without changing legacy behavior; require explicit scope for new ignores.
+- [x] Validate imported project terminology bounds and render it as text only.
+- [x] Add the `Add to…` context submenu and terminology management UI.
+- [x] Apply exact-case terminology and provider-normalized language dictionary matching.
+- [x] Reanalyze only affected ranges after adding, editing, or removing a term.
+- [x] Preserve provider-by-script compatibility routing only for explicitly unresolved dynamic or inherited contexts.
+- [x] Invalidate propagated ranges when declarations change.
+- [x] Keep issue, suggestion, replacement, and provider-failure revision checks intact.
 
 Exit gate: nested multilingual fixtures produce issues only from the primary or configured disjoint-script providers, never substitute a same-script language, and honor terminology without leaking language-specific words into other languages.
 
 ### Phase 5 — Keyboard-language completion
 
-- [ ] Add the shared input-source service and settings schema.
-- [ ] Implement and test the Windows adapter first.
-- [ ] Handle custom/unmapped layouts, app focus changes, remote desktop, and layout changes while completion is open.
-- [ ] Add scope and manual fallbacks.
-- [ ] Resolve exactly one completion provider per request.
-- [ ] Guard composition, cursor, provider, input-source, revision, and replacement ranges.
-- [ ] Add macOS/Linux adapters behind reliability reporting and platform-specific validation.
+- [x] Add the shared input-source service and settings schema.
+- [x] Implement and test the Windows adapter first.
+- [x] Handle custom/unmapped layouts, app focus changes, remote desktop, and layout changes while completion is open.
+- [x] Add scope and manual fallbacks.
+- [x] Resolve exactly one completion provider per request.
+- [x] Guard composition, cursor, provider, input-source, revision, and replacement ranges.
+- [x] Add macOS/Linux adapters behind reliability reporting and platform-specific validation.
 
 Exit gate: changing keyboard language changes subsequent word suggestions without changing spellcheck scope or interrupting IME candidates.
 
 ### Phase 6 — Documentation, performance, and release gates
 
-- [ ] Update Language Tools settings copy and multilingual examples.
-- [ ] Update the bundled interactive language-tools example and multilingual template to demonstrate the completed behavior: English/Khmer/Arabic disjoint-script routing, explicit English/French/Spanish same-script scopes, nested `#text(...)`, named and anonymous set-rule blocks, missing-provider hint/gutter recovery, project/global versus language terminology, and keyboard-language completion without changing spellcheck scope.
-- [ ] Add example README instructions that identify which providers must be installed, how to trigger each warning or completion state, and what should disappear after installing/enabling a provider; keep the default example usable when optional dictionaries are absent.
-- [ ] Document static scope support and dynamic-expression limitations.
-- [ ] Link behavior to the supported Typst language, region, script, set-rule, and content/code-block semantics.
-- [ ] Add scope parse, provider resolution, and completion timing to performance diagnostics.
-- [ ] Record parser dependency size/build impact and input-source adapter reliability by platform.
-- [ ] Run Khmer, Lao, autocomplete, language-provider conformance, diagnostics, and long-document suites.
+- [x] Update Language Tools settings copy and multilingual examples.
+- [x] Update the bundled interactive language-tools example and multilingual template to demonstrate the completed behavior: English/Khmer/Arabic disjoint-script routing, explicit English/French/Spanish same-script scopes, nested `#text(...)`, named and anonymous set-rule blocks, missing-provider hint/gutter recovery, project/global versus language terminology, and keyboard-language completion without changing spellcheck scope.
+- [x] Add example README instructions that identify which providers must be installed, how to trigger each warning or completion state, and what should disappear after installing/enabling a provider; keep the default example usable when optional dictionaries are absent.
+- [x] Document static scope support and dynamic-expression limitations.
+- [x] Link behavior to the supported Typst language, region, script, set-rule, and content/code-block semantics.
+- [x] Add scope parse, provider resolution, and completion timing to performance diagnostics.
+- [x] Record parser dependency size/build impact and input-source adapter reliability by platform.
+- [x] Run Khmer, Lao, autocomplete, language-provider conformance, diagnostics, and long-document suites.
 - [ ] Verify dark, light, and Typsastra themes plus keyboard-only and screen-reader behavior.
 
 Exit gate: no regression in ordinary documents, Khmer completion, IME composition, or incremental spellcheck performance; main-file root routing matches Typst defaults.

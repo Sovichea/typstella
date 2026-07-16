@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { TerminologyEntry } from "../settings";
 
 export type StoredWorkspaceToolchain = {
   tinymistVersion: string;
@@ -15,10 +16,11 @@ export type StoredWorkspaceTab = {
 };
 
 export type StoredProjectState = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   projectId: string;
   mainFile: string | null;
   recommendedToolchain: StoredWorkspaceToolchain | null;
+  terminology: TerminologyEntry[];
 };
 
 export type StoredWorkspaceState = {
@@ -92,12 +94,13 @@ export function normalizeWorkspaceMetadata(
     : [];
   return {
     project: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       projectId: typeof project.projectId === "string" && project.projectId.length > 0
         ? project.projectId
         : createProjectId(),
       mainFile: safeRelativeWorkspacePath(project.mainFile),
-      recommendedToolchain: toolchainOrNull(project.recommendedToolchain)
+      recommendedToolchain: toolchainOrNull(project.recommendedToolchain),
+      terminology: normalizeProjectTerminology(project.terminology)
     },
     workspace: {
       schemaVersion: 1,
@@ -193,4 +196,17 @@ function toolchainOrNull(value: unknown): StoredWorkspaceToolchain | null {
   return typeof toolchain.tinymistVersion === "string" && typeof toolchain.typstVersion === "string"
     ? { tinymistVersion: toolchain.tinymistVersion, typstVersion: toolchain.typstVersion }
     : null;
+}
+
+function normalizeProjectTerminology(value: unknown): TerminologyEntry[] {
+  if (!Array.isArray(value)) return [];
+  const entries = new Map<string, TerminologyEntry>();
+  for (const item of value.slice(0, 2_000)) {
+    const record = objectValue(item);
+    const term = typeof record.term === "string" ? record.term.trim() : "";
+    if (!term || term.length > 128 || /[\r\n\0]/.test(term)) continue;
+    const exactCase = record.exactCase !== false;
+    entries.set(`${exactCase ? "exact" : "fold"}:${term}`, { term, exactCase });
+  }
+  return [...entries.values()];
 }

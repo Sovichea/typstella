@@ -1,40 +1,54 @@
-#set document(title: "Interactive Language Tools")
+#set document(title: "Scope-aware Language Tools")
 #set page(margin: 24mm)
 // typsastra:typography:start
 #set text(font: ("MiSans Latin", "MiSans Khmer"), size: 11pt)
 // typsastra:typography:end
 #set heading(numbering: "1.")
 #set par(leading: 0.7em)
+#set text(lang: "en")
 
-= Interactive Language Tools
+= Scope-aware Language Tools
 
-Typsastra offers interactive language tools such as spellcheck and word completion. These are controlled from Settings (`Ctrl+,`) and are independent of script-aware editor navigation.
+Typsastra derives spellcheck language from static Typst `text` scopes. Typing suggestions can independently follow the keyboard language, the current scope, or a manual language selected in Settings.
 
-== Khmer Spellcheck and Completion
+== Disjoint scripts in one English scope
 
-Khmer support is bundled by default. Typsastra will underline unknown words with a blue informational squiggle.
+Enable Khmer and Arabic as *Embedded* languages in Settings. English owns Latin runs; the embedded providers may check only their disjoint Khmer and Arabic scripts.
 
-Press the trigger key (usually `Ctrl+Space`) while your cursor is inside a Khmer word to see completion suggestions based on the current prefix.
+English with an intentional sentance typo. សួស្តី ពិភពលោក។ مرحبًا بالعالم.
 
-រឿងព្រេងនិទានខ្មែរ គឺជារតនសម្បត្តិវប្បធម៌ដ៏មានតម្លៃ។
+== Named and anonymous set-rule blocks
 
-== English Spellcheck
+#block[
+  #set text(lang: "km")
+  អត្ថបទខ្មែរនេះស្ថិតក្នុង named block។ English remains an explicitly configured embedded run only when its provider owns a disjoint script.
+]
 
-English (US) spellcheck is also bundled. It identifies misspellings and suggests corrections.
+#[
+  #set text(lang: "ar")
+  #text(dir: rtl)[هذا النص داخل anonymous content block.]
+]
 
-This sentance contains an intentional typo. // <- intentional misspelling — right-click to correct
+== Nested direct text scopes
 
-== Mixed Language Analysis
+#text(lang: "fr", region: "FR")[Le français utilise son propre dictionnaire. #text(lang: "en")[This nested sentence is English.] Retour au français.]
 
-When you mix languages, Typsastra automatically routes each script to the appropriate language provider. The Khmer segmenter only analyzes Khmer characters, and the English dictionary only checks Latin characters.
+#text(lang: "es", region: "ES", "El español también funciona dans une chaîne directe.")
 
-នៅក្នុងសៀវភៅដ៏តូចនេះ យើងសូមលើកយករឿង Typst examples មកបង្ហាញ។
+English, French, and Spanish all use Latin script. Typsastra therefore requires these explicit scopes and never accepts a French word merely because an English dictionary recognizes it.
 
-== Installing Additional Languages
+== Missing-provider recovery
 
-To add spellcheck and completion for other languages:
-1. Open Settings (`Ctrl+,`).
-2. Go to the *Language Tools* section.
-3. Find your language in the catalog and click *Install*.
+#text(lang: "eo")[Ĉi tiu Esperanto-scope intentionally demonstrates an unavailable language provider.]
 
-Typsastra will download the dictionary and immediately activate it for your documents. You can safely remove dictionaries at any time.
+The `lang: "eo"` declaration receives a dotted hint and gutter warning when no provider is installed. Activate the gutter marker to open Language Tools. Installing or enabling the provider removes the warning and starts analysis without reopening this file.
+
+== Terminology and scoped ignores
+
+Right-click an unknown word such as Typsastra and choose global, project, or language-family terminology. Global and project terminology apply across scopes; a language-family term remains isolated. New ignores also record an explicit language or global scope, while migrated legacy ignores remain visible.
+
+== Keyboard-language completion
+
+In Settings, set *Suggestion language source* to Keyboard language. Switch the operating-system layout, type a prefix in a compatible prose scope, and open completion. Suggestions follow the keyboard language but spellcheck remains owned by the Typst scope. IME composition is never interrupted.
+
+Dynamic expressions such as `#text(lang: selected-language)[...]`, spread style dictionaries, and show-set rules remain unresolved. Typsastra does not evaluate Typst code to guess their language.

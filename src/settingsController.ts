@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { confirm, message } from "@tauri-apps/plugin-dialog";
-import { cloneDefaultAppSettings, normalizeAppSettings, type AppSettings, type ThemeName } from "./settings";
+import { cloneDefaultAppSettings, normalizeAppSettings, type AppSettings, type TerminologyEntry, type ThemeName } from "./settings";
 import {
   unicodeEditorFonts,
   unicodeFontPreferenceOptions,
@@ -40,6 +40,8 @@ export class SettingsController {
   private systemFonts: SystemFontCatalog = { all: ["MiSans Latin"], monospace: ["Fira Mono"] };
   private languageProviders: LanguageProviderOption[] = [];
   private readonly timingEntries: SettingsTimingEntry[] = [];
+  private projectTerminology: TerminologyEntry[] = [];
+  private updateProjectTerminology: (entries: TerminologyEntry[]) => void = () => {};
 
   constructor(
     private readonly applySettings: (settings: AppSettings) => void,
@@ -111,6 +113,15 @@ export class SettingsController {
     this.populateLanguageProviders();
   }
 
+  public setProjectTerminology(
+    entries: readonly TerminologyEntry[],
+    update?: (entries: TerminologyEntry[]) => void,
+  ): void {
+    this.projectTerminology = [...entries];
+    if (update) this.updateProjectTerminology = update;
+    this.populateTerminology();
+  }
+
   public initializePanel() {
     const overlay = document.getElementById("settings-overlay");
     if (!overlay) return;
@@ -166,6 +177,12 @@ export class SettingsController {
     onChange("settings-indent-guides", (settings, control) => { settings.editor.indentationGuides = (control as HTMLInputElement).checked; });
     onChange("settings-spellcheck", (settings, control) => { settings.editor.spellcheck = (control as HTMLInputElement).checked; });
     onChange("settings-word-completion", (settings, control) => { settings.editor.wordCompletion = (control as HTMLInputElement).checked; });
+    onChange("settings-completion-language-source", (settings, control) => {
+      settings.editor.completionLanguageSource = control.value as AppSettings["editor"]["completionLanguageSource"];
+    });
+    onChange("settings-manual-completion-language", (settings, control) => {
+      settings.editor.manualCompletionLanguage = control.value.trim() || null;
+    });
     onChange("settings-show-zws", (settings, control) => { settings.editor.showZws = (control as HTMLInputElement).checked; });
     onChange("settings-format-on-save", (settings, control) => { settings.editor.formatOnSave = (control as HTMLInputElement).checked; });
     onChange("settings-preview-render-mode", (settings, control) => { settings.preview.renderMode = control.value as AppSettings["preview"]["renderMode"]; });
@@ -257,6 +274,8 @@ export class SettingsController {
     setValue("settings-preview-render-mode", preview.renderMode);
     setValue("settings-sync-debounce", String(preview.syncDebounceMs));
     setValue("settings-highlight-duration", String(preview.highlightDurationMs));
+    setValue("settings-completion-language-source", editor.completionLanguageSource);
+    setValue("settings-manual-completion-language", editor.manualCompletionLanguage ?? "");
     setChecked("settings-word-wrap", editor.wordWrap);
     setChecked("settings-line-numbers", editor.lineNumbers);
     setChecked("settings-active-line", editor.highlightActiveLine);
@@ -264,6 +283,8 @@ export class SettingsController {
     setChecked("settings-indent-guides", editor.indentationGuides);
     setChecked("settings-spellcheck", editor.spellcheck);
     setChecked("settings-word-completion", editor.wordCompletion);
+    const manualCompletion = document.getElementById("settings-manual-completion-language") as HTMLInputElement | null;
+    if (manualCompletion) manualCompletion.disabled = editor.completionLanguageSource !== "manual";
     setChecked("settings-show-zws", editor.showZws);
     setChecked("settings-format-on-save", editor.formatOnSave);
     setChecked("settings-cursor-sync", preview.cursorSync);
@@ -287,6 +308,7 @@ export class SettingsController {
       control.disabled = !this.settings.developerMode;
     });
     this.populateLanguageProviders();
+    this.populateTerminology();
 
     const path = document.getElementById("settings-file-path");
     if (path) {
@@ -375,11 +397,12 @@ export class SettingsController {
     const controls = this.languageProviders.map(provider => {
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
+      checkbox.className = "language-provider-enabled";
       checkbox.value = provider.id;
       checkbox.checked = enabled.has(provider.id);
       checkbox.addEventListener("change", () => {
         const checked = new Set(
-          Array.from(container.querySelectorAll<HTMLInputElement>("input[type='checkbox']:checked"))
+          Array.from(container.querySelectorAll<HTMLInputElement>("input.language-provider-enabled:checked"))
             .map(input => input.value)
         );
         this.update(settings => {
@@ -412,7 +435,29 @@ export class SettingsController {
       const label = document.createElement("label");
       label.className = "settings-language-provider";
       label.title = support.description;
-      label.append(text, checkbox);
+      const controls = document.createElement("span");
+      controls.className = "settings-language-provider-controls";
+      const embedded = document.createElement("input");
+      embedded.type = "checkbox";
+      embedded.checked = this.settings.editor.embeddedSpellcheckLanguages.includes(provider.id);
+      embedded.disabled = !checkbox.checked;
+      embedded.title = "Allow this provider to check a disjoint foreign script inside another language scope";
+      embedded.setAttribute("aria-label", `Use ${this.languageProviderLabel(provider)} as an embedded spellcheck language`);
+      embedded.addEventListener("change", () => this.update(settings => {
+        const scripts = new Set(provider.scripts.map(script => script.toLowerCase()));
+        settings.editor.embeddedSpellcheckLanguages = embedded.checked
+          ? [...settings.editor.embeddedSpellcheckLanguages.filter(id => {
+              if (id === provider.id) return false;
+              const candidate = this.languageProviders.find(item => item.id === id);
+              return !candidate?.scripts.some(script => scripts.has(script.toLowerCase()));
+            }), provider.id]
+          : settings.editor.embeddedSpellcheckLanguages.filter(id => id !== provider.id);
+      }));
+      checkbox.addEventListener("change", () => { embedded.disabled = !checkbox.checked; });
+      const embeddedLabel = document.createElement("small");
+      embeddedLabel.textContent = "Embedded";
+      controls.append(checkbox, embedded, embeddedLabel);
+      label.append(text, controls);
       return label;
     });
     container.replaceChildren(...controls);
@@ -420,6 +465,58 @@ export class SettingsController {
 
   private languageProviderLabel(provider: LanguageProviderOption): string {
     return provider.displayName || provider.languageTag || provider.id;
+  }
+
+  private populateTerminology(): void {
+    const container = document.getElementById("settings-terminology");
+    if (!container) return;
+    const entries = [
+      ...this.settings.editor.globalTerminology.map((entry, index) => ({
+        entry,
+        scope: "Global",
+        remove: () => this.update(settings => { settings.editor.globalTerminology.splice(index, 1); }),
+      })),
+      ...this.projectTerminology.map((entry, index) => ({
+        entry,
+        scope: "Project",
+        remove: () => {
+          const next = this.projectTerminology.filter((_, candidate) => candidate !== index);
+          this.projectTerminology = next;
+          this.updateProjectTerminology(next);
+          this.populateTerminology();
+        },
+      })),
+      ...this.settings.editor.languageTerminology.map((entry, index) => ({
+        entry,
+        scope: entry.languageFamily,
+        remove: () => this.update(settings => { settings.editor.languageTerminology.splice(index, 1); }),
+      })),
+    ];
+    if (!entries.length) {
+      const empty = document.createElement("small");
+      empty.textContent = "No accepted terminology has been added.";
+      container.replaceChildren(empty);
+      return;
+    }
+    container.replaceChildren(...entries.map(({ entry, scope, remove }) => {
+      const row = document.createElement("div");
+      row.className = "settings-language-provider";
+      const term = document.createElement("span");
+      term.textContent = entry.term;
+      const meta = document.createElement("small");
+      meta.textContent = `${scope} · ${entry.exactCase ? "exact case" : "case insensitive"}`;
+      const text = document.createElement("span");
+      text.className = "settings-language-provider-text";
+      text.append(term, meta);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "settings-secondary-button";
+      button.textContent = "Remove";
+      button.setAttribute("aria-label", `Remove ${entry.term} from ${scope} terminology`);
+      button.addEventListener("click", remove);
+      row.append(text, button);
+      return row;
+    }));
   }
 
   private async toggleLanguageCatalog(): Promise<void> {

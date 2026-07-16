@@ -8,7 +8,7 @@ import { EditorState, Transaction } from "@codemirror/state";
 import { EditorView, highlightActiveLine, highlightActiveLineGutter, lineNumbers } from "@codemirror/view";
 import { undo, redo, undoDepth } from "@codemirror/commands";
 import { foldAll, foldEffect, foldedRanges, indentUnit, unfoldAll, unfoldEffect } from "@codemirror/language";
-import { closeBrackets, completionStatus } from "@codemirror/autocomplete";
+import { closeBrackets, closeCompletion, completionStatus } from "@codemirror/autocomplete";
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
 import { getEditorExtensions, themeCompartment, getThemeExtension, applyUIThemeVariables, wrapCompartment, lineNumbersCompartment, activeLineCompartment, closeBracketsCompartment, indentationGuidesCompartment, tabSizeCompartment, completionCompartment, showZwsCompartment, showZeroWidthSpaces } from "./editor/extensions";
 import { createTypstAutocomplete } from "./editor/autocomplete";
@@ -54,6 +54,7 @@ import { ToolchainController, type ToolchainStatus } from "./toolchain/toolchain
 import { DocumentOutlineController, type DocumentHeading } from "./outline/documentOutline";
 import { parseTypographyBlock, typographyEdit, type DocumentFontFallback, type DocumentTypography } from "./editor/documentTypography";
 import { SpellcheckController, type SpellingIssue } from "./editor/spellcheck";
+import { InputLanguageService } from "./editor/languageScopes";
 import type { ImportedTypsastraProject, TypsastraProjectPreflight } from "./projectArchive";
 import { AppUpdateController } from "./appUpdateController";
 
@@ -341,6 +342,10 @@ export class TypsastraWorkspaceController {
     () => this.beginHorizontalPaneResize(),
     () => this.endHorizontalPaneResize()
   );
+  private readonly inputLanguageService = new InputLanguageService(
+    () => this.spellcheckController.getProviders(),
+    () => this.spellcheckController.getResolvedScopes(),
+  );
   private readonly workspaceStateStore = new WorkspaceStateStore();
   private readonly recentProjectsController = new RecentProjectsController(path => this.openWorkspace(path));
   private readonly workspaceWatcher = new WorkspaceWatcher(
@@ -415,10 +420,49 @@ export class TypsastraWorkspaceController {
         settings.editor.userDictionary.push(issue.word);
       }
     }),
+    addSpellingTerminology: (issue, scope) => {
+      const entry = { term: issue.sourceText, exactCase: true };
+      if (scope === "project") {
+        if (!this.workspaceMetadata) return;
+        const existing = this.workspaceMetadata.project.terminology;
+        if (!existing.some(candidate => candidate.term === entry.term && candidate.exactCase === entry.exactCase)) {
+          this.workspaceMetadata.project.terminology = [...existing, entry];
+          this.settingsController.setProjectTerminology(this.workspaceMetadata.project.terminology);
+          this.spellcheckController.setTerminology(
+            this.settingsController.value.editor.globalTerminology,
+            this.workspaceMetadata.project.terminology,
+            this.settingsController.value.editor.languageTerminology,
+            this.settingsController.value.editor.scopedIgnoredWords,
+          );
+          void this.saveWorkspaceState();
+        }
+        return;
+      }
+      this.settingsController.update(settings => {
+        if (scope === "languageFamily" && issue.languageFamily) {
+          if (!settings.editor.languageTerminology.some(candidate =>
+            candidate.term === entry.term && candidate.languageFamily === issue.languageFamily)) {
+            settings.editor.languageTerminology.push({ ...entry, languageFamily: issue.languageFamily });
+          }
+        } else if (!settings.editor.globalTerminology.some(candidate => candidate.term === entry.term)) {
+          settings.editor.globalTerminology.push(entry);
+        }
+      });
+    },
     setSpellingIgnored: (issue, ignored) => this.settingsController.update(settings => {
-      settings.editor.ignoredWords = ignored
-        ? [...new Set([...settings.editor.ignoredWords, issue.word])]
-        : settings.editor.ignoredWords.filter(word => word !== issue.word);
+      if (ignored) {
+        const entry = issue.languageFamily
+          ? { term: issue.sourceText, scope: "languageFamily" as const, languageFamily: issue.languageFamily }
+          : { term: issue.sourceText, scope: "global" as const };
+        if (!settings.editor.scopedIgnoredWords.some(candidate => candidate.term === entry.term
+          && candidate.scope === entry.scope && candidate.languageFamily === entry.languageFamily)) {
+          settings.editor.scopedIgnoredWords.push(entry);
+        }
+      } else {
+        settings.editor.ignoredWords = settings.editor.ignoredWords.filter(word => word !== issue.word);
+        settings.editor.scopedIgnoredWords = settings.editor.scopedIgnoredWords.filter(entry =>
+          entry.term !== issue.sourceText || (entry.languageFamily && entry.languageFamily !== issue.languageFamily));
+      }
     }),
     isPinnedMainFile: path => this.isPinnedMainFile(path),
     setPinnedMainFile: path => this.setPinnedMainFile(path),
@@ -653,9 +697,20 @@ export class TypsastraWorkspaceController {
     this.forwardSyncDebounceMs = preview.syncDebounceMs;
     this.editorFontManager.configure(editor.codeFont, editor.unicodeFont, editor.unicodeFonts);
     this.spellcheckController.setEnabledProviders(editor.languageProviders);
+    this.spellcheckController.setEmbeddedProviders(editor.embeddedSpellcheckLanguages);
     this.spellcheckController.setEnabled(editor.spellcheck);
     this.spellcheckController.setUserDictionary(editor.userDictionary);
     this.spellcheckController.setIgnoredWords(editor.ignoredWords);
+    this.spellcheckController.setTerminology(
+      editor.globalTerminology,
+      this.workspaceMetadata?.project.terminology ?? [],
+      editor.languageTerminology,
+      editor.scopedIgnoredWords,
+    );
+    this.inputLanguageService.configure(
+      editor.completionLanguageSource,
+      editor.manualCompletionLanguage,
+    );
 
     void applyUIThemeVariables(appearance.theme);
 
@@ -705,7 +760,10 @@ export class TypsastraWorkspaceController {
               () => this.getActiveLspUri(),
               () => this.flushPendingLspSync(),
               editor.wordCompletion,
-              () => this.spellcheckController.getProviders()
+              () => this.spellcheckController.getProviders(),
+              position => this.inputLanguageService.completionProvider(position),
+              () => this.inputLanguageService.currentGeneration(),
+              milliseconds => this.performanceDiagnostics.record({ name: "language.completion", milliseconds }),
           ))
         ]
       });
@@ -732,7 +790,10 @@ export class TypsastraWorkspaceController {
         () => this.getActiveLspUri(),
         () => this.flushPendingLspSync(),
         editor.wordCompletion,
-        () => this.spellcheckController.getProviders()
+        () => this.spellcheckController.getProviders(),
+        position => this.inputLanguageService.completionProvider(position),
+        () => this.inputLanguageService.currentGeneration(),
+        milliseconds => this.performanceDiagnostics.record({ name: "language.completion", milliseconds }),
       ))
     });
   }
@@ -1122,6 +1183,13 @@ export class TypsastraWorkspaceController {
     }
   }
 
+  private activateSpellcheckDocument(path: string | null): void {
+    const inherited = Boolean(path && this.pinnedMainFilePath
+      && filePathKey(path) !== filePathKey(this.pinnedMainFilePath));
+    this.spellcheckController.setRootLanguageContext(inherited ? "inherited" : "main");
+    this.spellcheckController.activateDocument(path ? filePathKey(path) : "");
+  }
+
   private foldCurrentFile(): void {
     if (!this.getActiveTab() || isBinaryImagePath(this.activeFilePath ?? "")) return;
     foldAll(this.editorInstance);
@@ -1205,7 +1273,7 @@ export class TypsastraWorkspaceController {
     if (this.activeFilePath === oldPath) {
       this.activeFilePath = newPath;
       this.explorer.setActiveFile(newPath);
-      this.spellcheckController.activateDocument(filePathKey(newPath));
+      this.activateSpellcheckDocument(newPath);
       this.previewRootPath = tab.previewRootPath;
       this.previewMainPath = tab.previewMainPath;
       this.previewTaskId = tab.previewTaskId;
@@ -1262,7 +1330,7 @@ export class TypsastraWorkspaceController {
         await this.activateEditorTab(nextTab.path, false);
       } else {
         this.explorer.setActiveFile(null);
-        this.spellcheckController.activateDocument("");
+        this.activateSpellcheckDocument(null);
         this.isLoadingFile = true;
         try {
           this.editorInstance.dispatch({
@@ -1333,7 +1401,7 @@ export class TypsastraWorkspaceController {
       filePathKey(path),
       parseTypographyBlock(tab.content)?.fallbacks.map(fallback => ({ ...fallback })) ?? []
     );
-    this.spellcheckController.activateDocument(filePathKey(path));
+    this.activateSpellcheckDocument(path);
 
     this.currentVersion = tab.version;
     this.latestDocumentVersion = tab.latestVersion;
@@ -4566,6 +4634,26 @@ export class TypsastraWorkspaceController {
       this.workspaceRootPath = selected;
       this.lspReady = false;
       this.workspaceMetadata = await this.loadWorkspaceMetadata(selected);
+      this.spellcheckController.setTerminology(
+        this.settingsController.value.editor.globalTerminology,
+        this.workspaceMetadata.project.terminology,
+        this.settingsController.value.editor.languageTerminology,
+        this.settingsController.value.editor.scopedIgnoredWords,
+      );
+      this.settingsController.setProjectTerminology(
+        this.workspaceMetadata.project.terminology,
+        entries => {
+          if (!this.workspaceMetadata) return;
+          this.workspaceMetadata.project.terminology = entries;
+          this.spellcheckController.setTerminology(
+            this.settingsController.value.editor.globalTerminology,
+            entries,
+            this.settingsController.value.editor.languageTerminology,
+            this.settingsController.value.editor.scopedIgnoredWords,
+          );
+          void this.saveWorkspaceState();
+        },
+      );
       await this.restoreWorkspaceToolchain(this.workspaceMetadata);
       const expandedDirectories = (await Promise.all(
         this.workspaceMetadata.workspace.expandedDirectories.map(path => this.absoluteWorkspacePath(selected, path))
@@ -5033,7 +5121,7 @@ export class TypsastraWorkspaceController {
     } finally {
       this.isLoadingFile = false;
     }
-    this.spellcheckController.activateDocument("");
+    this.activateSpellcheckDocument(null);
     this.editorFontManager.updateDocument("");
     this.editorToolbarController.setDisabled(true);
     if (this.activeMode === "WYSIWYM") this.mapMarkupToWysiwym("");
@@ -5049,6 +5137,24 @@ export class TypsastraWorkspaceController {
   }
 
   private bindGlobalEvents() {
+    const refreshInputLanguage = (force = false) => {
+      const generation = this.inputLanguageService.currentGeneration();
+      const startedAt = performance.now();
+      void this.inputLanguageService.refresh(force).then(() => {
+        this.performanceDiagnostics.record({
+          name: "language.inputSource",
+          milliseconds: performance.now() - startedAt,
+          detail: { changed: generation !== this.inputLanguageService.currentGeneration() },
+        });
+        if (generation !== this.inputLanguageService.currentGeneration() && this.editorInstance) {
+          closeCompletion(this.editorInstance);
+        }
+      }).catch(error => console.warn("Input language detection failed:", error));
+    };
+    window.addEventListener("focus", () => refreshInputLanguage(true));
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refreshInputLanguage(true);
+    });
     import("@tauri-apps/api/event").then(({ listen, emit }) => {
       listen("preview-window-ready", () => {
         if (this.lastPdfBase64) {
@@ -5087,6 +5193,7 @@ export class TypsastraWorkspaceController {
     });
 
     document.addEventListener("keydown", (e) => {
+      refreshInputLanguage();
       const isMac = navigator.userAgent.toLowerCase().includes("mac");
       const cmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
       const keyCode = e.code;

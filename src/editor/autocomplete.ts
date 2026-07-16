@@ -3,6 +3,7 @@ import type { Text } from "@codemirror/state";
 import type { TinymistLspClient } from "../compiler/lsp";
 import type { LanguageProviderCapabilities } from "../languageSupport";
 import { invoke } from "@tauri-apps/api/core";
+import type { CompletionProviderSelection } from "./languageScopes";
 
 type LspPosition = { line: number; character?: number };
 type LspRange = { start: LspPosition; end: LspPosition };
@@ -288,23 +289,32 @@ export function createTypstAutocomplete(
   getUri: () => string,
   flushLspSync: () => void | Promise<void>,
   languageWordCompletion = true,
-  getProviders: () => ProviderCapabilities[] = () => []
+  getProviders: () => ProviderCapabilities[] = () => [],
+  getLanguageCompletionProvider?: (position: number) => Promise<CompletionProviderSelection | null>,
+  getLanguageCompletionGeneration?: () => number,
+  onLanguageCompletionPerformance?: (milliseconds: number) => void,
 ) {
   return autocompletion({
     override: [
       async (context: CompletionContext) => {
-        if (languageWordCompletion) {
-          const providers = getProviders();
+        if (languageWordCompletion && !context.view?.composing && context.state.selection.ranges.length === 1) {
+          const languageCompletionStartedAt = performance.now();
+          const selected = getLanguageCompletionProvider
+            ? await getLanguageCompletionProvider(context.pos)
+            : null;
+          const providers = selected ? [selected.provider] : getLanguageCompletionProvider ? [] : getProviders();
           for (const provider of providers) {
             if (provider.supportsCompletion !== true) continue;
             const pattern = new RegExp(provider.pattern + "$", "u");
             const word = context.matchBefore(pattern);
             if (word) {
               const line = context.state.doc.lineAt(context.pos);
-              if (!allowsLanguageWordCompletionOnLine(line.text, word.from - line.from)) {
+              if (!selected && !allowsLanguageWordCompletionOnLine(line.text, word.from - line.from)) {
                 continue;
               }
               try {
+                const documentIdentity = context.state.doc;
+                const inputGeneration = selected?.generation;
                 const completion = await invoke<LanguageCompletionResponse | null>("complete_language_word", {
                   request: {
                     provider: provider.id,
@@ -313,6 +323,11 @@ export function createTypstAutocomplete(
                     limit: 10
                   }
                 });
+                onLanguageCompletionPerformance?.(performance.now() - languageCompletionStartedAt);
+                if (context.view && (context.view.state.doc !== documentIdentity
+                  || context.view.state.selection.main.head !== context.pos
+                  || context.view.composing)) return null;
+                if (inputGeneration !== undefined && getLanguageCompletionGeneration?.() !== inputGeneration) return null;
                 const replacement = languageCompletionRange(word.from, word.text.length, completion);
                 if (completion && replacement && completion.options.length > 0) {
                   return {
@@ -320,7 +335,9 @@ export function createTypstAutocomplete(
                     options: completion.options.map(w => ({
                       label: w,
                       type: "text",
-                      detail: completion.provider
+                      detail: selected
+                        ? `${completion.provider} · ${selected.languageTag} (${selected.source})`
+                        : completion.provider
                     })),
                     // Results are deliberately bounded and ranked for the current
                     // segmented prefix, so every typed character must query again.

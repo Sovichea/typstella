@@ -2,6 +2,33 @@ import { describe, expect, test } from "bun:test";
 import { LanguageScopeClient } from "../src/editor/languageScopes/client";
 import { invalidatedLanguageRanges, resolveLanguageScopes } from "../src/editor/languageScopes/resolver";
 import type { LanguageScopeExtraction, TextStyleMutation } from "../src/editor/languageScopes/types";
+import { LanguageProviderIndex } from "../src/editor/languageScopes/providerResolver";
+import { InputLanguageService, selectCompletionProvider } from "../src/editor/languageScopes/inputLanguage";
+import type { LanguageProviderCapabilities } from "../src/languageSupport";
+
+const provider = (id: string, languageTag: string, scripts: string[]): LanguageProviderCapabilities => ({
+  schemaVersion: 1,
+  id,
+  pattern: scripts.includes("Latn") ? "[A-Za-z]+" : scripts.includes("Khmr") ? "[\\u1780-\\u17ff]+" : "[\\u0600-\\u06ff]+",
+  displayName: id,
+  languageTag,
+  scripts,
+  engine: "test",
+  supportLevel: "basic",
+  stability: "stable",
+  boundaryMode: "unicode-word",
+  boundaryQuality: "general",
+  correctionQuality: "dictionary",
+  supportsSpellcheck: true,
+  supportsCorrections: true,
+  supportsCompletion: true,
+  supportsSegmentation: false,
+  supportsCustomDictionary: true,
+  hasEditingPolicy: false,
+  providerType: "dictionary-only",
+  version: "1",
+  license: "test",
+});
 
 const mutation = (values: Partial<TextStyleMutation>): TextStyleMutation => ({
   kind: "setRule",
@@ -109,5 +136,79 @@ describe("Typst language-scope resolver", () => {
     pending[1]!({ ...extraction(), revision: 2 });
     expect(await first).toBeNull();
     expect((await second)?.revision).toBe(2);
+  });
+});
+
+describe("language provider routing", () => {
+  const installed = [
+    provider("en", "en-US", ["Latn"]),
+    provider("fr", "fr-FR", ["Latn"]),
+    provider("km", "km", ["Khmr"]),
+    provider("ar", "ar", ["Arab"]),
+  ];
+
+  test("resolves exact locales, disabled providers, and downloadable catalog entries", () => {
+    const index = new LanguageProviderIndex(installed, [{
+      id: "es", locale: "es_ES", displayName: "Spanish", languageTag: "es-ES",
+      scripts: ["Latn"], installed: false, bundled: false,
+    }], ["en", "km", "ar"]);
+    expect(index.resolve({
+      language: { confidence: "static", value: "en" },
+      region: { confidence: "static", value: "US" },
+      script: { confidence: "static", value: "auto" },
+    }).availability).toBe("installed");
+    expect(index.resolve({
+      language: { confidence: "static", value: "fr" },
+      region: { confidence: "static", value: "FR" },
+      script: { confidence: "static", value: "auto" },
+    }).availability).toBe("disabled");
+    expect(index.resolve({
+      language: { confidence: "static", value: "es" },
+      region: { confidence: "static", value: "ES" },
+      script: { confidence: "static", value: "auto" },
+    }).availability).toBe("downloadable");
+  });
+
+  test("enforces disjoint embedded script ownership and preserves order", () => {
+    const index = new LanguageProviderIndex(installed, [], null);
+    expect(index.embeddedProviders(["Latn"], ["fr", "km", "ar"]).map((item) => item.id))
+      .toEqual(["km", "ar"]);
+    expect(index.embeddedProviders([], ["en", "fr", "km"]).map((item) => item.id))
+      .toEqual(["en", "km"]);
+  });
+
+  test("does not silently choose between same-language regional providers", () => {
+    const index = new LanguageProviderIndex([
+      provider("en-us", "en-US", ["Latn"]),
+      provider("en-gb", "en-GB", ["Latn"]),
+    ], [], null);
+    expect(index.resolve({
+      language: { confidence: "static", value: "en" },
+      region: { confidence: "static", value: null },
+      script: { confidence: "static", value: "auto" },
+    }).availability).toBe("ambiguous");
+  });
+
+  test("keyboard completion selects exactly one provider and falls back to scope", async () => {
+    const scopes = resolveLanguageScopes(extraction([
+      mutation({ language: { confidence: "static", value: "fr" } }),
+    ]));
+    const service = new InputLanguageService(
+      () => installed,
+      () => scopes,
+      async () => ({ languageTag: "km-KH", reliability: "reliable", source: "test" }),
+    );
+    const keyboard = await service.completionProvider(10);
+    expect(keyboard?.provider.id).toBe("km");
+    expect(keyboard?.source).toBe("keyboard");
+    service.configure("scope", null);
+    expect((await service.completionProvider(10))?.provider.id).toBe("fr");
+    expect((await service.completionProvider(20))?.provider.id).toBe("fr");
+    expect((await service.completionProvider(21))?.provider.id).toBe("fr");
+    expect(selectCompletionProvider(installed, "en-US")?.id).toBe("en");
+    expect(selectCompletionProvider([
+      provider("en-us", "en-US", ["Latn"]),
+      provider("en-gb", "en-GB", ["Latn"]),
+    ], "en")).toBeNull();
   });
 });

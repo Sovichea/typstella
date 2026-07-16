@@ -1,7 +1,8 @@
 use super::provider::{
-    validate_license, AnalyzeRequest, AnalyzeResponse, CompletionRequest, CompletionResponse,
-    EditorToken, LanguageSegmenter, ProviderCapabilities, ProviderFailure, SegmentToken,
-    SuggestionRequest, SuggestionResponse, TextAnalysis, PROVIDER_CAPABILITY_SCHEMA_VERSION,
+    validate_license, AnalyzeContentMode, AnalyzeRequest, AnalyzeResponse, CompletionRequest,
+    CompletionResponse, EditorToken, LanguageSegmenter, ProviderCapabilities, ProviderFailure,
+    SegmentToken, SuggestionRequest, SuggestionResponse, TextAnalysis,
+    PROVIDER_CAPABILITY_SCHEMA_VERSION,
 };
 use crate::render_prepare::scanner::{scan_typst_content, ScanState};
 use icu_segmenter::{options::WordBreakInvariantOptions, WordSegmenter, WordSegmenterBorrowed};
@@ -1910,16 +1911,33 @@ impl SegmentationRegistry {
 
         for chunk in request.chunks {
             let byte_to_utf16 = byte_to_utf16_offsets(&chunk.text);
-            for (state, span_from_byte, span_to_byte, _scope) in scan_typst_content(&chunk.text) {
-                if state != ScanState::MarkupText || span_from_byte >= span_to_byte {
-                    continue;
-                }
+            let selected_providers: Vec<_> = if let Some(provider_id) = chunk.provider.as_deref() {
+                let provider = providers
+                    .iter()
+                    .find(|provider| provider.id() == provider_id)
+                    .ok_or_else(|| {
+                        format!("Unknown or unavailable routed language provider: {provider_id}")
+                    })?;
+                vec![provider]
+            } else {
+                providers.iter().collect()
+            };
+            let spans = match chunk.content_mode {
+                AnalyzeContentMode::PlainText => vec![(0, chunk.text.len())],
+                AnalyzeContentMode::TypstSource => scan_typst_content(&chunk.text)
+                    .into_iter()
+                    .filter_map(|(state, from, to, _)| {
+                        (state == ScanState::MarkupText && from < to).then_some((from, to))
+                    })
+                    .collect(),
+            };
+            for (span_from_byte, span_to_byte) in spans {
                 let span_text = &chunk.text[span_from_byte..span_to_byte];
                 let span_start_utf16 = chunk.start_utf16 + byte_to_utf16[span_from_byte];
                 let span_end_utf16 = span_start_utf16 + span_text.encode_utf16().count();
                 let utf16_to_byte = utf16_to_byte_boundaries(span_text);
 
-                for provider in providers
+                for provider in selected_providers
                     .iter()
                     .filter(|provider| provider.supports(span_text))
                 {
@@ -2510,6 +2528,8 @@ mod tests {
             chunks: vec![AnalyzeChunk {
                 text: source.to_string(),
                 start_utf16: 0,
+                provider: None,
+                content_mode: AnalyzeContentMode::TypstSource,
             }],
         })
         .expect("Khmer-only analysis");
@@ -2520,6 +2540,8 @@ mod tests {
             chunks: vec![AnalyzeChunk {
                 text: source.to_string(),
                 start_utf16: 0,
+                provider: None,
+                content_mode: AnalyzeContentMode::TypstSource,
             }],
         })
         .expect("mixed analysis");
@@ -3043,6 +3065,8 @@ mod tests {
                 chunks: vec![crate::segmentation::provider::AnalyzeChunk {
                     text: "សាលារៀន hello invalidword".to_string(),
                     start_utf16: 0,
+                    provider: None,
+                    content_mode: AnalyzeContentMode::TypstSource,
                 }],
             })
             .expect("analyze language ranges");
@@ -3089,6 +3113,8 @@ mod tests {
                 chunks: vec![crate::segmentation::provider::AnalyzeChunk {
                     text: text.to_string(),
                     start_utf16: 7,
+                    provider: None,
+                    content_mode: AnalyzeContentMode::TypstSource,
                 }],
             })
             .expect("mixed analysis");
@@ -3172,6 +3198,8 @@ mod tests {
                 chunks: vec![crate::segmentation::provider::AnalyzeChunk {
                     text: "hello wrld".to_string(),
                     start_utf16: 0,
+                    provider: None,
+                    content_mode: AnalyzeContentMode::TypstSource,
                 }],
             })
             .expect("analysis");
@@ -3181,6 +3209,41 @@ mod tests {
             .any(|token| token.provider == "hunspell:en_US"
                 && token.source_text == "wrld"
                 && !token.known));
+    }
+
+    #[test]
+    fn routed_plain_text_uses_only_the_requested_provider_and_fails_closed() {
+        let registry = SegmentationRegistry::new().expect("registry");
+        let response = registry
+            .analyze_ranges(AnalyzeRequest {
+                chunks: vec![crate::segmentation::provider::AnalyzeChunk {
+                    text: "wrld".to_string(),
+                    start_utf16: 9,
+                    provider: Some("hunspell:en_US".to_string()),
+                    content_mode: AnalyzeContentMode::PlainText,
+                }],
+            })
+            .expect("routed analysis");
+        assert!(response
+            .tokens
+            .iter()
+            .all(|token| token.provider == "hunspell:en_US"));
+        assert!(response
+            .tokens
+            .iter()
+            .any(|token| token.source_from_utf16 == 9));
+
+        let error = registry
+            .analyze_ranges(AnalyzeRequest {
+                chunks: vec![crate::segmentation::provider::AnalyzeChunk {
+                    text: "wrld".to_string(),
+                    start_utf16: 0,
+                    provider: Some("removed-provider".to_string()),
+                    content_mode: AnalyzeContentMode::PlainText,
+                }],
+            })
+            .expect_err("unknown provider must fail closed");
+        assert!(error.contains("Unknown or unavailable routed language provider"));
     }
 
     #[test]
@@ -3241,6 +3304,8 @@ This paragraph has a recieve typo.
                 chunks: vec![crate::segmentation::provider::AnalyzeChunk {
                     text: source.to_string(),
                     start_utf16: 0,
+                    provider: None,
+                    content_mode: AnalyzeContentMode::TypstSource,
                 }],
             })
             .expect("analysis");

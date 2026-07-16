@@ -182,6 +182,7 @@ Typsastra downloads and manages Tinymist for preview and diagnostics. A separate
 - [Language tools providers](./docs/LANGUAGE_TOOLS.md)
 - [Script-aware editor policy guide](./docs/SCRIPT_EDITING_POLICIES.md)
 - [Khmer spellcheck and word completion](./docs/KHMER_SPELLCHECK.md)
+- [Scope-aware multilingual spellcheck and completion](./docs/SCOPE_AWARE_LANGUAGE_TOOLS.md)
 - [Experimental Lao language support](./docs/LAO_LANGUAGE_SUPPORT.md)
 - [Language contributor guide](./docs/LANGUAGE_CONTRIBUTOR_GUIDE.md)
 - [Compatibility and promotion policy](./docs/COMPATIBILITY_POLICY.md)

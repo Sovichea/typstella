@@ -9,6 +9,10 @@ export type PerformanceMetricName =
   | "preview.zoom"
   | "preview.recovery"
   | "language.analysis"
+  | "language.scopeParse"
+  | "language.providerResolution"
+  | "language.completion"
+  | "language.inputSource"
   | "memory.heap";
 
 export type PerformanceMetric = {

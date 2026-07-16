@@ -30,10 +30,11 @@ describe("workspace state store", () => {
       }
     })).toEqual({
       project: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         projectId: "project-1",
         mainFile: "chapters/main.typ",
-        recommendedToolchain: null
+        recommendedToolchain: null,
+        terminology: []
       },
       workspace: {
         schemaVersion: 1,

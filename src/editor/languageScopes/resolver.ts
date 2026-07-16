@@ -43,9 +43,14 @@ function sameStyle(left: EffectiveLanguageStyle, right: EffectiveLanguageStyle):
 function sourceFor(active: TextStyleMutation[]): {
   sourceKind: MutationKind | "default" | "inherited";
   declaration?: SourceRange;
+  languageDeclaration?: SourceRange;
 } {
   const source = active.reduce<TextStyleMutation | undefined>(
     (latest, mutation) => !latest || mutation.order > latest.order ? mutation : latest,
+    undefined,
+  );
+  const languageSource = active.reduce<TextStyleMutation | undefined>(
+    (latest, mutation) => mutation.language && (!latest || mutation.order > latest.order) ? mutation : latest,
     undefined,
   );
   return source ? {
@@ -54,6 +59,10 @@ function sourceFor(active: TextStyleMutation[]): {
       fromUtf16: source.declarationFromUtf16,
       toUtf16: source.declarationToUtf16,
     },
+    languageDeclaration: languageSource ? {
+      fromUtf16: languageSource.diagnosticFromUtf16,
+      toUtf16: languageSource.diagnosticToUtf16,
+    } : undefined,
   } : { sourceKind: "default" };
 }
 
@@ -99,7 +108,9 @@ export function resolveLanguageScopes(
     if (previous && previous.toUtf16 === fromUtf16 && sameStyle(previous.style, style)
       && previous.sourceKind === source.sourceKind
       && previous.declaration?.fromUtf16 === source.declaration?.fromUtf16
-      && previous.declaration?.toUtf16 === source.declaration?.toUtf16) {
+      && previous.declaration?.toUtf16 === source.declaration?.toUtf16
+      && previous.languageDeclaration?.fromUtf16 === source.languageDeclaration?.fromUtf16
+      && previous.languageDeclaration?.toUtf16 === source.languageDeclaration?.toUtf16) {
       previous.toUtf16 = toUtf16;
     } else {
       ranges.push({ fromUtf16, toUtf16, style, ...source });
@@ -111,6 +122,7 @@ export function resolveLanguageScopes(
     revision: extraction.revision,
     documentUtf16: documentEnd,
     parserVersion: extraction.parserVersion,
+    elapsedMicros: extraction.elapsedMicros,
     ranges,
     proseRanges: extraction.proseRanges,
     syntaxErrors: extraction.syntaxErrors,
