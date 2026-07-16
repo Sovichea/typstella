@@ -3,6 +3,7 @@ import { confirm, message, open, save } from "@tauri-apps/plugin-dialog";
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getVersion } from "@tauri-apps/api/app";
 import { dirname, join } from "@tauri-apps/api/path";
 import { EditorState, Transaction } from "@codemirror/state";
 import { EditorView, highlightActiveLine, highlightActiveLineGutter, lineNumbers } from "@codemirror/view";
@@ -5596,6 +5597,32 @@ export class TypsastraWorkspaceController {
 
     document.getElementById("action-docs-typst")?.addEventListener("click", () => {
       openUrl("https://typst.app/docs");
+    });
+
+    const aboutOverlay = document.getElementById("about-overlay");
+    const aboutClose = document.getElementById("about-close") as HTMLButtonElement | null;
+    const aboutAction = document.getElementById("action-about-typsastra") as HTMLElement | null;
+    const closeAbout = () => {
+      if (aboutOverlay?.classList.contains("hidden")) return;
+      aboutOverlay?.classList.add("hidden");
+      aboutAction?.focus();
+    };
+    aboutAction?.addEventListener("click", async () => {
+      const version = document.getElementById("about-version");
+      if (version) version.textContent = await getVersion().catch(() => "Unavailable");
+      aboutOverlay?.classList.remove("hidden");
+      aboutClose?.focus();
+    });
+    aboutClose?.addEventListener("click", closeAbout);
+    document.getElementById("about-done")?.addEventListener("click", closeAbout);
+    document.getElementById("about-project-page")?.addEventListener("click", () => {
+      openUrl("https://github.com/Sovichea/typsastra");
+    });
+    aboutOverlay?.addEventListener("click", event => {
+      if (event.target === aboutOverlay) closeAbout();
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && !aboutOverlay?.classList.contains("hidden")) closeAbout();
     });
 
     // TODO: Re-enable the WYSIWYM layout menu action when the implementation is ready.

@@ -1088,6 +1088,72 @@ body.typsastra-resizing #input-container-wrapper::after {
 .settings-footer .settings-primary { color: #fff; background: #0969da; border-color: #0969da; }
 .settings-footer .settings-primary:hover { background: #075bbd; }
 
+.about-dialog {
+  width: min(540px, 100%);
+  height: auto;
+  max-height: calc(100vh - 48px);
+}
+
+.about-content {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 18px;
+  overflow-y: auto;
+  padding: 24px;
+}
+
+.about-app-icon {
+  display: block;
+  width: 88px;
+  height: 88px;
+  object-fit: contain;
+}
+
+.about-identity h3 {
+  margin: 2px 0 8px;
+  color: var(--ui-text);
+  font-size: 20px;
+}
+
+.about-identity p {
+  margin: 5px 0;
+  color: var(--ui-header-text);
+  line-height: 1.5;
+}
+
+.about-version strong { color: var(--ui-text); }
+
+.about-license {
+  grid-column: 1 / -1;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  background: var(--ui-hover);
+}
+
+.about-license summary {
+  padding: 9px 12px;
+  color: var(--ui-text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.about-license pre {
+  margin: 0;
+  padding: 0 12px 12px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  color: var(--ui-header-text);
+  font: 10px/1.55 var(--font-family-mono);
+}
+
+.about-footer { justify-content: flex-end; }
+
+@media (max-width: 480px) {
+  .about-content { grid-template-columns: 1fr; text-align: center; }
+  .about-app-icon { margin-inline: auto; }
+  .about-license { grid-column: 1; text-align: left; }
+}
+
 .settings-content { display: flex; flex: 1; min-height: 0; }
 .settings-nav {
   width: 170px;

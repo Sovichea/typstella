@@ -185,6 +185,10 @@
                                 >
                                     Typst Reference
                                 </div>
+                                <div class="dropdown-separator"></div>
+                                <div class="dropdown-item" id="action-about-typsastra" tabindex="-1">
+                                    About Typsastra
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2566,6 +2570,71 @@
                             Done
                         </button>
                     </div>
+                </footer>
+            </section>
+        </div>
+
+        <div id="about-overlay" class="settings-overlay hidden" role="presentation">
+            <section
+                class="settings-dialog about-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="about-title"
+                aria-describedby="about-description"
+            >
+                <header class="settings-header">
+                    <div>
+                        <h2 id="about-title">About Typsastra</h2>
+                        <p>Application and license information</p>
+                    </div>
+                    <button
+                        id="about-close"
+                        class="settings-icon-button"
+                        type="button"
+                        aria-label="Close About Typsastra"
+                        title="Close"
+                    >×</button>
+                </header>
+                <div class="about-content">
+                    <img
+                        src="/assets/typsastra-icon.png"
+                        class="about-app-icon"
+                        width="88"
+                        height="88"
+                        alt="Typsastra application icon"
+                    />
+                    <div class="about-identity">
+                        <h3>Typsastra</h3>
+                        <p id="about-description">
+                            A complex-script-first Typst environment for research and long-form multilingual writing.
+                        </p>
+                        <p class="about-version">Version <strong id="about-version">Loading…</strong></p>
+                        <p>Copyright © 2026 Sovichea Tep</p>
+                    </div>
+                    <details class="about-license">
+                        <summary>MIT License</summary>
+                        <pre>Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.</pre>
+                    </details>
+                </div>
+                <footer class="settings-footer about-footer">
+                    <button id="about-project-page" type="button">Project page</button>
+                    <button id="about-done" class="settings-primary" type="button">Done</button>
                 </footer>
             </section>
         </div>
