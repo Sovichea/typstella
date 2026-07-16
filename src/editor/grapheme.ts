@@ -149,11 +149,15 @@ export function snapSelectionToGraphemeBoundaries(
         forward ? "forward" : "backward",
         temporaryBoundary
       );
-      return anchor === head ? EditorSelection.cursor(anchor) : EditorSelection.range(anchor, head);
+      return anchor === head
+        ? EditorSelection.cursor(anchor, range.assoc, range.bidiLevel ?? undefined, range.goalColumn)
+        : EditorSelection.range(anchor, head, range.goalColumn, range.bidiLevel ?? undefined, range.assoc);
     }
     const anchor = snapPositionToGraphemeBoundary(doc, range.anchor, temporaryBoundary);
     const head = snapPositionToGraphemeBoundary(doc, range.head, temporaryBoundary);
-    return anchor === head ? EditorSelection.cursor(anchor) : EditorSelection.range(anchor, head);
+    return anchor === head
+      ? EditorSelection.cursor(anchor, range.assoc, range.bidiLevel ?? undefined, range.goalColumn)
+      : EditorSelection.range(anchor, head, range.goalColumn, range.bidiLevel ?? undefined, range.assoc);
   });
   return EditorSelection.create(ranges, selection.mainIndex);
 }

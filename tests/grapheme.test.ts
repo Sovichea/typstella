@@ -55,6 +55,16 @@ describe("editor grapheme navigation", () => {
     }
   });
 
+  test("preserves CodeMirror's visual goal column while snapping a grapheme", () => {
+    const doc = Text.of(["ឱ្យ text"]);
+    const selection = EditorSelection.create([
+      EditorSelection.cursor(1, 0, undefined, 84),
+    ]);
+    const snapped = snapSelectionToGraphemeBoundaries(doc, selection).main;
+    expect(snapped.head).toBe(0);
+    expect(snapped.goalColumn).toBe(84);
+  });
+
   test("backspace deletes one Unicode code point except Khmer subscript pairs", () => {
     const doc = Text.of(["ខ្មែរ"]);
     expect(codePointDeletionRange(doc, 4, "backward")).toEqual({ from: 3, to: 4 });

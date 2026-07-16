@@ -13,6 +13,7 @@ import { closeBrackets, closeCompletion, completionStatus } from "@codemirror/au
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
 import { getEditorExtensions, themeCompartment, getThemeExtension, applyUIThemeVariables, wrapCompartment, lineNumbersCompartment, activeLineCompartment, closeBracketsCompartment, indentationGuidesCompartment, tabSizeCompartment, completionCompartment, showZwsCompartment, showZeroWidthSpaces } from "./editor/extensions";
 import { createTypstAutocomplete } from "./editor/autocomplete";
+import { cursorRowColumn } from "./editor/verticalCursor";
 import type { EditorFoldRange } from "./editor/folding";
 import { looksLikeStalePrefixDiagnostic, setEditorDiagnosticsEffect } from "./editor/diagnostics";
 import type { EditorDiagnostic, EditorDiagnosticSeverity } from "./editor/diagnostics";
@@ -973,6 +974,9 @@ export class TypsastraWorkspaceController {
             } else if (update.docChanged) {
               this.logConsoleController.setActiveSpellcheckLocation(null);
             }
+            if (update.selectionSet || update.docChanged) {
+              this.updateCursorPositionStatus();
+            }
             if (update.viewportChanged) {
               const topVisiblePosition = update.view.lineBlockAtHeight(update.view.scrollDOM.scrollTop).from;
               this.documentOutlineController.setCursorPosition(topVisiblePosition, this.activeFilePath);
@@ -1022,6 +1026,19 @@ export class TypsastraWorkspaceController {
       this.previewSyncController.suppressForwardFor(500);
     }, { passive: true });
     this.editorFontManager.updateDocument(initialDocument);
+    this.updateCursorPositionStatus();
+  }
+
+  private updateCursorPositionStatus(): void {
+    const status = document.getElementById("cursor-position-status");
+    const label = status?.querySelector<HTMLElement>(".status-label");
+    if (!status || !label || !this.editorInstance) return;
+    const { row, column } = cursorRowColumn(
+      this.editorInstance.state.doc,
+      this.editorInstance.state.selection.main.head,
+    );
+    label.textContent = `Ln ${row}, Col ${column}`;
+    status.setAttribute("aria-label", `Cursor at row ${row}, column ${column}`);
   }
 
   private refreshEditorLayout(reason: string): void {

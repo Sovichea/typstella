@@ -2807,6 +2807,12 @@ button.welcome-item:disabled {
   color: var(--ui-accent-color);
 }
 
+.cursor-position-status {
+  margin-left: auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .cm-language-scope-hint.downloadable,
 .cm-language-scope-hint.unsupported {
   text-decoration: underline dotted var(--ui-warning-color);
