@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri, nativeFilePath, relativeFilePath } from "../src/platform/paths";
+import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri, nativeFilePath, relativeFilePath, remapFilePath } from "../src/platform/paths";
 
 describe("platform paths", () => {
   test("round-trips Windows paths and encodes spaces", () => {
@@ -39,5 +39,16 @@ describe("platform paths", () => {
     expect(relativeFilePath("C:\\Work", "c:\\Work\\chapters\\one.typ")).toBe("chapters/one.typ");
     expect(relativeFilePath("/work", "/work/chapters/one.typ")).toBe("chapters/one.typ");
     expect(relativeFilePath("/work", "/outside/one.typ")).toBeNull();
+  });
+
+  test("remaps renamed files and descendants across platforms", () => {
+    expect(remapFilePath("C:\\Work\\main.typ", "c:/work/main.typ", "C:\\Work\\book.typ"))
+      .toBe("C:\\Work\\book.typ");
+    expect(remapFilePath("C:\\Work\\chapters\\one.typ", "C:\\Work\\chapters", "C:\\Work\\content"))
+      .toBe("C:\\Work\\content\\one.typ");
+    expect(remapFilePath("/work/chapters/one.typ", "/work/chapters", "/work/content"))
+      .toBe("/work/content/one.typ");
+    expect(remapFilePath("/work/main.typ", "/work/chapters", "/work/content"))
+      .toBe("/work/main.typ");
   });
 });

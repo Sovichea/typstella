@@ -60,3 +60,14 @@ export function relativeFilePath(root: string, path: string): string | null {
   if (!pathKey.startsWith(`${rootKey}/`)) return null;
   return normalizedPath.slice(normalizedRoot.length + 1);
 }
+
+/** Remap a path when a file or one of its parent directories is renamed. */
+export function remapFilePath(path: string, oldPath: string, newPath: string): string {
+  const relative = relativeFilePath(oldPath, path);
+  if (relative === null) return path;
+  if (relative === "") return newPath;
+
+  const separator = newPath.includes("\\") && !newPath.includes("/") ? "\\" : "/";
+  const base = newPath.replace(/[\\/]+$/, "");
+  return `${base}${separator}${relative.replace(/[\\/]/g, separator)}`;
+}

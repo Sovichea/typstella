@@ -22,7 +22,7 @@ import { TinymistLspClient } from "./compiler/lsp";
 import type { EditorTextEdit, LspDiagnostic, LspInverseSyncResult, LspLogEntry, LspSourcePosition, LspStatus, PreviewDocumentPosition } from "./compiler/lsp";
 import type { AppSettings, DeveloperLogCategory } from "./settings";
 import { SettingsController } from "./settingsController";
-import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri, nativeFilePath, relativeFilePath } from "./platform/paths";
+import { fileNameFromPath, filePathFromUri, filePathKey, filePathToUri, nativeFilePath, relativeFilePath, remapFilePath } from "./platform/paths";
 import { isBinaryImagePath, isSupportedInAppPath } from "./platform/fileTypes";
 import { WysiwymAdapter } from "./wysiwym/adapter";
 import { PreviewFrame, type PreviewClickPoint, type PreviewInteractionStatus } from "./preview/previewFrame";
@@ -378,8 +378,7 @@ export class TypsastraWorkspaceController {
     getPreviewFrame: () => this.previewFrame.element,
     loadFile: path => this.loadFile(path),
     save: () => this.saveActiveFile(),
-    updateTabPath: (oldPath, newPath) => this.updateEditorTabPath(oldPath, newPath),
-    activateTab: path => this.activateEditorTab(path, false),
+    renameWorkspacePath: (oldPath, newPath) => this.renameWorkspacePath(oldPath, newPath),
     closeTab: path => this.closeEditorTab(path, true),
     closeTabInteractive: path => this.closeEditorTab(path, false),
     closeOtherTabs: path => this.closeOtherTabs(path),
@@ -1280,27 +1279,102 @@ export class TypsastraWorkspaceController {
     }
   }
 
-  private updateEditorTabPath(oldPath: string, newPath: string) {
-    const tab = this.openTabs.find((candidate) => candidate.path === oldPath);
-    if (!tab) return;
+  private async renameWorkspacePath(oldPath: string, newPath: string): Promise<void> {
+    const workspaceRoot = this.workspaceRootPath;
+    if (workspaceRoot) this.workspaceWatcher.stop();
 
-    tab.path = newPath;
-    const acceptedScale = this.acceptedTypographyScales.get(filePathKey(oldPath));
-    this.acceptedTypographyScales.delete(filePathKey(oldPath));
-    if (acceptedScale !== undefined) this.acceptedTypographyScales.set(filePathKey(newPath), acceptedScale);
-    if (this.activeFilePath === oldPath) {
-      this.activeFilePath = newPath;
-      this.explorer.setActiveFile(newPath);
-      this.activateSpellcheckDocument(newPath);
-      this.previewRootPath = tab.previewRootPath;
-      this.previewMainPath = tab.previewMainPath;
-      this.previewTaskId = tab.previewTaskId;
-      this.previewSessionKey = tab.previewSessionKey;
-      this.previewImported = tab.previewImported;
-      this.previewStandalone = tab.previewStandalone;
-      this.previewDisabled = tab.previewDisabled;
+    try {
+      await invoke("rename_workspace_file", { oldPath, newPath });
+
+      const renamedTabs: Array<{ oldPath: string; tab: EditorTab }> = [];
+      for (const tab of this.openTabs) {
+        const renamedPath = remapFilePath(tab.path, oldPath, newPath);
+        if (renamedPath === tab.path) continue;
+
+        renamedTabs.push({ oldPath: tab.path, tab });
+        const acceptedScale = this.acceptedTypographyScales.get(filePathKey(tab.path));
+        this.acceptedTypographyScales.delete(filePathKey(tab.path));
+        if (acceptedScale !== undefined) {
+          this.acceptedTypographyScales.set(filePathKey(renamedPath), acceptedScale);
+        }
+        tab.path = renamedPath;
+      }
+
+      this.activeFilePath = this.activeFilePath
+        ? remapFilePath(this.activeFilePath, oldPath, newPath)
+        : null;
+      this.pinnedMainFilePath = this.pinnedMainFilePath
+        ? remapFilePath(this.pinnedMainFilePath, oldPath, newPath)
+        : null;
+      this.pendingLspSyncPath = this.pendingLspSyncPath
+        ? remapFilePath(this.pendingLspSyncPath, oldPath, newPath)
+        : null;
+
+      // Preview roots and task identities include the source path. Keeping any
+      // of them after a rename lets stale and current sessions alternate.
+      for (const tab of this.openTabs) {
+        tab.previewRootPath = null;
+        tab.previewMainPath = null;
+        tab.previewTaskId = null;
+        tab.previewSessionKey = null;
+        tab.previewImported = false;
+        tab.previewStandalone = true;
+        tab.previewDisabled = false;
+      }
+      this.previewRootPath = null;
+      this.previewMainPath = null;
+      this.previewTaskId = null;
+      this.previewSessionKey = null;
+      this.previewImported = false;
+      this.previewStandalone = true;
+      this.previewDisabled = false;
+      this.pinnedLspMainPath = null;
+      this.pdfPreviewGeneratedFiles.clear();
+      this.pdfPreparationRevision += 1;
+      this.pdfPreviewScheduleGeneration += 1;
+      if (this.pdfPreviewTimer !== null) {
+        window.clearTimeout(this.pdfPreviewTimer);
+        this.pdfPreviewTimer = null;
+      }
+
+      if (this.activeFilePath) {
+        this.explorer.setActiveFile(this.activeFilePath);
+        this.activateSpellcheckDocument(this.activeFilePath);
+      }
+      this.sortPinnedMainTabFirst();
+      this.renderEditorTabs();
+      await this.saveWorkspaceState();
+
+      if (this.lspReady && this.lspClient) {
+        try {
+          for (const renamed of renamedTabs) {
+            const oldUri = filePathToUri(renamed.oldPath);
+            if (!this.openedDocumentUris.delete(oldUri)) continue;
+            await this.lspClient.closeTextDocument(oldUri).catch(() => {});
+            const newUri = filePathToUri(renamed.tab.path);
+            await this.lspClient.openTextDocument(newUri, renamed.tab.content, renamed.tab.version);
+            this.openedDocumentUris.add(newUri);
+          }
+          await this.lspClient.notifyWorkspaceFilesChanged([
+            { uri: filePathToUri(oldPath), type: 3 },
+            { uri: filePathToUri(newPath), type: 1 }
+          ]);
+        } catch (error) {
+          this.appendDeveloperLog({
+            kind: "warning",
+            source: "workspace",
+            message: `The file was renamed, but Tinymist's document state could not be transferred: ${String(error)}`
+          });
+        }
+      }
+
+      await this.prepareRenderProjectIfNeeded();
+      await this.refreshActivePreviewRoot(true);
+    } finally {
+      if (workspaceRoot && this.workspaceRootPath === workspaceRoot) {
+        await this.workspaceWatcher.start(workspaceRoot);
+      }
     }
-    this.renderEditorTabs();
   }
 
   private async closeEditorTab(path: string, skipDirtyCheck = false) {

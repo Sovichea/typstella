@@ -16,8 +16,7 @@ export type ContextMenuDependencies = {
   getPreviewFrame: () => HTMLIFrameElement | null;
   loadFile: (path: string) => void | Promise<void>;
   save: () => void | Promise<void>;
-  updateTabPath: (oldPath: string, newPath: string) => void;
-  activateTab: (path: string) => void | Promise<void>;
+  renameWorkspacePath: (oldPath: string, newPath: string) => void | Promise<void>;
   closeTab: (path: string) => void | Promise<void>;
   closeTabInteractive: (path: string) => void | Promise<void>;
   closeOtherTabs: (path: string) => void | Promise<void>;
@@ -208,11 +207,8 @@ export class ContextMenuController {
         if (newName && newName !== oldName) {
           const newPath = await join(await dirname(originalPath), newName);
           try {
-            await invoke("rename_workspace_file", { oldPath: originalPath, newPath });
+            await this.dependencies.renameWorkspacePath(originalPath, newPath);
             await this.refreshExplorer();
-            const active = this.dependencies.getActiveFile() === originalPath;
-            this.dependencies.updateTabPath(originalPath, newPath);
-            if (active) await this.dependencies.activateTab(newPath);
           } catch (error) { alert(`Failed to rename: ${error}`); }
         }
         resolve();
