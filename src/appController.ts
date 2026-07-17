@@ -1157,7 +1157,7 @@ export class TypsastraWorkspaceController {
   private persistActiveTabState() {
     const tab = this.getActiveTab();
     if (!tab || !this.editorInstance) return;
-    if (isBinaryImagePath(tab.path)) return;
+    if (!isSupportedInAppPath(tab.path) || isBinaryImagePath(tab.path)) return;
 
     const content = this.activeMode === "WYSIWYM"
       ? this.mapWysiwymToMarkup()
@@ -1213,13 +1213,13 @@ export class TypsastraWorkspaceController {
   }
 
   private foldCurrentFile(): void {
-    if (!this.getActiveTab() || isBinaryImagePath(this.activeFilePath ?? "")) return;
+    if (!this.getActiveTab() || !isSupportedInAppPath(this.activeFilePath ?? "") || isBinaryImagePath(this.activeFilePath ?? "")) return;
     foldAll(this.editorInstance);
     this.editorInstance.focus();
   }
 
   private unfoldCurrentFile(): void {
-    if (!this.getActiveTab() || isBinaryImagePath(this.activeFilePath ?? "")) return;
+    if (!this.getActiveTab() || !isSupportedInAppPath(this.activeFilePath ?? "") || isBinaryImagePath(this.activeFilePath ?? "")) return;
     unfoldAll(this.editorInstance);
     this.editorInstance.focus();
   }
@@ -1460,6 +1460,7 @@ export class TypsastraWorkspaceController {
     const tab = this.openTabs.find((candidate) => filePathKey(candidate.path) === filePathKey(path));
     const sameActivePath = this.activeFilePath !== null && filePathKey(this.activeFilePath) === filePathKey(path);
     const activeEditorMatchesTab = tab !== undefined && (
+      !isSupportedInAppPath(tab.path) ||
       isBinaryImagePath(tab.path) ||
       this.editorInstance.state.doc.toString() === tab.content
     );
@@ -1512,7 +1513,8 @@ export class TypsastraWorkspaceController {
       const imageViewerImg = document.getElementById("image-viewer-img") as HTMLImageElement;
       const imageViewerInfo = document.getElementById("image-viewer-info");
 
-      if (isBinaryImagePath(path)) {
+      const unsupportedFile = !isSupportedInAppPath(path);
+      if (unsupportedFile || isBinaryImagePath(path)) {
         codeRenderPane?.classList.add("hidden");
         imageViewerPane?.classList.remove("hidden");
         if (imageViewerImg) imageViewerImg.style.display = "none"; // Hide image element in editor
@@ -1526,9 +1528,22 @@ export class TypsastraWorkspaceController {
           `;
         }
         
+        this.renderNonTextEditorPlaceholder(path, unsupportedFile);
         document.getElementById("wysiwym-editor-pane")?.classList.add("hidden");
 
-        this.renderInteractiveImageViewer(tab.content);
+        this.activateSpellcheckDocument(null);
+        this.documentOutlineController.clear();
+        if (isBinaryImagePath(path)) {
+          this.renderInteractiveImageViewer(tab.content);
+        } else {
+          document.querySelector(".preview-actions")?.classList.add("hidden");
+          this.previewFrame.setMessage(
+            `<div class="preview-disabled-placeholder">` +
+            `<div class="preview-disabled-title">Preview Unavailable</div>` +
+            `<div class="preview-disabled-msg">Open this file with its system application to view it.</div>` +
+            `</div>`
+          );
+        }
         this.editorToolbarController.setDisabled(true);
         this.activeFilePath = path;
         this.isLoadingFile = false;
@@ -1787,30 +1802,6 @@ export class TypsastraWorkspaceController {
 
 
   private async loadFile(path: string, options: LoadFileOptions = {}) {
-    if (!isSupportedInAppPath(path)) {
-      const shouldOpenExternally = await confirm(
-        `${fileNameFromPath(path)} cannot be opened in Typsastra. Would you like to open it with your system application?`,
-        {
-          title: "Unsupported File Format",
-          kind: "warning",
-          okLabel: "Open Externally",
-          cancelLabel: "Cancel"
-        }
-      );
-      if (shouldOpenExternally) {
-        try {
-          await invoke("open_file_externally", { path });
-        } catch (error) {
-          console.error("Failed to open file externally:", error);
-          await message(`The file could not be opened externally.\n\n${String(error)}`, {
-            title: "Open External File Failed",
-            kind: "error"
-          });
-        }
-      }
-      return;
-    }
-
     const existingTab = this.openTabs.find((tab) => filePathKey(tab.path) === filePathKey(path));
     if (existingTab) {
       if (!options.temporary) {
@@ -1828,9 +1819,11 @@ export class TypsastraWorkspaceController {
     }
 
     try {
-      const contents = isBinaryImagePath(path)
-        ? await invoke<string>("read_workspace_file_as_base64", { path })
-        : normalizeEditorText(await invoke<string>("read_workspace_file", { path }));
+      const contents = !isSupportedInAppPath(path)
+        ? ""
+        : isBinaryImagePath(path)
+          ? await invoke<string>("read_workspace_file_as_base64", { path })
+          : normalizeEditorText(await invoke<string>("read_workspace_file", { path }));
       const newTab: EditorTab = {
         path,
         content: contents,
@@ -1913,7 +1906,7 @@ export class TypsastraWorkspaceController {
   }
 
   private async performSaveActiveFile(): Promise<void> {
-    if (!this.activeFilePath) {
+    if (!this.activeFilePath || !isSupportedInAppPath(this.activeFilePath) || isBinaryImagePath(this.activeFilePath)) {
       return;
     }
 
@@ -4404,6 +4397,10 @@ export class TypsastraWorkspaceController {
         continue;
       }
 
+      // Unsupported files are represented by a lightweight editor placeholder
+      // and are never decoded or synchronized as text.
+      if (!isSupportedInAppPath(tab.path)) continue;
+
       let contents: string;
       try {
         contents = isBinaryImagePath(tab.path)
@@ -4538,6 +4535,60 @@ export class TypsastraWorkspaceController {
       `<div class="preview-disabled-msg" style="margin-top: 8px; font-size: 12px; opacity: 0.75;">Include this file from the configured main document to preview it.</div>` +
       `</div>`
     );
+  }
+
+  private renderNonTextEditorPlaceholder(path: string, unsupported: boolean): void {
+    const info = document.getElementById("image-viewer-info");
+    if (!info) return;
+
+    const placeholder = document.createElement("div");
+    placeholder.className = "preview-disabled-placeholder editor-file-placeholder";
+
+    const icon = document.createElement("div");
+    icon.className = "preview-disabled-icon";
+    icon.textContent = unsupported ? "\u{1F4C4}" : "\u{1F4BE}";
+
+    const title = document.createElement("div");
+    title.className = "preview-disabled-title";
+    title.textContent = unsupported ? "Unsupported File" : "Binary File";
+
+    const fileName = document.createElement("div");
+    fileName.className = "editor-file-placeholder-name";
+    fileName.textContent = fileNameFromPath(path);
+
+    const description = document.createElement("div");
+    description.className = "preview-disabled-msg";
+    description.textContent = unsupported
+      ? "This file format cannot be displayed in Typsastra."
+      : "Cannot load raw binary in the text editor.";
+
+    placeholder.append(icon, title, fileName, description);
+    if (unsupported) {
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "editor-file-placeholder-action";
+      openButton.textContent = "Open Externally";
+      openButton.addEventListener("click", () => {
+        void this.openFileExternally(path, openButton);
+      });
+      placeholder.appendChild(openButton);
+    }
+    info.replaceChildren(placeholder);
+  }
+
+  private async openFileExternally(path: string, button?: HTMLButtonElement): Promise<void> {
+    if (button) button.disabled = true;
+    try {
+      await invoke("open_file_externally", { path });
+    } catch (error) {
+      console.error("Failed to open file externally:", error);
+      await message(`The file could not be opened externally.\n\n${String(error)}`, {
+        title: "Open External File Failed",
+        kind: "error"
+      });
+    } finally {
+      if (button?.isConnected) button.disabled = false;
+    }
   }
 
   private renderInteractiveImageViewer(src: string) {

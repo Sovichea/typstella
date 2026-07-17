@@ -3161,6 +3161,47 @@ button.welcome-item:disabled {
   color: var(--ui-header-text);
 }
 
+.editor-file-placeholder {
+  padding: 0;
+  background: transparent;
+}
+
+.editor-file-placeholder-name {
+  max-width: min(420px, 80vw);
+  margin: 0 0 8px;
+  overflow: hidden;
+  color: var(--ui-text);
+  font: 12px var(--editor-code-font), monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-file-placeholder-action {
+  min-height: 30px;
+  margin-top: 16px;
+  padding: 5px 12px;
+  border: 1px solid var(--ui-accent-color);
+  border-radius: 3px;
+  background: var(--ui-accent-color);
+  color: var(--ui-accent-contrast, #fff);
+  font: 12px var(--font-family-sans);
+  cursor: pointer;
+}
+
+.editor-file-placeholder-action:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.editor-file-placeholder-action:focus-visible {
+  outline: 1px solid var(--ui-text);
+  outline-offset: 2px;
+}
+
+.editor-file-placeholder-action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 .preview-only-mode .titlebar,
 .preview-only-mode #sidebar-activity-bar,
 .preview-only-mode #explorer-sidebar,
