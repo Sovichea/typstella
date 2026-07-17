@@ -13,3 +13,13 @@ export function pagesToEvict(
     )
     .slice(0, excess);
 }
+
+export function pageDimensionsChanged(
+  previous: { width: number; height: number } | undefined,
+  next: { width: number; height: number },
+  tolerance = 0.01
+): boolean {
+  return !previous
+    || Math.abs(previous.width - next.width) > tolerance
+    || Math.abs(previous.height - next.height) > tolerance;
+}

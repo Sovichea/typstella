@@ -41,7 +41,10 @@ These CLI values measure reproducibility and compiler cost, not WebView renderin
 
 - Spellcheck maps existing issues through edits, expands only changed logical ranges, coalesces overlaps, and permits one active plus one queued request.
 - Suggestions use provider indexes. Khmer edit-distance ranking is capped at 1,000 candidates and completion scanning at 1,024 candidates.
-- PDF slots preserve page geometry, but only the focused window of at most seven pages retains canvases and text layers.
+- PDF preview presentation reads the first page geometry synchronously, estimates the remaining slots, and hydrates exact page sizes in yielding background batches.
+- Only the focused window of at most seven pages retains canvases. The obsolete invisible PDF text layer is not built; source synchronization remains coordinate-based and links use the annotation layer.
+- Preview iframe scrollbar rules target its scrolling body instead of every rendered PDF element.
+- Visible page canvases render through one priority queue. Active rendering and geometry hydration pause during scrolling and resume after a short idle interval, keeping scrollbar dragging responsive.
 - A new PDF generation destroys an obsolete pending PDF.js load, cancels page renders, and rejects stale load, render, source-map, spellcheck, and compilation results.
 - The last valid PDF remains mounted until the replacement document and its page dimensions are ready. Zoom keeps the prior canvas visible until its current-resolution replacement commits.
 - Language catalogs and provider indexes initialize after the main window becomes usable.

@@ -21,7 +21,7 @@ export type PreviewMemorySnapshot = {
 };
 
 import { PERFORMANCE_BUDGETS, type PerformanceMetric } from "../performance/diagnostics";
-import { pagesToEvict } from "./virtualization";
+import { pageDimensionsChanged, pagesToEvict } from "./virtualization";
 import {
   TYPSASTRA_GREEN,
   TYPSASTRA_GREEN_RIPPLE_FILL,
@@ -70,6 +70,10 @@ export class PreviewFrame {
   private observer: IntersectionObserver | null = null;
   private pageDimensions = new Map<number, PageDimensions>();
   private activeRenders = new Map<number, ActivePageRender>();
+  private queuedPageRenders = new Set<number>();
+  private renderQueueRunning = false;
+  private previewScrolling = false;
+  private scrollResumeTimer: number | null = null;
   private pdfGeneration = 0;
   private currentPdfBytes = 0;
   private firstRenderedGeneration = 0;
@@ -271,7 +275,7 @@ export class PreviewFrame {
         await (pdfDoc as any).destroy();
         return;
       }
-      const nextDimensions = await readPdfPageDimensions(pdfDoc, generation, () => this.pdfGeneration);
+      const nextDimensions = await readInitialPdfPageDimensions(pdfDoc);
       if (generation !== this.pdfGeneration) {
         await (pdfDoc as any).destroy();
         return;
@@ -296,6 +300,11 @@ export class PreviewFrame {
       this.setupIframeInteractions();
       this.installPageObserver(iframe);
       this.restoreScrollAnchor(previousScroll);
+      void this.hydratePageDimensions(pdfDoc, generation).catch(error => {
+        if (generation === this.pdfGeneration && this.pdfDoc === pdfDoc) {
+          console.warn("Failed to finish PDF page geometry discovery:", error);
+        }
+      });
       this.reportInteractionStatus({ kind: "installed", url: identity });
       this.onPerformance?.({
         name: "preview.load",
@@ -342,20 +351,18 @@ export class PreviewFrame {
     iframe.className = "preview-frame";
     iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><style>
       :root{--preview-ui-bg:#fcfcfc;--preview-ui-header:#616161;--preview-ui-accent:${TYPSASTRA_GREEN};--scrollbar-track:transparent;--scrollbar-thumb:color-mix(in srgb,var(--preview-ui-header) 62%,var(--preview-ui-bg));--scrollbar-hover:color-mix(in srgb,var(--preview-ui-accent) 72%,var(--preview-ui-header))}
-      @supports not selector(::-webkit-scrollbar){*{scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track);scrollbar-width:auto}}
-      *::-webkit-scrollbar{width:15px;height:15px}
-      *::-webkit-scrollbar-track{background:transparent}
-      *::-webkit-scrollbar-thumb{min-width:32px;min-height:32px;background:var(--scrollbar-thumb);background-clip:padding-box;border:1px solid transparent;border-radius:0}
-      *::-webkit-scrollbar-thumb:hover,*::-webkit-scrollbar-thumb:active{background:var(--scrollbar-hover);background-clip:padding-box}
-      *::-webkit-scrollbar-corner{background:transparent}
-      *::-webkit-scrollbar-button{display:none;width:0;height:0}
+      @supports not selector(::-webkit-scrollbar){html,body{scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track);scrollbar-width:auto}}
+      body::-webkit-scrollbar{width:15px;height:15px}
+      body::-webkit-scrollbar-track{background:transparent}
+      body::-webkit-scrollbar-thumb{min-width:32px;min-height:32px;background:var(--scrollbar-thumb);background-clip:padding-box;border:1px solid transparent;border-radius:0}
+      body::-webkit-scrollbar-thumb:hover,body::-webkit-scrollbar-thumb:active{background:var(--scrollbar-hover);background-clip:padding-box}
+      body::-webkit-scrollbar-corner{background:transparent}
+      body::-webkit-scrollbar-button{display:none;width:0;height:0}
       html,body{margin:0;width:100%;height:100%;background:transparent}
       body{overflow:auto;font-family:sans-serif}
       #viewer-container{box-sizing:border-box;min-width:100%;width:max-content;padding:20px;display:flex;flex-direction:column;gap:20px}
       .pdf-page-container{position:relative;box-sizing:border-box;flex:none;margin:0 auto;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.25);overflow:hidden}
       .pdf-page-canvas{position:absolute;inset:0;display:block;width:100%;height:100%}
-      .textLayer{position:absolute;inset:0;overflow:hidden;line-height:1;opacity:1;--scale-factor:1;pointer-events:none;user-select:none}
-      .textLayer span,.textLayer br{position:absolute;color:transparent;white-space:pre;transform-origin:0 0}
       .forward-sync-ripple{position:fixed;z-index:2147483647;box-sizing:border-box;width:18px;height:18px;margin:-9px 0 0 -9px;border:2px solid ${TYPSASTRA_GREEN};border-radius:999px;background:${TYPSASTRA_GREEN_RIPPLE_FILL};box-shadow:0 0 0 0 ${TYPSASTRA_GREEN_RIPPLE_SHADOW};pointer-events:none;animation:typsastra-forward-ripple 900ms ease-out forwards}
       @keyframes typsastra-forward-ripple{0%{opacity:0;transform:scale(.55);box-shadow:0 0 0 0 rgba(61,180,137,.38)}12%{opacity:1}100%{opacity:0;transform:scale(3.1);box-shadow:0 0 0 14px rgba(61,180,137,0)}}
       .annotation-link{position:absolute;display:block}
@@ -413,6 +420,57 @@ export class PreviewFrame {
     }
   }
 
+  private async hydratePageDimensions(pdfDoc: any, generation: number): Promise<void> {
+    const startedAt = performance.now();
+    let widerPageFound = false;
+    const initialMaxWidth = [...this.pageDimensions.values()]
+      .reduce((maximum, dimensions) => Math.max(maximum, dimensions.width), 0);
+    for (let pageNo = 2; pageNo <= pdfDoc.numPages; pageNo += 1) {
+      await this.waitForScrollingToStop(pdfDoc, generation);
+      if (generation !== this.pdfGeneration || this.pdfDoc !== pdfDoc) return;
+      const page = await pdfDoc.getPage(pageNo);
+      if (generation !== this.pdfGeneration || this.pdfDoc !== pdfDoc) {
+        page.cleanup();
+        return;
+      }
+      const viewport = page.getViewport({ scale: 1 });
+      const dimensions = { width: viewport.width, height: viewport.height };
+      const previous = this.pageDimensions.get(pageNo);
+      if (pageDimensionsChanged(previous, dimensions)) {
+        this.pageDimensions.set(pageNo, dimensions);
+        this.updatePageSlotDimensions(pageNo, dimensions);
+        widerPageFound ||= dimensions.width > initialMaxWidth;
+      }
+      if (!this.activeRenders.has(pageNo)) page.cleanup();
+      if (pageNo % 8 === 0) {
+        await nextTurn();
+        await this.waitForScrollingToStop(pdfDoc, generation);
+      }
+    }
+    if (generation !== this.pdfGeneration || this.pdfDoc !== pdfDoc) return;
+    if (widerPageFound && this.isFitToWidth) this.applyFitToWidth();
+    this.onPerformance?.({
+      name: "preview.geometry",
+      milliseconds: performance.now() - startedAt,
+      detail: { pageCount: pdfDoc.numPages }
+    });
+  }
+
+  private async waitForScrollingToStop(pdfDoc: any, generation: number): Promise<void> {
+    while (this.previewScrolling && generation === this.pdfGeneration && this.pdfDoc === pdfDoc) {
+      await delay(40);
+    }
+  }
+
+  private updatePageSlotDimensions(pageNo: number, dimensions: PageDimensions): void {
+    const slot = this.iframe?.contentDocument
+      ?.querySelector<HTMLElement>(`.pdf-page-container[data-page-no="${pageNo}"]`);
+    if (!slot) return;
+    const zoom = this.previewZoomPercent / 100;
+    slot.style.width = `${dimensions.width * zoom}px`;
+    slot.style.height = `${dimensions.height * zoom}px`;
+  }
+
   private installPageObserver(iframe: HTMLIFrameElement): void {
     this.observer?.disconnect();
     const doc = iframe.contentDocument;
@@ -421,7 +479,7 @@ export class PreviewFrame {
     this.observer = new Observer(entries => {
       for (const entry of entries) {
         const pageNo = Number((entry.target as HTMLElement).dataset.pageNo);
-        if (entry.isIntersecting) void this.renderPage(pageNo, this.pdfGeneration);
+        if (entry.isIntersecting) this.queuePageRender(pageNo);
         else this.unrenderPage(pageNo);
       }
     }, { root: null, rootMargin: "1000px 0px 1000px 0px", threshold: 0 });
@@ -435,9 +493,65 @@ export class PreviewFrame {
     for (const slot of doc.querySelectorAll<HTMLElement>(".pdf-page-container")) {
       const rect = slot.getBoundingClientRect();
       if (rect.bottom >= -1000 && rect.top <= viewportHeight + 1000) {
-        void this.renderPage(Number(slot.dataset.pageNo), this.pdfGeneration);
+        this.queuePageRender(Number(slot.dataset.pageNo));
       }
     }
+  }
+
+  private queuePageRender(pageNo: number): void {
+    if (!Number.isFinite(pageNo) || this.activeRenders.has(pageNo)) return;
+    const slot = this.iframe?.contentDocument
+      ?.querySelector<HTMLElement>(`.pdf-page-container[data-page-no="${pageNo}"]`);
+    if (!slot || slot.dataset.renderKey === this.currentPageRenderKey(this.pdfGeneration)) return;
+    this.queuedPageRenders.add(pageNo);
+    if (!this.previewScrolling) void this.pumpPageRenderQueue();
+  }
+
+  private async pumpPageRenderQueue(): Promise<void> {
+    if (this.renderQueueRunning) return;
+    this.renderQueueRunning = true;
+    try {
+      while (!this.previewScrolling && this.queuedPageRenders.size > 0) {
+        const pageNo = this.nextQueuedPage();
+        if (pageNo === null) break;
+        this.queuedPageRenders.delete(pageNo);
+        await this.renderPage(pageNo, this.pdfGeneration);
+        await nextTurn();
+      }
+    } finally {
+      this.renderQueueRunning = false;
+      if (!this.previewScrolling && this.queuedPageRenders.size > 0) {
+        void this.pumpPageRenderQueue();
+      }
+    }
+  }
+
+  private nextQueuedPage(): number | null {
+    const doc = this.iframe?.contentDocument;
+    const viewportCenter = (this.iframe?.clientHeight ?? 0) / 2;
+    let closest: { pageNo: number; distance: number } | null = null;
+    for (const pageNo of this.queuedPageRenders) {
+      const slot = doc?.querySelector<HTMLElement>(`.pdf-page-container[data-page-no="${pageNo}"]`);
+      if (!slot) continue;
+      const rect = slot.getBoundingClientRect();
+      const distance = Math.abs(rect.top + rect.height / 2 - viewportCenter);
+      if (!closest || distance < closest.distance) closest = { pageNo, distance };
+    }
+    return closest?.pageNo ?? this.queuedPageRenders.values().next().value ?? null;
+  }
+
+  private deferPageRenderingDuringScroll(): void {
+    if (!this.previewScrolling) {
+      this.previewScrolling = true;
+      this.cancelActivePageRenders();
+    }
+    if (this.scrollResumeTimer !== null) window.clearTimeout(this.scrollResumeTimer);
+    this.scrollResumeTimer = window.setTimeout(() => {
+      this.scrollResumeTimer = null;
+      this.previewScrolling = false;
+      this.renderVisiblePages();
+      void this.pumpPageRenderQueue();
+    }, 120);
   }
 
   private async renderPage(pageNo: number, generation: number): Promise<void> {
@@ -459,7 +573,6 @@ export class PreviewFrame {
     const startedAt = performance.now();
     this.activeRenders.set(pageNo, active);
     try {
-      const pdfjs = await this.pdfJs();
       const page = await this.pdfDoc.getPage(pageNo);
       active.page = page;
       if (!this.renderIsCurrent(pageNo, active, slot)) return;
@@ -478,24 +591,30 @@ export class PreviewFrame {
       if (!context) throw new Error("Canvas rendering is unavailable.");
       const task = page.render({ canvasContext: context, viewport: renderViewport });
       active.task = task;
+      const canvasStartedAt = performance.now();
       await task.promise;
       active.task = null;
       if (!this.renderIsCurrent(pageNo, active, slot)) return;
+      this.onPerformance?.({
+        name: "preview.canvas-render",
+        milliseconds: performance.now() - canvasStartedAt,
+        detail: { pageNo, zoomPercent: this.previewZoomPercent }
+      });
       replaceElementChildren(slot, canvas);
       active.canvasCommitted = true;
       slot.dataset.renderKey = renderKey;
       delete slot.dataset.renderGeneration;
 
-      const textLayerElement = await this.renderTextLayer(pdfjs, page, cssViewport, doc);
-      if (!this.renderIsCurrent(pageNo, active, slot)) return;
-
+      const annotationStartedAt = performance.now();
       const annotationLinks = await this.renderAnnotationLinks(page, cssViewport, doc);
       if (!this.renderIsCurrent(pageNo, active, slot)) return;
+      this.onPerformance?.({
+        name: "preview.annotation-layer",
+        milliseconds: performance.now() - annotationStartedAt,
+        detail: { pageNo, linkCount: annotationLinks.length }
+      });
 
-      const children = textLayerElement
-        ? [canvas, textLayerElement, ...annotationLinks]
-        : [canvas, ...annotationLinks];
-      replaceElementChildren(slot, ...children);
+      replaceElementChildren(slot, canvas, ...annotationLinks);
       slot.dataset.renderKey = renderKey;
       delete slot.dataset.renderGeneration;
       this.trimResidentPages(pageNo);
@@ -522,31 +641,6 @@ export class PreviewFrame {
       if (this.activeRenders.get(pageNo) === active) this.activeRenders.delete(pageNo);
       active.page?.cleanup();
       if (active.canvas && !active.canvasCommitted) releaseCanvas(active.canvas);
-    }
-  }
-
-  private async renderTextLayer(pdfjs: PdfJsModule, page: any, viewport: any, doc: Document): Promise<HTMLElement | null> {
-    const TextLayer = (pdfjs as unknown as { TextLayer?: new (options: {
-      textContentSource: unknown;
-      container: HTMLElement;
-      viewport: unknown;
-    }) => { render(): Promise<void> | void } }).TextLayer;
-    if (typeof TextLayer !== "function") return null;
-    try {
-      const textContent = await page.getTextContent();
-      const textLayerElement = doc.createElement("div");
-      textLayerElement.className = "textLayer";
-      textLayerElement.style.setProperty("--scale-factor", String(viewport.scale));
-      const textLayer = new TextLayer({
-        textContentSource: textContent,
-        container: textLayerElement,
-        viewport
-      });
-      await textLayer.render();
-      return textLayerElement;
-    } catch (error) {
-      console.warn("Failed to render PDF text layer:", error);
-      return null;
     }
   }
 
@@ -587,6 +681,7 @@ export class PreviewFrame {
   }
 
   private unrenderPage(pageNo: number): void {
+    this.queuedPageRenders.delete(pageNo);
     const active = this.activeRenders.get(pageNo);
     active?.task?.cancel();
     active?.page?.cleanup();
@@ -614,6 +709,16 @@ export class PreviewFrame {
   }
 
   private cancelAllPageRenders(): void {
+    this.queuedPageRenders.clear();
+    this.previewScrolling = false;
+    if (this.scrollResumeTimer !== null) {
+      window.clearTimeout(this.scrollResumeTimer);
+      this.scrollResumeTimer = null;
+    }
+    this.cancelActivePageRenders();
+  }
+
+  private cancelActivePageRenders(): void {
     for (const [pageNo, render] of this.activeRenders) {
       render.task?.cancel();
       render.page?.cleanup();
@@ -748,6 +853,11 @@ export class PreviewFrame {
         }
       }
     }, { passive: false });
+    this.iframe?.contentWindow?.addEventListener(
+      "scroll",
+      () => this.deferPageRenderingDuringScroll(),
+      { passive: true }
+    );
   }
 
   private pdfDocumentPointAtClick(pageNo: number, slot: HTMLElement, event: MouseEvent): PreviewClickPoint {
@@ -856,20 +966,21 @@ function decodeBase64(value: string): Uint8Array {
   return bytes;
 }
 
-async function readPdfPageDimensions(
-  pdfDoc: any,
-  generation: number,
-  currentGeneration: () => number
-): Promise<Map<number, PageDimensions>> {
+async function readInitialPdfPageDimensions(pdfDoc: any): Promise<Map<number, PageDimensions>> {
   const dimensions = new Map<number, PageDimensions>();
+  if (pdfDoc.numPages < 1) return dimensions;
+  const page = await pdfDoc.getPage(1);
+  const viewport = page.getViewport({ scale: 1 });
+  const first = { width: viewport.width, height: viewport.height };
   for (let pageNo = 1; pageNo <= pdfDoc.numPages; pageNo += 1) {
-    if (generation !== currentGeneration()) return dimensions;
-    const page = await pdfDoc.getPage(pageNo);
-    const viewport = page.getViewport({ scale: 1 });
-    dimensions.set(pageNo, { width: viewport.width, height: viewport.height });
-    page.cleanup();
+    dimensions.set(pageNo, first);
   }
+  page.cleanup();
   return dimensions;
+}
+
+function nextTurn(): Promise<void> {
+  return new Promise(resolve => window.setTimeout(resolve, 0));
 }
 
 async function cleanupPdfResources(

@@ -15,11 +15,19 @@ describe("cross-platform scrollbar design", () => {
 
   test("applies matching custom geometry inside the isolated PDF iframe", async () => {
     const source = await Bun.file(new URL("../src/preview/previewFrame.ts", import.meta.url)).text();
-    expect(source).toMatch(/\*::\-webkit-scrollbar\{width:\d+px;height:\d+px\}/);
+    expect(source).toMatch(/body::\-webkit-scrollbar\{width:\d+px;height:\d+px\}/);
+    expect(source).not.toContain("*::-webkit-scrollbar");
     expect(source).toContain("@supports not selector(::-webkit-scrollbar)");
     expect(source).toContain("scrollbar-color:var(--scrollbar-thumb) var(--scrollbar-track)");
     expect(source).toContain("border-radius:0");
     expect(source).toContain('copy("--ui-accent-color", "--preview-ui-accent"');
     expect(source).toContain("var(--preview-ui-accent)");
+  });
+
+  test("does not build an unused PDF text layer", async () => {
+    const source = await Bun.file(new URL("../src/preview/previewFrame.ts", import.meta.url)).text();
+    expect(source).not.toContain("renderTextLayer");
+    expect(source).not.toContain('className = "textLayer"');
+    expect(source).toContain("hydratePageDimensions");
   });
 });
