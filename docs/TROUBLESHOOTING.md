@@ -57,3 +57,21 @@ When reporting preview issues, include:
 - Whether the preview is docked or undocked.
 - Whether the file is `main.typ` or an included file.
 - Any visible messages from the developer log console.
+
+### Linux preview is completely white
+
+If PDF export succeeds but the embedded preview is white or only appears briefly while resizing, open **Settings → Preview → Linux preview compatibility**. Review the detected session, WebKitGTK version, and graphics vendor, then enable **Disable WebKitGTK DMA-BUF renderer** and restart Typsastra.
+
+The equivalent temporary launch workaround is:
+
+```bash
+WEBKIT_DISABLE_DMABUF_RENDERER=1 typsastra
+```
+
+For an AppImage:
+
+```bash
+WEBKIT_DISABLE_DMABUF_RENDERER=1 ./Typsastra_0.4.1_amd64.AppImage
+```
+
+This is a WebKitGTK rendering workaround. It does not change Typst compilation or the exported PDF and may reduce rendering performance. When reporting the issue, also include `echo "$XDG_SESSION_TYPE"` and the installed `libwebkit2gtk-4.1-0` version where available.

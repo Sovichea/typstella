@@ -2439,6 +2439,31 @@
                             data-settings-panel-content="preview"
                         >
                             <h3>Preview</h3>
+                            <section
+                                id="settings-linux-renderer-compatibility"
+                                class="settings-compatibility-card hidden"
+                                aria-labelledby="settings-renderer-heading"
+                            >
+                                <h4 id="settings-renderer-heading">Linux preview compatibility</h4>
+                                <div
+                                    id="settings-renderer-status"
+                                    class="settings-notice"
+                                    role="status"
+                                    aria-live="polite"
+                                >Checking Linux display and WebKitGTK compatibility...</div>
+                                <p id="settings-renderer-details" class="settings-compatibility-details"></p>
+                                <label class="settings-toggle">
+                                    <input id="settings-disable-webkit-dmabuf" type="checkbox" />
+                                    <span>
+                                        <strong>Disable WebKitGTK DMA-BUF renderer</strong>
+                                        <small>Work around white or intermittently visible PDF previews on affected Linux/Wayland systems. This may reduce rendering performance and requires a restart.</small>
+                                    </span>
+                                </label>
+                                <div class="settings-compatibility-actions">
+                                    <button id="settings-renderer-recheck" class="settings-secondary-button" type="button">Recheck</button>
+                                    <button id="settings-renderer-restart" class="settings-secondary-button hidden" type="button">Restart Typsastra</button>
+                                </div>
+                            </section>
                             <div class="settings-field">
                                 <label for="settings-preview-render-mode"
                                     >Render preview</label

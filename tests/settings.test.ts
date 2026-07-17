@@ -21,6 +21,7 @@ describe("application settings", () => {
     expect(settings.preview.renderMode).toBe("on-type");
     expect(settings.preview.syncDebounceMs).toBe(defaultAppSettings.preview.syncDebounceMs);
     expect(settings.preview.khmerRenderPreparation).toBe(false);
+    expect(settings.compatibility.disableWebkitDmabufRenderer).toBe(false);
     expect(settings.toolchain.tinymistVersion).toBeNull();
   });
 
@@ -110,6 +111,12 @@ describe("application settings", () => {
 
   test("keeps the selected preview render mode", () => {
     expect(normalizeAppSettings({ preview: { renderMode: "on-save" } }).preview.renderMode).toBe("on-save");
+  });
+
+  test("keeps the Linux WebKit DMA-BUF compatibility override", () => {
+    expect(normalizeAppSettings({
+      compatibility: { disableWebkitDmabufRenderer: true }
+    }).compatibility.disableWebkitDmabufRenderer).toBe(true);
   });
 
   test("normalizes and deduplicates personal dictionary words", () => {

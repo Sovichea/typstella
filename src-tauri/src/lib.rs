@@ -13,6 +13,7 @@ use tokio_tungstenite::{
     },
 };
 
+mod compatibility;
 mod examples;
 mod font_store;
 mod input_language;
@@ -23,6 +24,7 @@ mod render_prepare;
 mod scaled_fonts;
 mod segmentation;
 mod toolchain;
+use compatibility::{get_linux_renderer_compatibility, prepare_linux_renderer_relaunch};
 use examples::prepare_examples_workspace;
 use render_prepare::{
     cancel_render_preparation, map_generated_to_source, map_source_to_generated,
@@ -2582,6 +2584,7 @@ async fn select_project_toolchain(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    compatibility::configure_process_environment();
     let native_start = Instant::now();
     let startup_timings = StartupTimings::default();
     let registry_start = Instant::now();
@@ -2651,6 +2654,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_startup_timings,
+            get_linux_renderer_compatibility,
+            prepare_linux_renderer_relaunch,
             get_memory_diagnostics,
             finish_startup_initialization,
             load_app_settings,

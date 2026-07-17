@@ -4,7 +4,7 @@ Open Settings from **File → Settings**, the status bar, or `Ctrl + ,`. Changes
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "appearance": {
     "theme": "default",
     "editorFontSize": 14,
@@ -32,6 +32,9 @@ Open Settings from **File → Settings**, the status bar, or `Ctrl + ,`. Changes
     "highlightDurationMs": 2200,
     "khmerRenderPreparation": false
   },
+  "compatibility": {
+    "disableWebkitDmabufRenderer": false
+  },
   "toolchain": {
     "tinymistVersion": null
   }
@@ -57,6 +60,12 @@ The Toolchain panel installs stable Tinymist releases and shows each release's e
 `syncDebounceMs` controls the quiet period before on-type cache preparation and PDF compilation. Increasing it reduces editor contention while typing quickly; the default is 500 ms.
 
 Forward cursor sync is temporarily disabled. Its reliability redesign and re-enablement are scheduled for the v0.9.0 prerelease.
+
+### Linux preview compatibility
+
+On Linux, the Preview panel reports the desktop session, WebKitGTK version, graphics vendor when detectable, CPU architecture, and whether the DMA-BUF renderer is active. A Wayland, AMD, and WebKitGTK 2.52.x combination is marked as a reported-risk profile for an all-white preview that may flash briefly while resizing. Detection is advisory and never changes the renderer automatically.
+
+**Disable WebKitGTK DMA-BUF renderer** persists `compatibility.disableWebkitDmabufRenderer` globally. After confirmation and restart, Typsastra sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` before creating the WebKit webview. This workaround may reduce rendering performance and should remain off unless the preview is affected. An environment variable supplied by an AppImage manager, shell, or desktop launcher remains authoritative and is identified separately in the compatibility status.
 
 ## Fonts and typography
 

@@ -68,6 +68,9 @@ export type AppSettings = {
     highlightDurationMs: number;
     khmerRenderPreparation: boolean;
   };
+  compatibility: {
+    disableWebkitDmabufRenderer: boolean;
+  };
   toolchain: {
     tinymistVersion: string | null;
   };
@@ -122,6 +125,9 @@ export const defaultAppSettings: AppSettings = {
     syncDebounceMs: 500,
     highlightDurationMs: 2200,
     khmerRenderPreparation: false
+  },
+  compatibility: {
+    disableWebkitDmabufRenderer: false
   },
   toolchain: {
     tinymistVersion: null
@@ -227,6 +233,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
   const appearance = objectValue(root.appearance);
   const editor = objectValue(root.editor);
   const preview = objectValue(root.preview);
+  const compatibility = objectValue(root.compatibility);
   const developerLogs = objectValue(root.developerLogs);
   const toolchain = objectValue(root.toolchain);
   const theme = themeNames.includes(appearance.theme as ThemeName)
@@ -289,6 +296,12 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       syncDebounceMs: Math.round(boundedNumber(preview.syncDebounceMs, defaultAppSettings.preview.syncDebounceMs, 50, 2000)),
       highlightDurationMs: Math.round(boundedNumber(preview.highlightDurationMs, defaultAppSettings.preview.highlightDurationMs, 500, 10000)),
       khmerRenderPreparation: booleanValue(preview.khmerRenderPreparation, defaultAppSettings.preview.khmerRenderPreparation)
+    },
+    compatibility: {
+      disableWebkitDmabufRenderer: booleanValue(
+        compatibility.disableWebkitDmabufRenderer,
+        defaultAppSettings.compatibility.disableWebkitDmabufRenderer
+      )
     },
     toolchain: {
       tinymistVersion: typeof toolchain.tinymistVersion === "string" && /^\d+\.\d+\.\d+$/.test(toolchain.tinymistVersion)

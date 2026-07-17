@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { confirm, message } from "@tauri-apps/plugin-dialog";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { cloneDefaultAppSettings, normalizeAppSettings, type AppSettings, type TerminologyEntry, type ThemeName } from "./settings";
 import {
   unicodeEditorFonts,
@@ -19,6 +20,20 @@ type SettingsPayload = { path: string; settings: unknown | null };
 type SystemFontCatalog = { all: string[]; monospace: string[] };
 type LanguageProviderOption = LanguageProviderCapabilities;
 type HunspellCatalogEntry = LanguageCatalogCapabilities;
+type LinuxRendererCompatibility = {
+  supported: boolean;
+  sessionType: string | null;
+  wayland: boolean;
+  webkitVersion: string | null;
+  distribution: string | null;
+  architecture: string;
+  gpuVendor: string | null;
+  amdGpu: boolean;
+  riskLevel: "none" | "possible" | "reported";
+  dmabufDisabled: boolean;
+  dmabufEnvironmentValue: string | null;
+  dmabufAppliedByTypsastra: boolean;
+};
 export type SettingsTimingEntry = {
   source: string;
   label: string;
@@ -41,6 +56,8 @@ export class SettingsController {
   private languageProviders: LanguageProviderOption[] = [];
   private readonly timingEntries: SettingsTimingEntry[] = [];
   private projectTerminology: TerminologyEntry[] = [];
+  private rendererCompatibility: LinuxRendererCompatibility | null = null;
+  private rendererCompatibilityError: string | null = null;
   private updateProjectTerminology: (entries: TerminologyEntry[]) => void = () => {};
 
   constructor(
@@ -88,6 +105,7 @@ export class SettingsController {
       this.recordTiming("frontend startup", "persist migrated settings", persistStart);
     }
     this.recordTiming("frontend startup", "settings load total", loadStart);
+    void this.refreshRendererCompatibility();
   }
 
   public update(mutator: (settings: AppSettings) => void) {
@@ -190,6 +208,9 @@ export class SettingsController {
     onChange("settings-sync-debounce", (settings, control) => { settings.preview.syncDebounceMs = Number(control.value); });
     onChange("settings-highlight-duration", (settings, control) => { settings.preview.highlightDurationMs = Number(control.value); });
     onChange("settings-khmer-prep", (settings, control) => { settings.preview.khmerRenderPreparation = (control as HTMLInputElement).checked; });
+    onChange("settings-disable-webkit-dmabuf", (settings, control) => {
+      settings.compatibility.disableWebkitDmabufRenderer = (control as HTMLInputElement).checked;
+    });
     onChange("settings-developer-mode", (settings, control) => { settings.developerMode = (control as HTMLInputElement).checked; });
     onChange("settings-dev-log-preview", (settings, control) => { settings.developerLogs.preview = (control as HTMLInputElement).checked; });
     onChange("settings-dev-log-inverse-sync", (settings, control) => { settings.developerLogs.inverseSync = (control as HTMLInputElement).checked; });
@@ -200,6 +221,12 @@ export class SettingsController {
     onChange("settings-dev-log-general", (settings, control) => { settings.developerLogs.general = (control as HTMLInputElement).checked; });
     document.getElementById("settings-add-language")?.addEventListener("click", () => {
       void this.toggleLanguageCatalog();
+    });
+    document.getElementById("settings-renderer-recheck")?.addEventListener("click", () => {
+      void this.refreshRendererCompatibility();
+    });
+    document.getElementById("settings-renderer-restart")?.addEventListener("click", () => {
+      void this.restartForRendererCompatibility();
     });
 
     document.getElementById("settings-reset")?.addEventListener("click", async () => {
@@ -227,7 +254,7 @@ export class SettingsController {
     this.populatePanel();
   }
 
-  private async persist() {
+  private async persist(): Promise<boolean> {
     const status = document.getElementById("settings-save-status");
     if (status) status.textContent = "Saving...";
     try {
@@ -238,9 +265,11 @@ export class SettingsController {
       if (status) status.textContent = "Saved";
       const path = document.getElementById("settings-file-path");
       if (path) path.textContent = this.filePath;
+      return true;
     } catch (error) {
       console.error("Failed to save settings.json", error);
       if (status) status.textContent = `Save failed: ${String(error)}`;
+      return false;
     }
   }
 
@@ -294,6 +323,7 @@ export class SettingsController {
       cursorSync.title = "Forward sync is disabled until the v0.9.0 prerelease reliability work.";
     }
     setChecked("settings-khmer-prep", preview.khmerRenderPreparation);
+    setChecked("settings-disable-webkit-dmabuf", this.settings.compatibility.disableWebkitDmabufRenderer);
     setChecked("settings-developer-mode", this.settings.developerMode);
     setChecked("settings-dev-log-preview", this.settings.developerLogs.preview);
     setChecked("settings-dev-log-inverse-sync", this.settings.developerLogs.inverseSync);
@@ -309,6 +339,7 @@ export class SettingsController {
     });
     this.populateLanguageProviders();
     this.populateTerminology();
+    this.populateRendererCompatibility();
 
     const path = document.getElementById("settings-file-path");
     if (path) {
@@ -317,6 +348,96 @@ export class SettingsController {
     }
     const status = document.getElementById("settings-save-status");
     if (status && this.loadError) status.textContent = `Using defaults: ${this.loadError}`;
+  }
+
+  private async refreshRendererCompatibility(): Promise<void> {
+    this.rendererCompatibilityError = null;
+    const status = document.getElementById("settings-renderer-status");
+    if (status) status.textContent = "Checking Linux display and WebKitGTK compatibility...";
+    try {
+      this.rendererCompatibility = await invoke<LinuxRendererCompatibility>("get_linux_renderer_compatibility");
+    } catch (error) {
+      this.rendererCompatibility = null;
+      this.rendererCompatibilityError = String(error);
+    }
+    this.populateRendererCompatibility();
+  }
+
+  private populateRendererCompatibility(): void {
+    const section = document.getElementById("settings-linux-renderer-compatibility");
+    const status = document.getElementById("settings-renderer-status");
+    const details = document.getElementById("settings-renderer-details");
+    const restart = document.getElementById("settings-renderer-restart") as HTMLButtonElement | null;
+    const compatibility = this.rendererCompatibility;
+
+    section?.classList.toggle("hidden", compatibility?.supported !== true && !this.rendererCompatibilityError);
+    if (!status || !details || !restart) return;
+    status.classList.remove("warning", "error");
+
+    if (this.rendererCompatibilityError) {
+      status.classList.add("error");
+      status.textContent = `Compatibility check failed: ${this.rendererCompatibilityError}`;
+      details.textContent = "You can still set the renderer override; it will be applied on the next Linux startup.";
+      restart.classList.add("hidden");
+      return;
+    }
+    if (!compatibility) return;
+    if (!compatibility.supported) return;
+
+    const desiredDisabled = this.settings.compatibility.disableWebkitDmabufRenderer;
+    const externallyDisabled = compatibility.dmabufDisabled && !compatibility.dmabufAppliedByTypsastra;
+    const restartRequired = desiredDisabled !== compatibility.dmabufDisabled
+      && !(externallyDisabled && !desiredDisabled);
+
+    if (restartRequired) {
+      status.classList.add("warning");
+      status.textContent = "Renderer setting changed. Restart Typsastra to apply it before WebKitGTK starts.";
+    } else if (externallyDisabled) {
+      status.textContent = "The DMA-BUF renderer is disabled for this run by an external environment variable.";
+    } else if (compatibility.dmabufDisabled) {
+      status.textContent = "The WebKitGTK DMA-BUF renderer is disabled for this run.";
+    } else if (compatibility.riskLevel === "reported") {
+      status.classList.add("warning");
+      status.textContent = "This Wayland, AMD, and WebKitGTK 2.52.x profile has a reported white-preview issue.";
+    } else if (compatibility.riskLevel === "possible") {
+      status.textContent = "Wayland is active. Use this workaround only if the PDF preview is white or flashes while resizing.";
+    } else {
+      status.textContent = "No reported DMA-BUF preview compatibility profile was detected.";
+    }
+
+    const platform = [
+      compatibility.distribution ?? "Linux",
+      compatibility.sessionType ? `session ${compatibility.sessionType}` : "session unknown",
+      compatibility.webkitVersion ? `WebKitGTK ${compatibility.webkitVersion}` : "WebKitGTK version unknown",
+      compatibility.gpuVendor ? `${compatibility.gpuVendor} graphics` : "GPU vendor unknown",
+      compatibility.architecture,
+    ];
+    details.textContent = platform.join(" | ");
+    restart.classList.toggle("hidden", !restartRequired);
+  }
+
+  private async restartForRendererCompatibility(): Promise<void> {
+    if (!await confirm(
+      "Restart Typsastra now to apply the WebKitGTK renderer setting?",
+      { title: "Restart Typsastra", kind: "warning" },
+    )) return;
+
+    if (this.saveTimer) {
+      window.clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    if (!await this.persist()) return;
+    try {
+      await invoke("prepare_linux_renderer_relaunch", {
+        disableDmabuf: this.settings.compatibility.disableWebkitDmabufRenderer,
+      });
+      await relaunch();
+    } catch (error) {
+      await message(`Typsastra could not restart automatically: ${String(error)}`, {
+        title: "Restart failed",
+        kind: "error",
+      });
+    }
   }
 
   private populateFontOptions() {

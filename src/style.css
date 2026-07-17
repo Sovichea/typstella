@@ -1428,6 +1428,27 @@ body.typsastra-resizing #input-container-wrapper::after {
 .settings-notice.warning { border-color: #bf8700; color: #9a6700; }
 .settings-notice.error { border-color: #cf222e; color: #cf222e; }
 .settings-help { color: var(--ui-header-text); font-size: 11px; line-height: 1.5; }
+.settings-compatibility-card {
+  margin-bottom: 20px;
+  padding: 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ui-hover) 55%, transparent);
+}
+.settings-compatibility-card h4 { margin: 0 0 10px; font-size: 12px; }
+.settings-compatibility-card .settings-notice { margin-bottom: 8px; }
+.settings-compatibility-card .settings-toggle { padding: 10px 0; }
+.settings-compatibility-details {
+  margin: 0;
+  color: var(--ui-header-text);
+  font: 10px/1.5 var(--font-family-mono);
+}
+.settings-compatibility-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 10px;
+}
 .settings-secondary-button {
   padding: 6px 10px;
   border: 1px solid var(--ui-border);
