@@ -121,8 +121,10 @@ This file serves as a consolidated reference for the architectural decisions, pa
   Typsastra does not consume the vector document, and forcing a full snapshot
   can block the first source lookup on thousand-page documents.
 - Start the hidden source-map task after PDF presentation and treat socket-open
-  only as transport readiness. Forward and inverse requests must wait for the
-  task's first natural `new` or `diff-v1` document frame before they are sent.
+  only as transport readiness. The initial vector frame can precede WebSocket
+  attachment, so warm-up retries a disposable `panelScrollTo` probe until a
+  `jump` confirms that source mapping is usable. A real synchronization request
+  remains serialized behind that readiness signal.
 
 ### E. WYSIWYM Mode
 - WYSIWYM is a secondary DOM editing view, not the source of truth. `WysiwymAdapter.render()` maps Typst to blocks and `.serialize()` maps blocks back to Typst.

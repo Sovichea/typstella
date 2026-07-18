@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { tinymistDataPlaneFrameKind, tinymistDataPlanePositionText } from "../src/preview/tinymistDataPlane";
+import {
+  tinymistDataPlaneFrameConfirmsSourceMap,
+  tinymistDataPlaneFrameKind,
+  tinymistDataPlanePositionText
+} from "../src/preview/tinymistDataPlane";
 
 const bytes = (value: string) => new TextEncoder().encode(value).buffer;
 
@@ -20,5 +24,11 @@ describe("Tinymist preview data plane", () => {
     expect(await tinymistDataPlaneFrameKind(bytes("jump,3 56.69 98.25"))).toBe("position");
     expect(await tinymistDataPlaneFrameKind("viewport,2 10 20")).toBe("position");
     expect(await tinymistDataPlaneFrameKind(bytes("outline,payload"))).toBe("unknown");
+  });
+
+  test("accepts either a document update or resolved position as source-map readiness", () => {
+    expect(tinymistDataPlaneFrameConfirmsSourceMap("document")).toBeTrue();
+    expect(tinymistDataPlaneFrameConfirmsSourceMap("position")).toBeTrue();
+    expect(tinymistDataPlaneFrameConfirmsSourceMap("unknown")).toBeFalse();
   });
 });

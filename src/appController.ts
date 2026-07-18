@@ -27,7 +27,11 @@ import { isBinaryImagePath, isSupportedInAppPath, fileExtension } from "./platfo
 import { WysiwymAdapter } from "./wysiwym/adapter";
 import { PreviewFrame, type PreviewClickPoint, type PreviewInteractionStatus, type PreviewPageStatus } from "./preview/previewFrame";
 import { PreviewSyncController } from "./preview/previewSyncController";
-import { tinymistDataPlaneFrameKind, tinymistDataPlanePositionText } from "./preview/tinymistDataPlane";
+import {
+  tinymistDataPlaneFrameConfirmsSourceMap,
+  tinymistDataPlaneFrameKind,
+  tinymistDataPlanePositionText
+} from "./preview/tinymistDataPlane";
 import { allowsStandalonePreview, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, tinymistPreviewPreferredSourceColumn, usesTemplateAwareStandaloneRoot, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
 import { LogConsoleController, spellcheckConsoleGroupKey, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
 import { EditorFontManager } from "./editor/fontManager";
@@ -3813,8 +3817,10 @@ export class TypsastraWorkspaceController {
 
   private async handlePdfSyncSocketMessage(data: unknown, socket = this.pdfSyncSocket): Promise<void> {
     const frameKind = await tinymistDataPlaneFrameKind(data);
+    if (socket && tinymistDataPlaneFrameConfirmsSourceMap(frameKind)) {
+      this.markPdfSourceMapDocumentReady(socket);
+    }
     if (frameKind === "document") {
-      if (socket) this.markPdfSourceMapDocumentReady(socket);
       return;
     }
     const text = await tinymistDataPlanePositionText(data);
@@ -3870,7 +3876,37 @@ export class TypsastraWorkspaceController {
     const startedAt = performance.now();
     const session = await this.ensurePdfSourceMapSocket(client, rootPath, taskId, "forward sync");
     if (!session || generation !== this.pdfPreviewGeneration) return;
-    const ready = await this.waitForPdfSourceMapDocument(session.socket);
+    const activePath = this.activeFilePath;
+    const cursor = this.editorInstance?.state.selection.main.head ?? 0;
+    const target = activePath?.toLowerCase().endsWith(".typ")
+      ? await this.forwardSyncTarget(activePath, cursor)
+      : null;
+    if (!target || generation !== this.pdfPreviewGeneration) return;
+
+    // The initial vector frame can be emitted before the data-plane WebSocket
+    // connects. Tinymist has no lightweight readiness command: `current`
+    // serializes the complete vector document. Probe the actual source-map path
+    // instead. Requests made before the compile view exists are harmlessly
+    // dropped; the first returned `jump` proves that mapping is usable.
+    let ready = this.pdfSyncDocumentReadySocket === session.socket;
+    let probeWaitMs = 250;
+    while (!ready
+      && generation === this.pdfPreviewGeneration
+      && this.pdfSyncSocket === session.socket
+      && performance.now() - startedAt < PDF_SOURCE_MAP_READY_TIMEOUT_MS) {
+      await client.scrollPreview(session.taskId, {
+        event: "panelScrollTo",
+        filepath: nativeFilePath(target.filepath),
+        line: target.line,
+        character: target.character
+      });
+      const remainingMs = PDF_SOURCE_MAP_READY_TIMEOUT_MS - (performance.now() - startedAt);
+      ready = await this.waitForPdfSourceMapDocument(
+        session.socket,
+        Math.max(1, Math.min(probeWaitMs, remainingMs))
+      );
+      probeWaitMs = Math.min(probeWaitMs * 2, 8000);
+    }
     if (generation !== this.pdfPreviewGeneration) return;
     this.appendDeveloperLog({
       kind: ready ? "info" : "warning",
@@ -3881,7 +3917,10 @@ export class TypsastraWorkspaceController {
     });
   }
 
-  private waitForPdfSourceMapDocument(socket: WebSocket): Promise<boolean> {
+  private waitForPdfSourceMapDocument(
+    socket: WebSocket,
+    timeoutMs = PDF_SOURCE_MAP_READY_TIMEOUT_MS
+  ): Promise<boolean> {
     if (this.pdfSyncDocumentReadySocket === socket) return Promise.resolve(true);
     if (this.pdfSyncSocket !== socket || !this.pdfSyncDocumentReadyPromise) return Promise.resolve(false);
     const readiness = this.pdfSyncDocumentReadyPromise;
@@ -3893,7 +3932,7 @@ export class TypsastraWorkspaceController {
         window.clearTimeout(timeout);
         resolve(ready);
       };
-      const timeout = window.setTimeout(() => finish(false), PDF_SOURCE_MAP_READY_TIMEOUT_MS);
+      const timeout = window.setTimeout(() => finish(false), timeoutMs);
       void readiness.then(finish);
     });
   }

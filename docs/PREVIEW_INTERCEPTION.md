@@ -82,14 +82,17 @@ PDF forward and inverse sync use one hidden Tinymist web-preview task solely for
 Typsastra starts this hidden task immediately after publishing a compiled PDF,
 instead of waiting for the first synchronization gesture. WebSocket connection
 and compiler readiness are separate states: the socket is connected when it
-opens, but source requests remain gated until Tinymist naturally publishes the
-task's first `new` or `diff-v1` document frame. Typsastra uses that frame only as
-a readiness signal and does not retain its vector payload.
+opens, but the task may have published its initial vector frame before the
+WebSocket listener was attached. Typsastra therefore sends a disposable source
+position probe and retries it while compilation is pending. The first `jump`
+response proves that the source map is usable; a natural `new` or `diff-v1`
+frame can establish the same state. Probe positions are discarded and never
+move the PDF preview.
 
 Typsastra deliberately does not send Tinymist's `current` command because that
-would request an additional complete vector-document snapshot. Once the natural
-initial document frame establishes readiness, only source-map position frames
-are parsed.
+would request an additional complete vector-document snapshot. The readiness
+probe exercises only the source-position path required by forward and inverse
+sync, without retaining a vector payload.
 
 ## Security boundaries
 

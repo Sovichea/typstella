@@ -4,6 +4,12 @@ const documentFrameKinds = new Set(["new", "diff-v1"]);
 
 export type TinymistDataPlaneFrameKind = "position" | "document" | "unknown";
 
+export function tinymistDataPlaneFrameConfirmsSourceMap(
+  kind: TinymistDataPlaneFrameKind
+): boolean {
+  return kind === "position" || kind === "document";
+}
+
 function protocolKindFromBytes(bytes: Uint8Array): TinymistDataPlaneFrameKind {
   const comma = bytes.indexOf(44);
   if (comma < 0) return "unknown";
