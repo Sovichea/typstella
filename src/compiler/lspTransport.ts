@@ -7,6 +7,10 @@ export class TauriLspTransport {
     return invoke("start_tinymist_lsp", { workspaceRootPath });
   }
 
+  public stop(): Promise<void> {
+    return invoke("stop_tinymist_lsp");
+  }
+
   public send(message: JsonRpcMessage): Promise<void> {
     return invoke("send_lsp_message", { message: JSON.stringify(message) });
   }

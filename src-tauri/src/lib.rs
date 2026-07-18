@@ -1908,6 +1908,12 @@ async fn stop_lsp_process(state: &tauri::State<'_, LspState>) {
 }
 
 #[tauri::command]
+async fn stop_tinymist_lsp(state: tauri::State<'_, LspState>) -> Result<(), String> {
+    stop_lsp_process(&state).await;
+    Ok(())
+}
+
+#[tauri::command]
 async fn install_tinymist_toolchain(
     app_handle: tauri::AppHandle,
     state: tauri::State<'_, LspState>,
@@ -2659,6 +2665,7 @@ pub fn run() {
             list_tinymist_releases,
             install_tinymist_toolchain,
             start_tinymist_lsp,
+            stop_tinymist_lsp,
             send_lsp_message,
             prepare_render_project,
             prepare_render_file,

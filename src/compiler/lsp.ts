@@ -199,6 +199,12 @@ export class TinymistLspClient {
     this.setStatus("ready", "LSP ready");
   }
 
+  public async stop(): Promise<void> {
+    this.rejectPendingRequests(new Error("Tinymist was stopped."));
+    await this.transport.stop();
+    this.setStatus("stopped", "Tinymist stopped");
+  }
+
   public dispose(): void {
     this.rejectPendingRequests(new Error("Tinymist LSP client was disposed."));
     for (const unlisten of this.unlistenTransport.splice(0)) unlisten();

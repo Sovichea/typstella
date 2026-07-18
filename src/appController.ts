@@ -229,6 +229,7 @@ export class TypsastraWorkspaceController {
   private pendingLspSyncText: string | null = null;
   private pendingLspSyncVersion: number | null = null;
   private lspSyncRequestGenerations = new Map<string, number>();
+  private tinymistLifecycleQueue: Promise<void> = Promise.resolve();
   private latestDocumentVersion = 1;
   private diagnosticWaitStartedAt: number | null = null;
   private openTabs: EditorTab[] = [];
@@ -1929,6 +1930,49 @@ export class TypsastraWorkspaceController {
     }
   }
 
+  private queueTinymistLifecycle(operation: () => Promise<void>): Promise<void> {
+    const next = this.tinymistLifecycleQueue.then(operation, operation);
+    this.tinymistLifecycleQueue = next.catch(() => {});
+    return next;
+  }
+
+  private resetTinymistSessionState(): void {
+    this.lspReady = false;
+    this.pinnedLspMainPath = null;
+    this.openedDocumentUris.clear();
+    this.clearPendingLspSync();
+    this.previewSyncController.clearForward();
+    this.clearDiagnostics();
+    this.pdfSyncPreviewTaskKey = null;
+    this.pdfSyncRegisteredTaskId = null;
+    this.pdfSourceMapStartup = null;
+    this.pdfSourceMapStartupKey = null;
+    this.pdfSyncSocket?.close();
+    this.pdfSyncSocket = null;
+    this.pdfSyncSocketUrl = "";
+  }
+
+  private stopTinymistSession(statusMessage: string): Promise<void> {
+    return this.queueTinymistLifecycle(async () => {
+      this.resetTinymistSessionState();
+      if (this.lspClient) await this.lspClient.stop();
+      this.setLspStatus({ kind: "stopped", message: statusMessage });
+    });
+  }
+
+  private restartTinymistSession(statusMessage: string): Promise<void> {
+    return this.queueTinymistLifecycle(async () => {
+      this.resetTinymistSessionState();
+      this.setLspStatus({ kind: "starting", message: statusMessage });
+      if (!this.lspClient) {
+        await this.initLsp();
+        return;
+      }
+      await this.lspClient.restart();
+      this.lspReady = true;
+    });
+  }
+
   private handlePreviewStartupFailure(context: {
     path: string;
     taskId: string;
@@ -2408,12 +2452,7 @@ export class TypsastraWorkspaceController {
 
   private async reloadWorkspaceFonts(): Promise<void> {
     if (!this.lspClient || !this.workspaceRootPath) return;
-    this.setLspStatus({ kind: "starting", message: "Reloading workspace fonts..." });
-    this.lspReady = false;
-    this.openedDocumentUris.clear();
-    await this.lspClient.restart();
-    this.lspReady = true;
-    this.pinnedLspMainPath = null;
+    await this.restartTinymistSession("Reloading workspace fonts...");
     const lspMainPath = this.previewStandalone
       ? this.previewRootPath
       : (this.previewMainPath ?? this.previewRootPath);
@@ -5337,20 +5376,9 @@ export class TypsastraWorkspaceController {
       await this.prepareRenderProjectIfNeeded();
       if (this.workspaceRootPath !== selected) return;
       if (this.lspClient) {
-        this.setLspStatus({ kind: "starting", message: "Connecting to new workspace root..." });
-        this.lspReady = false;
-        this.openedDocumentUris.clear();
         try {
-          await this.lspClient.restart();
+          await this.restartTinymistSession("Connecting to new workspace root...");
           if (this.workspaceRootPath !== selected) return;
-          this.lspReady = true;
-          this.pdfSyncPreviewTaskKey = null;
-          this.pdfSyncRegisteredTaskId = null;
-          this.pdfSourceMapStartup = null;
-          this.pdfSourceMapStartupKey = null;
-          this.pdfSyncSocket?.close();
-          this.pdfSyncSocket = null;
-          this.pdfSyncSocketUrl = "";
         } catch (error) {
           if (this.workspaceRootPath !== selected) return;
           this.lspReady = false;
@@ -5663,16 +5691,38 @@ export class TypsastraWorkspaceController {
   }
 
   private async setPinnedMainFile(path: string | null): Promise<void> {
+    const mainChanged = filePathKey(this.pinnedMainFilePath ?? "") !== filePathKey(path ?? "");
     const mainWasAlreadyActive = path !== null
       && this.activeFilePath !== null
       && filePathKey(path) === filePathKey(this.activeFilePath);
     this.pinnedMainFilePath = path;
     this.saveWorkspaceState();
+
+    if (mainChanged && this.lspClient) {
+      if (this.pdfPreviewTimer !== null) window.clearTimeout(this.pdfPreviewTimer);
+      this.pdfPreviewTimer = null;
+      this.pdfPreviewScheduleGeneration += 1;
+      this.pdfPreparationRevision += 1;
+      this.pdfPreviewGeneration += 1;
+      this.queuedPdfPreviewContents = null;
+      this.queuedPdfPreviewForced = false;
+      void invoke("cancel_render_preparation").catch(() => {});
+      try {
+        await this.restartTinymistSession("Restarting Tinymist for the new main file...");
+      } catch (error) {
+        this.lspReady = false;
+        this.appendDeveloperLog({
+          kind: "error",
+          source: "lsp",
+          message: `Failed to restart Tinymist after changing the main file: ${String(error)}`
+        });
+      }
+    }
     
     if (path) {
       await this.loadFile(path, { temporary: false });
       this.sortPinnedMainTabFirst();
-    } else {
+    } else if (!mainChanged) {
       await this.updatePinnedMain(null);
     }
     
@@ -5709,6 +5759,16 @@ export class TypsastraWorkspaceController {
       for (const taskId of previewTaskIds) {
         void this.lspClient.stopPreview(taskId).catch(() => {});
       }
+    }
+
+    try {
+      await this.stopTinymistSession("Project closed");
+    } catch (error) {
+      this.appendDeveloperLog({
+        kind: "warning",
+        source: "lsp",
+        message: `Tinymist did not stop cleanly while closing the project: ${String(error)}`
+      });
     }
 
     if (this.pdfPreviewTimer !== null) window.clearTimeout(this.pdfPreviewTimer);
@@ -5786,7 +5846,7 @@ export class TypsastraWorkspaceController {
     this.documentOutlineController.clear();
     this.previewFrame.clear();
     this.renderEditorTabs();
-    this.setLspStatus({ kind: "ready", message: "Project closed" });
+    this.setLspStatus({ kind: "stopped", message: "Project closed" });
     this.updateWorkspaceViewportVisibility();
     return true;
   }
@@ -6238,13 +6298,15 @@ export class TypsastraWorkspaceController {
     });
 
     document.getElementById("action-restart-lsp")?.addEventListener("click", async () => {
-      this.setLspStatus({ kind: "starting", message: "Restarting LSP..." });
       const activePath = this.activeFilePath;
-      this.lspReady = false;
-      this.openedDocumentUris.clear();
       this.previewFrame.clear();
-      this.clearPendingLspSync();
-      await this.initLsp();
+      try {
+        await this.restartTinymistSession("Restarting LSP...");
+      } catch (error) {
+        this.lspReady = false;
+        this.setLspStatus({ kind: "error", message: `LSP restart failed: ${String(error)}` });
+        return;
+      }
       if (activePath && this.openTabs.some(tab => filePathKey(tab.path) === filePathKey(activePath))) {
         this.activeFilePath = null;
         await this.activateEditorTab(activePath, false);
