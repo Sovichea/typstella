@@ -45,6 +45,7 @@ These CLI values measure reproducibility and compiler cost, not WebView renderin
 - Only the focused window of at most seven pages retains canvases. The obsolete invisible PDF text layer is not built; source synchronization remains coordinate-based and links use the annotation layer.
 - Preview iframe scrollbar rules target its scrolling body instead of every rendered PDF element.
 - Visible page canvases render through one priority queue. Active rendering and geometry hydration pause during scrolling and resume after a short idle interval, keeping scrollbar dragging responsive.
+- The fixed scroll-idle behavior is scheduled for replacement by the stable-frame motion, bounded draft-cache, selective-cancellation, and visible-page priority contracts in the [PDF preview interaction implementation plan](./PDF_PREVIEW_INTERACTION_IMPLEMENTATION_PLAN.md). Those gates are required for v1.0.
 - A new PDF generation destroys an obsolete pending PDF.js load, cancels page renders, and rejects stale load, render, source-map, spellcheck, and compilation results.
 - The last valid PDF remains mounted until the replacement document and its page dimensions are ready. Zoom keeps the prior canvas visible until its current-resolution replacement commits.
 - Language catalogs and provider indexes initialize after the main window becomes usable.
