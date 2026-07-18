@@ -13,10 +13,10 @@ The last public release in this line is v0.4.1. Development after that tag is
 assigned to v0.5.0 because it introduces new subsystems and intentional pre-1.0
 format changes rather than another stabilization patch.
 
-## v0.5.0 — multilingual foundations
+## v0.5.0 — multilingual foundations (released)
 
-The current development line has completed the foundations needed for broader
-multilingual work:
+Released on July 18, 2026, this milestone completed the foundations needed for
+broader multilingual work:
 
 - Typst language-scope-aware spellcheck with fail-closed provider warnings.
 - Keyboard-language-aware word completion and scoped terminology.
@@ -24,6 +24,8 @@ multilingual work:
 - Portable workspace state, lazy restored tabs, and guarded large-file loading.
 - Font-free schema-v2 project archives and explicit Tinymist process lifecycle.
 - Signed update detection, recent-project search, pane keyboard navigation, and cross-platform application refinements.
+- Primary and embedded-script document typography with portable ordered font stacks.
+- Warmed source-map sessions for reliable first-use synchronization in very long documents.
 
 ## v0.6.0 — research productivity and discoverability
 
@@ -114,6 +116,6 @@ The long-term research tasks and gates are in the [v2 implementation plan](./V2_
 
 ## Current release status
 
-Typsastra is beta software. The latest public release is v0.4.1. The main branch
-is the v0.5.0 development line; see the
-[draft release notes](./RELEASE_NOTES_V0.5.0.md).
+Typsastra is beta software. The latest release is v0.5.0; see the
+[release notes](./RELEASE_NOTES_V0.5.0.md). Planned development continues with
+the v0.6.0 research-productivity milestone.

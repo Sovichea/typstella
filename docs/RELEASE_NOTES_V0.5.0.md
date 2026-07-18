@@ -1,7 +1,6 @@
 # Typsastra v0.5.0 release notes
 
-Status: development draft. The latest public release remains v0.4.1 until the
-v0.5.0 release artifacts are published.
+Released: July 18, 2026.
 
 First-class right-to-left editing is scheduled for the v0.9.0 pre-release
 milestone and is not part of the v0.5.0 release scope.
@@ -31,6 +30,10 @@ understate both the feature scope and the migration impact.
 - Global, project, and language-family terminology can be managed separately.
 - Khmer completion, word selection at line starts, and mixed-script examples
   received additional regression coverage.
+- Document typography now models an explicit primary script and font alongside
+  embedded-script fonts. Script dominance detection, compatible font choices,
+  portable ordered Typst font stacks, and legacy typography migration keep the
+  document configuration aligned with multilingual language settings.
 
 ### Faster and more predictable PDF preview
 
@@ -41,6 +44,9 @@ understate both the feature scope and the migration impact.
   for WebView environments that lose the native pointer-release event.
 - Forward-sync and manual page jumps are immediate rather than animated across
   hundreds or thousands of pages.
+- The hidden Tinymist source-map session is warmed after PDF presentation.
+  Readiness uses a disposable source-position probe, avoiding both the first-use
+  timeout on very long documents and an unnecessary full vector snapshot.
 - The shared preview toolbar shows an editable current page and total page count.
 - PDF files can be opened directly in Typsastra and share the live-preview zoom
   controls. Image preview behavior and zoom controls are also consistent.
@@ -139,6 +145,6 @@ disabled.
   [BENCHMARKS.md](./BENCHMARKS.md). They are not presented as desktop memory or
   end-to-end WebView measurements.
 
-Before publishing v0.5.0, run the complete frontend, native, conformance,
+Release qualification covers the complete frontend, native, conformance,
 installer, updater, project-import, Linux compatibility, and long-document
-interaction release gates.
+interaction gates.
