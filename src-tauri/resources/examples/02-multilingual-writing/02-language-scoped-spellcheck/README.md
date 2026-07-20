@@ -10,3 +10,5 @@ This example demonstrates static Typst language scopes, provider routing, termin
 6. Set Suggestion language source to Keyboard language, switch the OS keyboard layout, and type a word prefix. On Windows, reliable mapped layouts select one completion provider. Unmapped layouts fall back to the current Typst scope; macOS and Linux report their current fallback reliability.
 
 Spellcheck always follows the document scope. Keyboard language changes suggestions only. Completion is suppressed during IME composition, outside syntax-proven prose, and with incompatible multiple selections.
+
+Tutorial: <https://github.com/Sovichea/typsastra/blob/main/docs/tutorials/MULTILINGUAL_SPELLCHECK.md>

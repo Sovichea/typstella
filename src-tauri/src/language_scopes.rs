@@ -765,7 +765,7 @@ mod tests {
     #[test]
     fn multilingual_article_exposes_french_and_spanish_declarations() {
         let source = include_str!(
-            "../resources/examples/templates/multilingual-article/sections/scripts.typ"
+            "../resources/examples/04-research-projects/01-multilingual-article/sections/scripts.typ"
         );
         let output = parse(source);
         for language in ["fr", "es"] {

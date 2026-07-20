@@ -441,7 +441,7 @@ mod tests {
         let project_root = manifest_dir
             .join("resources")
             .join("examples")
-            .join("03-language-tools")
+            .join("03-language-providers")
             .join("02-khmer-segmentation-comparison");
         let source_path = project_root.join("main.typ");
         let source = fs::read_to_string(&source_path).unwrap();

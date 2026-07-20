@@ -9,8 +9,10 @@
     "test": "bun test",
     "test:khmer": "bun test tests/khmerReference.test.ts tests/grapheme.test.ts tests/editingPolicies.test.ts tests/autocomplete.test.ts tests/spellcheck.test.ts",
     "test:lao": "bun test tests/laoReference.test.ts tests/khmerReference.test.ts tests/editingPolicies.test.ts tests/languageSupport.test.ts",
+    "test:docs": "bun test tests/documentationLinks.test.ts",
     "conform": "bun test tests/editingPolicies.test.ts tests/khmerReference.test.ts tests/laoReference.test.ts tests/languageSupport.test.ts",
     "benchmark:performance": "bun scripts/run-performance-benchmarks.ts",
+    "validate:examples": "bun scripts/validate-examples.ts",
     "tauri": "tauri",
     "tauri:dev:update": "tauri dev --config src-tauri/tauri.update-test.conf.json",
     "tauri:dev:macos-titlebar": "tauri dev --config src-tauri/tauri.macos-layout-test.conf.json"

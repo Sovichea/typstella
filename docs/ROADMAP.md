@@ -27,6 +27,28 @@ broader multilingual work:
 - Primary and embedded-script document typography with portable ordered font stacks.
 - Warmed source-map sessions for reliable first-use synchronization in very long documents.
 
+## v0.5.1 — examples, tutorials, and maintenance
+
+Make the v0.5.0 multilingual foundations easier to learn and verify while
+continuing the v0.5.x maintenance line:
+
+- Restructure the bundled examples into a guided path from Typst basics through
+  multilingual language scopes, language providers, research projects, and
+  project portability.
+- Add focused examples for primary and embedded scripts, scope-aware
+  spellcheck, keyboard-language completion, optional-provider warnings, and
+  document typography.
+- Add a user-facing documentation landing page and task-oriented tutorials for
+  projects, multilingual tools, long documents, preview synchronization, and
+  import/export.
+- Add example compilation, language-scope, migration, packaging, and
+  documentation-link validation.
+- Include post-v0.5.0 bug fixes, performance improvements, and platform
+  refinements without introducing a new major subsystem.
+
+The detailed tasks and acceptance criteria are in the
+[v0.5.1 examples and documentation implementation plan](./V0_5_1_EXAMPLES_DOCUMENTATION_IMPLEMENTATION_PLAN.md).
+
 ## v0.6.0 — research productivity and discoverability
 
 Make Typsastra's document-engineering strengths easier to discover while adding broadly useful research-authoring tools. This milestone does not expand into discipline-specific computation or visual tooling.
@@ -118,4 +140,5 @@ The long-term research tasks and gates are in the [v2 implementation plan](./V2_
 
 Typsastra is beta software. The latest release is v0.5.0; see the
 [release notes](./RELEASE_NOTES_V0.5.0.md). Planned development continues with
-the v0.6.0 research-productivity milestone.
+the v0.5.1 examples, tutorials, and maintenance milestone before the v0.6.0
+research-productivity milestone.

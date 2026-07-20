@@ -36,7 +36,7 @@ fn migrate_legacy_contents(relative_path: &str, contents: Vec<u8>) -> Vec<u8> {
             "..measurements.map(row => (row.at(0), str(row.at(1)))),",
             "..measurements.map(row => (row.at(0), str(row.at(1)))).flatten(),",
         ),
-        "templates/multilingual-article/template.typ" => text
+        "04-research-projects/01-multilingual-article/template.typ" => text
             .replace(
                 "  title:,\n  author:,",
                 "  title: \"Untitled Article\",\n  author: \"Anonymous\",",
@@ -352,7 +352,7 @@ mod tests {
             .contains(".flatten(),"));
 
         let template = migrate_legacy_contents(
-            "templates/multilingual-article/template.typ",
+            "04-research-projects/01-multilingual-article/template.typ",
             b"  title:,\n  author:,".to_vec(),
         );
         let template = String::from_utf8(template).expect("template example");
@@ -364,10 +364,10 @@ mod tests {
     fn test_khmer_example_exists_in_resources() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let khmer_path = manifest_dir
-            .join("resources/examples/03-language-tools/01-khmer-deep-support/main.typ");
+            .join("resources/examples/03-language-providers/01-khmer-deep-support/main.typ");
         assert!(
             khmer_path.is_file(),
-            "03-language-tools/01-khmer-deep-support/main.typ must exist in the resources directory"
+            "03-language-providers/01-khmer-deep-support/main.typ must exist in the resources directory"
         );
     }
 
@@ -375,7 +375,7 @@ mod tests {
     fn khmer_folklore_example_is_multifile() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
         let example_dir =
-            manifest_dir.join("resources/examples/04-projects/02-khmer-folklore-book");
+            manifest_dir.join("resources/examples/04-research-projects/03-khmer-folklore-book");
         assert!(example_dir.join("main.typ").is_file());
         assert!(example_dir
             .join("stories/01-rabbit-and-snail.typ")
@@ -388,18 +388,20 @@ mod tests {
     #[test]
     fn khmer_segmentation_comparison_example_exists() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let example_path = manifest_dir
-            .join("resources/examples/03-language-tools/02-khmer-segmentation-comparison/main.typ");
+        let example_path = manifest_dir.join(
+            "resources/examples/03-language-providers/02-khmer-segmentation-comparison/main.typ",
+        );
         assert!(
             example_path.is_file(),
-            "03-language-tools/02-khmer-segmentation-comparison/main.typ must exist in the resources directory"
+            "03-language-providers/02-khmer-segmentation-comparison/main.typ must exist in the resources directory"
         );
     }
 
     #[test]
     fn test_readme_example_exists() {
         let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let base_path = manifest_dir.join("resources/examples/04-projects/03-typsastra-readme");
+        let base_path =
+            manifest_dir.join("resources/examples/04-research-projects/04-typsastra-readme");
         assert!(base_path.join("main.typ").is_file());
         assert!(base_path.join("template.typ").is_file());
         assert!(base_path.join("import.typ").is_file());
@@ -409,5 +411,64 @@ mod tests {
         assert!(base_path.join("chapters/khmer-research.typ").is_file());
         assert!(base_path.join("assets/typsastra-icon.png").is_file());
         assert!(base_path.join("assets/typsastra-wordmark-v2.png").is_file());
+    }
+
+    fn collect_example_files(directory: &Path, files: &mut Vec<std::path::PathBuf>) {
+        for entry in std::fs::read_dir(directory).expect("read example directory") {
+            let entry = entry.expect("read example entry");
+            let path = entry.path();
+            if path.is_dir() {
+                collect_example_files(&path, files);
+            } else if path.is_file() {
+                files.push(path);
+            }
+        }
+    }
+
+    #[test]
+    fn v051_learning_path_and_readmes_are_bundled() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/examples");
+        for relative in [
+            "README.md",
+            "02-multilingual-writing/01-primary-and-embedded-scripts/main.typ",
+            "02-multilingual-writing/02-language-scoped-spellcheck/main.typ",
+            "02-multilingual-writing/03-keyboard-language-completion/main.typ",
+            "03-language-providers/04-optional-dictionaries/main.typ",
+            "04-research-projects/01-multilingual-article/main.typ",
+            "05-project-portability/01-main-and-included-files/main.typ",
+            "05-project-portability/02-portable-workspace-state/main.typ",
+            "05-project-portability/03-font-free-project-export/main.typ",
+        ] {
+            assert!(
+                root.join(relative).is_file(),
+                "missing bundled example {relative}"
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_examples_exclude_generated_output_caches_and_fonts() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/examples");
+        let mut files = Vec::new();
+        collect_example_files(&root, &mut files);
+        for path in files {
+            let relative = path
+                .strip_prefix(&root)
+                .expect("example path is below root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let lowercase = relative.to_ascii_lowercase();
+            assert!(
+                !lowercase.contains("/.typsastra/cache/")
+                    && !lowercase.ends_with(".pdf")
+                    && !lowercase.ends_with(".ttf")
+                    && !lowercase.ends_with(".otf")
+                    && !lowercase.ends_with(".ttc")
+                    && !lowercase.ends_with(".otc")
+                    && !lowercase.ends_with(".woff")
+                    && !lowercase.ends_with(".woff2"),
+                "bundled examples contain generated output, cache data, or a font: {relative}"
+            );
+        }
     }
 }

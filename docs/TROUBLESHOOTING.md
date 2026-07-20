@@ -1,5 +1,9 @@
 # Troubleshooting
 
+For a workflow-oriented starting point, see the
+[tutorial troubleshooting guide](./tutorials/TROUBLESHOOTING.md). This reference
+keeps the detailed build, packaging, platform, and diagnostic procedures.
+
 ## Native features do not work in the browser
 
 Use:

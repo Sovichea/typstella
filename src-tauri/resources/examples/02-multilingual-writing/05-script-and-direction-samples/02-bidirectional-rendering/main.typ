@@ -6,6 +6,14 @@
 
 = Bidirectional Text
 
+#block(
+  inset: 10pt,
+  fill: luma(235),
+  [*Scope:* This example validates Typst output and font coverage. First-class
+  RTL editor navigation, selection, deletion, and mixed-direction conformance
+  are planned for Typsastra v0.9.0.],
+)
+
 Right-to-left passages can contain left-to-right names, times, numbers, and links. Set the language and direction on the passage rather than reversing the source text.
 
 == Arabic

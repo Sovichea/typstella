@@ -172,6 +172,13 @@ Typsastra downloads and manages Tinymist for preview and diagnostics. A separate
 
 ## Documentation
 
+- [Documentation and tutorial index](./docs/README.md)
+- [Getting started](./docs/tutorials/GETTING_STARTED.md)
+- [Projects and main files](./docs/tutorials/PROJECTS_AND_MAIN_FILES.md)
+- [Multilingual spellcheck](./docs/tutorials/MULTILINGUAL_SPELLCHECK.md)
+- [Keyboard-language completion](./docs/tutorials/KEYBOARD_LANGUAGE_COMPLETION.md)
+- [Long-document workflow](./docs/tutorials/LONG_DOCUMENT_WORKFLOW.md)
+- [PDF preview and source synchronization](./docs/tutorials/PDF_PREVIEW_AND_SYNC.md)
 - [Product direction and terminology](./docs/PRODUCT_DIRECTION.md)
 - [Complex-script-first implementation plan](./docs/COMPLEX_SCRIPT_FIRST_IMPLEMENTATION_PLAN.md)
 - [v1.0 release implementation plan](./docs/V1_RELEASE_IMPLEMENTATION_PLAN.md)
@@ -195,6 +202,7 @@ Typsastra downloads and manages Tinymist for preview and diagnostics. A separate
 - [Reliability and performance gates](./docs/PERFORMANCE_GATES.md)
 - [Published benchmark results](./docs/BENCHMARKS.md)
 - [Typsastra v0.5.0 release notes](./docs/RELEASE_NOTES_V0.5.0.md)
+- [Typsastra v0.5.1 draft release notes](./docs/RELEASE_NOTES_V0.5.1.md)
 
 ## Contributing a language
 

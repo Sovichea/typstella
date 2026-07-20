@@ -1,0 +1,59 @@
+name: Examples and Documentation
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "src-tauri/resources/examples/**"
+      - "src-tauri/src/examples.rs"
+      - "src-tauri/src/language_scopes.rs"
+      - "scripts/validate-examples.ts"
+      - "tests/documentationLinks.test.ts"
+      - "package.json"
+      - "bun.lock"
+  push:
+    branches: [main]
+    paths:
+      - "README.md"
+      - "docs/**"
+      - "src-tauri/resources/examples/**"
+      - "src-tauri/src/examples.rs"
+      - "src-tauri/src/language_scopes.rs"
+      - "scripts/validate-examples.ts"
+      - "tests/documentationLinks.test.ts"
+      - "package.json"
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: typst-community/setup-typst@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libglib2.0-dev libwebkit2gtk-4.1-dev \
+            build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Validate documentation links
+        run: bun run test:docs
+      - name: Compile bundled examples
+        run: bun run validate:examples
+      - name: Validate example installation and migration
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib examples
+      - name: Validate bundled language scopes
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib language_scopes

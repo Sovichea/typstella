@@ -1,0 +1,36 @@
+# Getting started
+
+## Open a project
+
+Launch Typsastra and choose **Open Project**, or select one of the five recent
+projects. **Show All Recent Projects** opens fuzzy search across up to 32 stored
+projects. A project is a directory containing ordinary Typst source and assets.
+
+To learn without changing your own files, choose **Open Examples**. Typsastra
+installs writable copies in your Documents folder and opens `START-HERE.typ`.
+
+## Choose the main document
+
+Right-click a `.typ` file in Explorer or its editor tab and choose **Set as Main
+File**. The action is unavailable for other file types. Included chapters keep
+the configured main document's complete preview when opened.
+
+## Edit and preview
+
+Typsastra manages Tinymist, so a separate Typst installation is normally not
+required. Choose preview-on-type for immediate feedback or preview-on-save for
+large documents and lower background work. PDF compilation is asynchronous;
+the workspace UI becomes ready before the first preview finishes.
+
+Use the preview page field to jump to a page. Use **Reveal Cursor in Preview**
+or `Alt+Enter` (`Option+Enter` on macOS) for manual forward sync. Double-click
+supported preview content for inverse sync.
+
+## Save and export
+
+Save with `Ctrl+S` or `Cmd+S`. Export a PDF for the current preview target from
+the application command. Project export is different: a `.typsastra` archive
+packages portable project source and metadata but excludes fonts, caches, and
+generated PDFs.
+
+Next: [Projects and main files](PROJECTS_AND_MAIN_FILES.md).

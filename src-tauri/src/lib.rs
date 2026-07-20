@@ -1778,8 +1778,8 @@ mod preview_main_tests {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join("examples")
-            .join("04-projects")
-            .join("03-typsastra-readme");
+            .join("04-research-projects")
+            .join("04-typsastra-readme");
         let main = root.join("main.typ");
         let khmer = root.join("chapters").join("khmer-research.typ");
         let standalone = root.join("chapters").join("research-workflow.typ");
