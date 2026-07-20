@@ -763,6 +763,33 @@ mod tests {
     }
 
     #[test]
+    fn multilingual_article_exposes_french_and_spanish_declarations() {
+        let source = include_str!(
+            "../resources/examples/templates/multilingual-article/sections/scripts.typ"
+        );
+        let output = parse(source);
+        for language in ["fr", "es"] {
+            let mutation = output
+                .mutations
+                .iter()
+                .find(|mutation| {
+                    mutation.kind == MutationKind::TextCall
+                        && mutation
+                            .language
+                            .as_ref()
+                            .and_then(|value| value.value.as_deref())
+                            == Some(language)
+                })
+                .unwrap_or_else(|| panic!("missing {language} text scope"));
+            assert!(mutation.diagnostic_from_utf16 < mutation.diagnostic_to_utf16);
+            assert!(output.prose_ranges.iter().any(|range| {
+                range.from_utf16 >= mutation.apply_from_utf16
+                    && range.to_utf16 <= mutation.apply_to_utf16
+            }));
+        }
+    }
+
+    #[test]
     fn randomized_incomplete_edits_never_publish_out_of_bounds_ranges() {
         let mut source =
             "#set text(lang: \"en\")\n#text(lang: \"fr\")[Bonjour 😀]\n#[ខ្មែរ]".to_string();

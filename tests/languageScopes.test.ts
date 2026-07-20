@@ -2,7 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { LanguageScopeClient } from "../src/editor/languageScopes/client";
 import { invalidatedLanguageRanges, resolveLanguageScopes } from "../src/editor/languageScopes/resolver";
 import type { LanguageScopeExtraction, TextStyleMutation } from "../src/editor/languageScopes/types";
-import { LanguageProviderIndex } from "../src/editor/languageScopes/providerResolver";
+import {
+  LanguageProviderIndex,
+  spellcheckProviderIdsForScope,
+} from "../src/editor/languageScopes/providerResolver";
 import { InputLanguageService, selectCompletionProvider } from "../src/editor/languageScopes/inputLanguage";
 import type { LanguageProviderCapabilities } from "../src/languageSupport";
 
@@ -198,12 +201,57 @@ describe("language provider routing", () => {
     }).availability).toBe("downloadable");
   });
 
+  test("keeps an explicit language authoritative when the inherited region is dynamic", () => {
+    const index = new LanguageProviderIndex([
+      provider("en", "en-US", ["Latn"]),
+    ], [{
+      id: "fr", locale: "fr_FR", displayName: "French", languageTag: "fr-FR",
+      scripts: ["Latn"], installed: false, bundled: false,
+    }], null);
+    expect(index.resolve({
+      language: { confidence: "static", value: "fr" },
+      region: { confidence: "dynamic", value: null },
+      script: { confidence: "dynamic", value: null },
+    })).toMatchObject({
+      availability: "downloadable",
+      providerId: "fr",
+      canonicalLocale: "fr",
+    });
+  });
+
   test("enforces disjoint embedded script ownership and preserves order", () => {
     const index = new LanguageProviderIndex(installed, [], null);
     expect(index.embeddedProviders(["Latn"], ["fr", "km", "ar"]).map((item) => item.id))
       .toEqual(["km", "ar"]);
     expect(index.embeddedProviders([], ["en", "fr", "km"]).map((item) => item.id))
       .toEqual(["en", "km"]);
+  });
+
+  test("fails closed instead of routing unresolved Latin scopes through English", () => {
+    const index = new LanguageProviderIndex([
+      provider("en", "en-US", ["Latn"]),
+      provider("km", "km", ["Khmr"]),
+    ], [], null);
+    expect(spellcheckProviderIdsForScope(index, {
+      language: { confidence: "static", value: "fr" },
+      region: { confidence: "static", value: null },
+      script: { confidence: "static", value: "auto" },
+    }, ["en", "km"])).toEqual([]);
+  });
+
+  test("excludes English but retains different-script providers in known Latin scopes", () => {
+    const index = new LanguageProviderIndex([
+      provider("en", "en-US", ["Latn"]),
+      provider("km", "km", ["Khmr"]),
+    ], [{
+      id: "fr", locale: "fr_FR", displayName: "French", languageTag: "fr-FR",
+      scripts: ["Latn"], installed: false, bundled: false,
+    }], null);
+    expect(spellcheckProviderIdsForScope(index, {
+      language: { confidence: "static", value: "fr" },
+      region: { confidence: "static", value: null },
+      script: { confidence: "static", value: "auto" },
+    }, ["en", "km"])).toEqual(["km"]);
   });
 
   test("does not silently choose between same-language regional providers", () => {

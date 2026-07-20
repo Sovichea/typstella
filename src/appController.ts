@@ -62,7 +62,11 @@ import { ContextMenuController } from "./components/contextMenuController";
 import { ToolchainController, type ToolchainStatus } from "./toolchain/toolchainController";
 import { DocumentOutlineController, type DocumentHeading } from "./outline/documentOutline";
 import { parseTypographyBlock, typographyEdit, type DocumentEmbeddedFont, type DocumentTypography } from "./editor/documentTypography";
-import { SpellcheckController, type SpellingIssue } from "./editor/spellcheck";
+import {
+  SpellcheckController,
+  type SpellcheckDebugEvent,
+  type SpellingIssue,
+} from "./editor/spellcheck";
 import { InputLanguageService } from "./editor/languageScopes";
 import type { ImportedTypsastraProject, TypsastraProjectPreflight } from "./projectArchive";
 import { AppUpdateController } from "./appUpdateController";
@@ -329,7 +333,8 @@ export class TypsastraWorkspaceController {
   private readonly spellcheckController = new SpellcheckController(
     () => this.editorInstance,
     issues => this.updateSpellcheckLog(issues),
-    metric => this.performanceDiagnostics.record(metric)
+    metric => this.performanceDiagnostics.record(metric),
+    event => this.appendSpellcheckDebug(event),
   );
   private explorer!: WorkspaceExplorer;
   private lspClient!: TinymistLspClient;
@@ -4314,6 +4319,21 @@ export class TypsastraWorkspaceController {
       source,
       message: entry.message,
       channel: "dev"
+    });
+  }
+
+  private appendSpellcheckDebug(event: SpellcheckDebugEvent): void {
+    if (!this.settingsController.value.developerMode) return;
+    const message = `${event.stage} [revision ${event.revision}]: ${JSON.stringify(event.detail)}`;
+    console.info(`[spellcheck debug] ${event.documentKey || "no-document"} ${message}`);
+    const filePath = this.activeFilePath ?? undefined;
+    this.logConsoleController.appendLog({
+      kind: event.stage.endsWith("failed") ? "warning" : "info",
+      source: "spellcheck debug",
+      message,
+      channel: "dev",
+      filePath,
+      fileName: filePath ? fileNameFromPath(filePath) : undefined,
     });
   }
 

@@ -86,10 +86,15 @@ export class LanguageProviderIndex {
   }
 
   resolve(style: EffectiveLanguageStyle): LanguageProviderResolution {
-    if (style.language.confidence === "dynamic" || style.region.confidence === "dynamic") {
+    if (style.language.confidence === "dynamic") {
       return resolution(style, "dynamic");
     }
-    const locale = canonicalLocale(style.language.value, style.region.value);
+    // Typst style fields inherit independently. An included file may have an
+    // unknown inherited region while declaring a fully static `lang`. Route
+    // that declaration by language family instead of discarding it as dynamic.
+    // A static region still participates in exact regional matching.
+    const region = style.region.confidence === "static" ? style.region.value : null;
+    const locale = canonicalLocale(style.language.value, region);
     if (!locale) return resolution(style, "invalid");
     const installedMatch = bestLocaleMatch(this.installedByLanguage.get(locale.language) ?? [], locale);
     if (installedMatch.ambiguous) return resolution(style, "ambiguous", locale);
@@ -128,6 +133,37 @@ export class LanguageProviderIndex {
     }
     return selected;
   }
+}
+
+/**
+ * Selects providers for one effective Typst language scope.
+ *
+ * Explicit static scopes fail closed when their language cannot establish
+ * script ownership. This prevents an installed same-script provider (for
+ * example English in an unresolved French scope) from becoming an accidental
+ * fallback. Dynamic scopes retain the compatibility route because their
+ * language is intentionally unknown until Typst evaluates the document.
+ */
+export function spellcheckProviderIdsForScope(
+  index: LanguageProviderIndex,
+  style: EffectiveLanguageStyle,
+  embeddedProviderIds: readonly string[],
+): Array<string | undefined> {
+  const resolved = index.resolve(style);
+  const providerIds: Array<string | undefined> = [];
+  if (resolved.availability === "installed" && resolved.providerId) {
+    providerIds.push(resolved.providerId);
+  }
+  if (resolved.availability === "dynamic") providerIds.push(undefined);
+
+  const primaryScripts = index.scriptsForProviderId(resolved.providerId);
+  if (resolved.availability !== "dynamic" && primaryScripts.length === 0) {
+    return providerIds;
+  }
+  for (const embedded of index.embeddedProviders(primaryScripts, embeddedProviderIds)) {
+    providerIds.push(embedded.id);
+  }
+  return providerIds;
 }
 
 function normalizeScript(script: string): string {
