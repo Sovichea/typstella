@@ -736,6 +736,10 @@ export class TypsastraWorkspaceController {
     const { appearance, editor, preview } = settings;
     document.documentElement.style.setProperty("--editor-font-size", `${appearance.editorFontSize}px`);
     document.documentElement.style.setProperty("--editor-line-height", String(appearance.editorLineHeight));
+    document.documentElement.style.setProperty(
+      "--editor-line-height-px",
+      `${appearance.editorFontSize * appearance.editorLineHeight}px`,
+    );
     this.forwardSyncDebounceMs = preview.syncDebounceMs;
     this.editorFontManager.configure(editor.codeFont, editor.unicodeFont, editor.unicodeFonts);
     this.spellcheckController.setEnabledProviders(editor.languageProviders);
@@ -4323,7 +4327,7 @@ export class TypsastraWorkspaceController {
   }
 
   private appendSpellcheckDebug(event: SpellcheckDebugEvent): void {
-    if (!this.settingsController.value.developerMode) return;
+    if (!this.isDeveloperLogEnabled("spellcheck")) return;
     const message = `${event.stage} [revision ${event.revision}]: ${JSON.stringify(event.detail)}`;
     console.info(`[spellcheck debug] ${event.documentKey || "no-document"} ${message}`);
     const filePath = this.activeFilePath ?? undefined;
@@ -4345,6 +4349,7 @@ export class TypsastraWorkspaceController {
     if (normalized.includes("performance")) return "performance";
     if (normalized.includes("preview")) return "preview";
     if (normalized.includes("lsp") || normalized.includes("tinymist") || normalized.includes("toolchain")) return "lsp";
+    if (normalized.includes("spellcheck") || normalized.includes("language scope")) return "spellcheck";
     return "general";
   }
 

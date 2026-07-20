@@ -20,6 +20,7 @@ export type DeveloperLogCategory =
   | "performance"
   | "memory"
   | "lsp"
+  | "spellcheck"
   | "general";
 
 export type DeveloperLogSettings = Record<DeveloperLogCategory, boolean>;
@@ -86,6 +87,7 @@ export const defaultAppSettings: AppSettings = {
     performance: true,
     memory: true,
     lsp: true,
+    spellcheck: true,
     general: true
   },
   appearance: {
@@ -253,6 +255,7 @@ export function normalizeAppSettings(value: unknown): AppSettings {
       performance: booleanValue(developerLogs.performance, defaultAppSettings.developerLogs.performance),
       memory: booleanValue(developerLogs.memory, defaultAppSettings.developerLogs.memory),
       lsp: booleanValue(developerLogs.lsp, defaultAppSettings.developerLogs.lsp),
+      spellcheck: booleanValue(developerLogs.spellcheck, defaultAppSettings.developerLogs.spellcheck),
       general: booleanValue(developerLogs.general, defaultAppSettings.developerLogs.general)
     },
     appearance: {

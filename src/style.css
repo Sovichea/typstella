@@ -3133,8 +3133,12 @@ button.welcome-item:disabled {
 
 .cm-lineNumbers .cm-gutterElement:has(> .cm-language-scope-marker) {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: flex-end;
+}
+
+.cm-lineNumbers .cm-gutterElement > .cm-language-scope-marker {
+  margin-top: max(0px, calc((var(--editor-line-height-px, 23.8px) - 16px) / 2));
 }
 
 .cm-language-scope-marker.info {

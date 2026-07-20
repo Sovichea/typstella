@@ -82,6 +82,7 @@ describe("application settings", () => {
         performance: false,
         memory: true,
         lsp: false,
+        spellcheck: false,
         general: true
       }
     });
@@ -93,6 +94,7 @@ describe("application settings", () => {
       performance: false,
       memory: true,
       lsp: false,
+      spellcheck: false,
       general: true
     });
   });

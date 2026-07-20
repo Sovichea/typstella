@@ -218,6 +218,7 @@ export class SettingsController {
     onChange("settings-dev-log-performance", (settings, control) => { settings.developerLogs.performance = (control as HTMLInputElement).checked; });
     onChange("settings-dev-log-memory", (settings, control) => { settings.developerLogs.memory = (control as HTMLInputElement).checked; });
     onChange("settings-dev-log-lsp", (settings, control) => { settings.developerLogs.lsp = (control as HTMLInputElement).checked; });
+    onChange("settings-dev-log-spellcheck", (settings, control) => { settings.developerLogs.spellcheck = (control as HTMLInputElement).checked; });
     onChange("settings-dev-log-general", (settings, control) => { settings.developerLogs.general = (control as HTMLInputElement).checked; });
     document.getElementById("settings-add-language")?.addEventListener("click", () => {
       void this.toggleLanguageCatalog();
@@ -331,6 +332,7 @@ export class SettingsController {
     setChecked("settings-dev-log-performance", this.settings.developerLogs.performance);
     setChecked("settings-dev-log-memory", this.settings.developerLogs.memory);
     setChecked("settings-dev-log-lsp", this.settings.developerLogs.lsp);
+    setChecked("settings-dev-log-spellcheck", this.settings.developerLogs.spellcheck);
     setChecked("settings-dev-log-general", this.settings.developerLogs.general);
     const developerLogFilters = document.getElementById("settings-developer-log-filters");
     developerLogFilters?.classList.toggle("disabled", !this.settings.developerMode);

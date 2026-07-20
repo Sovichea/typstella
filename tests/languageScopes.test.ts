@@ -60,10 +60,13 @@ const extraction = (mutations: TextStyleMutation[] = []): LanguageScopeExtractio
 describe("Typst language-scope resolver", () => {
   test("overlays provider warnings in the line-number gutter", async () => {
     const source = await Bun.file(new URL("../src/editor/languageScopes/ui.ts", import.meta.url)).text();
+    const styles = await Bun.file(new URL("../src/style.css", import.meta.url)).text();
     expect(source).toContain("lineNumberMarkers.compute");
     expect(source).toContain("cm-language-scope-marker");
     expect(source).not.toContain("cm-language-scope-line-number-text");
     expect(source).not.toContain("cm-language-scope-gutter");
+    expect(styles).toContain("align-items: flex-start");
+    expect(styles).toContain("--editor-line-height-px");
   });
 
   test("keeps the Phase 1 multilingual routing fixture versioned", async () => {
