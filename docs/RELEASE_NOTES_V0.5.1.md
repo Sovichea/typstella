@@ -12,7 +12,7 @@ after release.
 - Reorganized the writable example workspace into a guided path covering
   basics, multilingual writing, language providers, research projects, and
   project portability.
-- Added focused examples for primary and embedded-script typography,
+- Added focused examples for script-specific font assignments,
   language-scoped spellcheck, keyboard-language completion, optional-provider
   recovery, main-file ownership, portable workspace state, and font-free export.
 - Promoted the multilingual article into the research-project sequence as the
@@ -24,6 +24,20 @@ after release.
 - Added a user documentation index and task-oriented tutorials for projects,
   language tools, typography, long documents, preview synchronization, and
   project interchange.
+
+## Document typography
+
+- Replaced primary and embedded typography roles with equal script-font
+  assignments. Every configured script can choose its own font and uniform
+  scale relative to the shared document size.
+- Added native Typst `covers` descriptors using Unicode Script Extensions
+  (`scx`). A Khmer font that contains Latin glyphs can now appear before the
+  Latin font without consuming Latin text.
+- Preserved existing primary/embedded configurations through automatic metadata
+  migration while writing the simpler `typsastra:script-fonts` format for new
+  changes.
+- Rejected conflicting scales when multiple scripts select the same internal
+  font family, avoiding ambiguous generated-font resolution.
 
 ## Language-tool fixes
 

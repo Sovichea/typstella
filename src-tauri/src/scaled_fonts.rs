@@ -39,10 +39,10 @@ struct StoredScaledFontManifest {
 
 fn validate_request(workspace_root: &Path, family: &str, scale: f32) -> Result<(), String> {
     if family.trim().is_empty() {
-        return Err("A complex-script font family is required.".into());
+        return Err("A document font family is required.".into());
     }
     if !scale.is_finite() || !(0.5..=2.0).contains(&scale) {
-        return Err("Complex-script font scale must be between 0.5 and 2.0.".into());
+        return Err("Document font scale must be between 0.5 and 2.0.".into());
     }
     if !workspace_root.is_dir() {
         return Err("The workspace root does not exist.".into());
@@ -99,17 +99,28 @@ pub fn scaled_workspace_font_set_update_required(
         .join(".typsastra")
         .join("fonts")
         .join("generated");
+    let mut requested_scales = std::collections::BTreeMap::<String, f32>::new();
+    for request in requests {
+        validate_request(workspace_root, &request.family, request.scale)?;
+        let key = request.family.to_lowercase();
+        if requested_scales
+            .get(&key)
+            .is_some_and(|scale| (scale - request.scale).abs() > 0.0001)
+        {
+            return Err(format!(
+                "The font family {:?} cannot use different scales for different scripts. Choose separate families or use one scale.",
+                request.family
+            ));
+        }
+        requested_scales.insert(key, request.scale);
+    }
     if generated_root.join("manifest.json").is_file() {
         return Ok(true);
     }
-    let desired: std::collections::BTreeMap<String, f32> = requests
-        .iter()
-        .filter(|request| (request.scale - 1.0).abs() > 0.0001)
-        .map(|request| {
-            validate_request(workspace_root, &request.family, request.scale)?;
-            Ok((request.family.to_lowercase(), request.scale))
-        })
-        .collect::<Result<_, String>>()?;
+    let desired: std::collections::BTreeMap<String, f32> = requested_scales
+        .into_iter()
+        .filter(|(_, scale)| (scale - 1.0).abs() > 0.0001)
+        .collect();
     let mut current = std::collections::BTreeMap::new();
     if generated_root.is_dir() {
         for entry in fs::read_dir(&generated_root)
@@ -454,5 +465,25 @@ mod tests {
             },
         ];
         assert!(scaled_workspace_font_set_update_required(workspace.path(), &added).unwrap());
+    }
+
+    #[test]
+    fn rejects_conflicting_scales_for_one_internal_family() {
+        let workspace = tempfile::tempdir().unwrap();
+        let requests = [
+            ScaledFontRequest {
+                family: "Shared Family".into(),
+                scale: 0.9,
+            },
+            ScaledFontRequest {
+                family: "Shared Family".into(),
+                scale: 1.0,
+            },
+        ];
+        assert!(
+            scaled_workspace_font_set_update_required(workspace.path(), &requests)
+                .unwrap_err()
+                .contains("cannot use different scales")
+        );
     }
 }

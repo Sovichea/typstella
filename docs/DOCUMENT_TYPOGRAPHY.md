@@ -1,52 +1,70 @@
 # Document typography
 
-Typsastra models document fonts as one primary script and zero or more embedded
-scripts. The primary font leads an ordered Typst fallback stack; embedded fonts
-follow in their configured order. A managed document block has this shape:
+Typsastra assigns a font and optional scale directly to each writing script.
+There is no primary or embedded typography role: Latin, Khmer, Arabic, and
+other scripts use the same configuration model and may be listed in any order.
+
+## Problems addressed
+
+Typst applies one `size` to every family in a normal fallback stack. Different
+scripts can have different visual proportions, so fonts at the same nominal
+point size may not look balanced.
+
+A font may also contain glyphs for several scripts. For example, a Khmer family
+may contain Latin glyphs. In an ordinary ordered stack, placing that family
+first prevents the intended Latin family from being reached.
+
+Regex show rules can force another font or size onto a script, but they
+reconstruct matching content. Forward and inverse sync can then resolve to a
+match or paragraph boundary instead of the intended source character. Typsastra
+does not use that approach.
+
+## Managed Typst rule
+
+Typsastra writes native Typst font descriptors with a `covers` restriction:
 
 ```typst
 // typsastra:typography:start
-// typsastra:font-roles {"primary":{"family":"MiSans Latin","script":"latin"},"embedded":[{"family":"MiSans Khmer","script":"khmer","scale":1.05},{"family":"MiSans Arabic","script":"arabic","scale":1}]}
-#set text(font: ("MiSans Latin", "MiSans Khmer", "MiSans Arabic"), size: 11pt)
+// typsastra:script-fonts [{"family":"MiSans Khmer","script":"khmer","scale":0.95},{"family":"MiSans Latin","script":"latin","scale":1.1},{"family":"MiSans Arabic","script":"arabic","scale":1}]
+#set text(
+  font: (
+    (name: "MiSans Khmer", covers: regex("\p{scx=Khmer}")),
+    (name: "MiSans Latin", covers: regex("\p{scx=Latin}")),
+    (name: "MiSans Arabic", covers: regex("\p{scx=Arabic}")),
+  ),
+  size: 11pt,
+)
 // typsastra:typography:end
 ```
 
-The metadata comment is ignored by Typst. It records which script owns each
-font role and lets Typsastra reproduce preview-only embedded-font scales while
-keeping the source portable. Compiling outside Typsastra uses the same ordered
-font stack with the original system fonts at their original scales.
+`scx` is the Unicode Script Extensions property. It includes characters that
+Unicode associates with a script, including relevant marks that may not have
+that script as their primary `Script` property.
 
-The primary script is not assumed to be Latin. A Khmer-first document can use
-Khmer as primary and add Latin and Arabic as embedded scripts. Automatic
-detection orders scripts by the number of matching characters, but the author
-can change the primary role and embedded order explicitly.
+Font coverage descriptors require Typst 0.13 or newer, matching Typsastra's
+supported managed-toolchain baseline.
 
-## Why roles use an ordered stack
+The `covers` restriction makes a family eligible only for its assigned script.
+MiSans Khmer can therefore appear before MiSans Latin without consuming Latin
+letters that happen to exist in the Khmer font. Order remains meaningful only
+when two configured entries intentionally have overlapping Unicode coverage.
 
-Typst chooses the first font in the stack that contains each required glyph.
-The script metadata lets Typsastra offer compatible installed fonts and retain
-the author's intent. It does not reconstruct source text or force every script
-run through a show rule. A broad primary font may therefore supply glyphs for
-an embedded script when it already covers them; authors who require strict
-typeface separation should select a primary family with the intended coverage.
+Spaces, generic punctuation, digits, and other Common or Inherited characters
+are not always owned by one script. Typst may select their font from the
+surrounding run or fallback context; script-specific letters and marks remain
+restricted by the descriptors above.
 
-## Why Typsastra does not use a regex show rule
+The metadata comment is ignored by Typst. Typsastra uses it to restore the
+toolbar configuration and prepare local scaled fonts. Older primary/embedded
+metadata is migrated when Typsastra reads and reapplies the configuration.
 
-A rule such as the following reconstructs every match as generated content:
+## Uniform script scaling
 
-```typst
-#show regex("\p{Khmer}+"): set text(font: "MiSans Khmer")
-```
+Every script entry accepts a uniform scale from `0.5` to `2.0`, relative to the
+shared document point size. For an `11pt` document, Latin can use `1.1`, Khmer
+`0.95`, and Arabic `1.0`; no script has a special base-font role.
 
-That changes source ownership in Typst's rendered frame. Inverse sync can then resolve a click to the match or paragraph boundary instead of the original character. Ordered fallback families select glyphs without replacing source content, so forward and inverse source mapping remain intact.
-
-## Uniform scaling
-
-The typography toolbar accepts a uniform embedded-script scale from `0.5` to
-`2.0`. A scale of `1.05` enlarges that embedded font by five percent in both
-dimensions. The primary font uses the configured base point size directly.
-
-When the scale differs from `1.0`, Typsastra:
+When a scale differs from `1.0`, Typsastra:
 
 1. locates every installed TTF or OTF face in the selected family;
 2. creates a uniformly scaled copy by changing the OpenType units-per-em value;
@@ -54,22 +72,42 @@ When the scale differs from `1.0`, Typsastra:
 4. writes the results and a manifest under `.typsastra/fonts/generated/`;
 5. restarts Tinymist with that directory in `TYPST_FONT_PATHS`.
 
-Changing units-per-em scales outlines, advances, vertical metrics, and Khmer OpenType positioning anchors together. Typsastra does not scale outlines independently because that would misalign dependent vowels and subscript consonants.
+Changing units-per-em scales outlines, advances, vertical metrics, and OpenType
+positioning anchors together. Generated fonts retain their original internal
+family names. The generated directory is local, disposable, ignored by Git,
+and excluded from project exports. Recipients install the original fonts and
+reproduce any scale locally.
 
-Generated fonts retain their original internal family names. Typst gives the workspace font directory priority over system fonts during Typsastra rendering. The generated directory contains a `.gitignore` rule and should never be committed or exported. Typsastra project and source ZIP exports never include font binaries, so recipients must install required fonts separately.
+Two assignments that use the same physical family with different scales are
+not supported because both generated copies would have the same internal family
+name. Choose separate families or use the same scale for those assignments.
 
-OpenType collections (`.ttc` and `.otc`) are not transformed in the initial implementation. Select an individual TTF or OTF face instead.
+OpenType collections (`.ttc` and `.otc`) are not transformed. Select an
+individual TTF or OTF face for scaling.
 
-## Raw code
+## Application and boundaries
 
-Typsastra does not override `raw`. Inline and block raw content continues using Typst's original raw/system font behavior. A project may add its own explicit raw styling when needed.
+**Apply to document** inserts or replaces the managed block. **Apply as
+template** updates a detected local template or creates
+`typsastra-template.typ`, allowing included chapters to inherit the same rule.
+
+Document Typography does not change CodeMirror's source-editor font, Typst
+`lang` or `dir`, spellcheck, completion, segmentation, or IME behavior. The
+Language Tools **Embedded spellcheck** setting is unrelated to script-font
+assignments.
+
+Typsastra does not override `raw`; inline and block raw content keeps Typst's
+normal raw-font behavior.
 
 ## Rust and WASM
 
-The pure transformation engine lives in `crates/font-scaler`. Desktop Typsastra uses its native Rust API. The same crate exposes a WASM binding behind the `wasm` feature:
+The pure transformation engine lives in `crates/font-scaler`. Desktop
+Typsastra uses its native Rust API. The same crate exposes a WASM binding behind
+the `wasm` feature:
 
 ```text
 cargo check --manifest-path crates/font-scaler/Cargo.toml --features wasm
 ```
 
-The WASM host is responsible for providing font bytes and persisting the returned font. The transformation engine itself performs no filesystem or system-font access.
+The WASM host supplies font bytes and persists the result. The transformation
+engine itself performs no filesystem or system-font access.

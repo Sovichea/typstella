@@ -10,9 +10,11 @@ import {
 } from "../src/editor/templateTypography";
 
 const config = {
-  primary: { family: "MiSans Latin", script: "latin" },
   baseSizePt: 11,
-  embedded: [{ family: "MiSans Khmer", script: "khmer", scale: 1 }]
+  fonts: [
+    { family: "MiSans Latin", script: "latin", scale: 1 },
+    { family: "MiSans Khmer", script: "khmer", scale: 1 }
+  ]
 };
 
 describe("template typography", () => {
@@ -38,7 +40,8 @@ describe("template typography", () => {
     const source = "#let thesis(title: none, body) = {\n  body\n}\n";
     const edit = templateTypographyEdit(source, "thesis", config)!;
     const updated = source.slice(0, edit.from) + edit.insert + source.slice(edit.to);
-    expect(updated).toContain('  set text(font: ("MiSans Latin", "MiSans Khmer"), size: 11pt)');
+    expect(updated).toContain('  set text(');
+    expect(updated).toContain('(name: "MiSans Khmer", covers: regex("\\p{scx=Khmer}"))');
     expect(updated).not.toContain("show regex(");
   });
 

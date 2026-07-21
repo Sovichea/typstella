@@ -430,7 +430,7 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/examples");
         for relative in [
             "README.md",
-            "02-multilingual-writing/01-primary-and-embedded-scripts/main.typ",
+            "02-multilingual-writing/01-script-font-assignments/main.typ",
             "02-multilingual-writing/02-language-scoped-spellcheck/main.typ",
             "02-multilingual-writing/03-keyboard-language-completion/main.typ",
             "03-language-providers/04-optional-dictionaries/main.typ",

@@ -1,26 +1,64 @@
 # Document typography
 
-Open Typsastra's typography control and choose one primary script plus any
-embedded scripts. The primary family leads an ordered Typst font stack;
-embedded families follow in the order you choose.
+## Why use it?
+
+A normal Typst fallback stack applies the same size to every font:
 
 ```typst
-// typsastra:typography:start
-#set text(font: ("MiSans Latin", "MiSans Khmer", "MiSans Arabic"), size: 11pt)
-// typsastra:typography:end
+#set text(font: ("MiSans Khmer", "MiSans Latin"), size: 11pt)
 ```
 
-The primary script need not be Latin. A Khmer-first document can add Latin and
-Arabic fallbacks. Typsastra can recommend installed families with appropriate
-coverage, but it does not silently replace the author's selection.
+This creates two practical problems:
 
-Typography roles control glyph selection and optional uniform embedded-font
-scaling. They do not control spellcheck, segmentation, word completion, or text
-direction. Use explicit Typst `lang` and `dir` settings for those concerns.
+- fonts for different scripts may look mismatched at the same point size;
+- a font listed first may contain another script and prevent that script's
+  intended font from being used.
 
-Generated scaled fonts under `.typsastra/fonts/generated` are local rendering
-artifacts. They are not committed or exported. Recipients install their required
-fonts separately.
+Typsastra solves both without rewriting document content. Each script receives
+its own font, Unicode coverage restriction, and optional visual scale.
 
-For exact behavior and limitations, see [Document typography](../DOCUMENT_TYPOGRAPHY.md).
-Try `02-multilingual-writing/01-primary-and-embedded-scripts`.
+## Configure script fonts
+
+1. Open **Document Typography** from the `Aa` toolbar button.
+2. Set the shared document size.
+3. Add each script used by the document.
+4. Choose its installed font and adjust its scale if necessary.
+5. Choose **Apply to document**, or **Apply as template** for shared project
+   typography.
+
+For example:
+
+```text
+Document size  11pt
+Khmer          MiSans Khmer    0.95×
+Latin          MiSans Latin    1.10×
+Arabic         MiSans Arabic   1.00×
+```
+
+There is no primary script. The entries may appear in any order. Typsastra
+generates a native Typst descriptor such as:
+
+```typst
+(name: "MiSans Khmer", covers: regex("\p{scx=Khmer}"))
+```
+
+`scx` means Unicode Script Extensions. The restriction prevents a Khmer font's
+built-in Latin glyphs from taking ownership of Latin text. It also avoids the
+regex show rules that would interfere with forward and inverse sync.
+
+Typsastra asks for confirmation before generating a scaled font. Generated
+fonts live under `.typsastra/fonts/generated`; they are local, disposable, and
+excluded from project exports.
+
+## What this does not control
+
+Script-font assignments do not change:
+
+- the source editor's font;
+- Typst `lang` or `dir`;
+- spellcheck, segmentation, or completion providers;
+- the Language Tools **Embedded spellcheck** setting.
+
+For implementation details and limitations, see
+[Document typography](../DOCUMENT_TYPOGRAPHY.md). Try
+`02-multilingual-writing/01-script-font-assignments`.

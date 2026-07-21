@@ -9,17 +9,18 @@ describe("document typography", () => {
     expect(typographyScaleChange(1.2, 1.3)).toBe("confirm");
   });
   const config = {
-    primary: { family: "Calibri", script: "latin" },
     baseSizePt: 11,
-    embedded: [
+    fonts: [
+      { family: "Calibri", script: "latin", scale: 1 },
       { family: "MiSans Khmer", script: "khmer", scale: 1.05 },
       { family: "MiSans Lao", script: "lao", scale: 1 }
     ]
   };
 
   test("renders reliable Typst font rules", () => {
-    expect(renderTypographyBlock(config)).toContain('#set text(font: ("Calibri", "MiSans Khmer", "MiSans Lao"), size: 11pt)');
-    expect(renderTypographyBlock(config)).toContain('// typsastra:font-roles {"primary":{"family":"Calibri","script":"latin"},"embedded":[{"family":"MiSans Khmer","script":"khmer","scale":1.05},{"family":"MiSans Lao","script":"lao","scale":1}]}');
+    expect(renderTypographyBlock(config)).toContain('(name: "Calibri", covers: regex("\\p{scx=Latin}"))');
+    expect(renderTypographyBlock(config)).toContain('(name: "MiSans Khmer", covers: regex("\\p{scx=Khmer}"))');
+    expect(renderTypographyBlock(config)).toContain('// typsastra:script-fonts [{"family":"Calibri","script":"latin","scale":1},{"family":"MiSans Khmer","script":"khmer","scale":1.05},{"family":"MiSans Lao","script":"lao","scale":1}]');
     expect(renderTypographyBlock(config)).not.toContain("#show regex(");
     expect(renderTypographyBlock(config)).not.toContain("show raw");
     expect(parseTypographyBlock(renderTypographyBlock(config))).toEqual(config);
@@ -34,9 +35,11 @@ describe("document typography", () => {
       ""
     ].join("\n");
     expect(parseTypographyBlock(legacy)).toEqual({
-      primary: { family: "Calibri", script: "latin" },
       baseSizePt: 10,
-      embedded: [{ family: "MiSans Khmer", script: "khmer", scale: 1.05 }]
+      fonts: [
+        { family: "Calibri", script: "latin", scale: 1 },
+        { family: "MiSans Khmer", script: "khmer", scale: 1.05 }
+      ]
     });
   });
 
@@ -49,31 +52,54 @@ describe("document typography", () => {
       ""
     ].join("\n");
     expect(parseTypographyBlock(legacy)).toEqual({
-      primary: { family: "Calibri", script: "latin" },
       baseSizePt: 11,
-      embedded: [{ family: "MiSans Khmer", script: "khmer", scale: 1.1 }]
+      fonts: [
+        { family: "Calibri", script: "latin", scale: 1 },
+        { family: "MiSans Khmer", script: "khmer", scale: 1.1 }
+      ]
     });
   });
 
-  test("supports non-Latin primary scripts and Latin-only documents", () => {
-    const khmerPrimary = {
-      primary: { family: "MiSans Khmer", script: "khmer" },
+  test("migrates primary and embedded role metadata to equal script assignments", () => {
+    const legacy = [
+      "// typsastra:typography:start",
+      '// typsastra:font-roles {"primary":{"family":"MiSans Khmer","script":"khmer"},"embedded":[{"family":"MiSans Latin","script":"latin","scale":1.1}]}',
+      '#set text(font: ("MiSans Khmer", "MiSans Latin"), size: 11pt)',
+      "// typsastra:typography:end",
+      ""
+    ].join("\n");
+    expect(parseTypographyBlock(legacy)).toEqual({
       baseSizePt: 11,
-      embedded: [{ family: "Calibri", script: "latin", scale: 1 }]
-    };
-    const complexBlock = renderTypographyBlock(khmerPrimary);
-    expect(complexBlock).toContain('#set text(font: ("MiSans Khmer", "Calibri"), size: 11pt)');
-    expect(parseTypographyBlock(complexBlock)).toEqual(khmerPrimary);
+      fonts: [
+        { family: "MiSans Khmer", script: "khmer", scale: 1 },
+        { family: "MiSans Latin", script: "latin", scale: 1.1 }
+      ]
+    });
+  });
 
-    const latinOnly = { ...config, embedded: [] };
+  test("supports arbitrary script order and single-script documents", () => {
+    const khmerFirst = {
+      baseSizePt: 11,
+      fonts: [
+        { family: "MiSans Khmer", script: "khmer", scale: 0.95 },
+        { family: "Calibri", script: "latin", scale: 1.1 }
+      ]
+    };
+    const complexBlock = renderTypographyBlock(khmerFirst);
+    expect(complexBlock.indexOf('name: "MiSans Khmer"')).toBeLessThan(complexBlock.indexOf('name: "Calibri"'));
+    expect(complexBlock).toContain('covers: regex("\\p{scx=Khmer}")');
+    expect(complexBlock).toContain('covers: regex("\\p{scx=Latin}")');
+    expect(parseTypographyBlock(complexBlock)).toEqual(khmerFirst);
+
+    const latinOnly = { baseSizePt: 11, fonts: [{ family: "Calibri", script: "latin", scale: 1 }] };
     const latinBlock = renderTypographyBlock(latinOnly);
-    expect(latinBlock).toContain('#set text(font: "Calibri", size: 11pt)');
+    expect(latinBlock).toContain('(name: "Calibri", covers: regex("\\p{scx=Latin}"))');
     expect(latinBlock).not.toContain("#show regex(");
     expect(parseTypographyBlock(latinBlock)).toEqual(latinOnly);
   });
 
   test("supports disabling managed typography", () => {
-    const disabledBoth = { ...config, primary: null, embedded: [] };
+    const disabledBoth = { baseSizePt: 11, fonts: [] };
     const disabledBlock = renderTypographyBlock(disabledBoth);
     expect(disabledBlock).not.toContain("#set text(");
     expect(disabledBlock).not.toContain("#show regex(");
@@ -86,10 +112,13 @@ describe("document typography", () => {
     const withBlock = original.slice(0, first.from) + first.insert + original.slice(first.to);
     expect(withBlock.startsWith("// typsastra:typography:start")).toBe(true);
 
-    const second = typographyEdit(withBlock, { ...config, primary: { family: "MiSans Latin", script: "latin" } });
+    const second = typographyEdit(withBlock, {
+      ...config,
+      fonts: config.fonts.map(font => font.script === "latin" ? { ...font, family: "MiSans Latin" } : font)
+    });
     const updated = withBlock.slice(0, second.from) + second.insert + withBlock.slice(second.to);
     expect(updated.match(/typsastra:typography:start/g)?.length).toBe(1);
-    expect(updated).toContain('font: ("MiSans Latin", "MiSans Khmer", "MiSans Lao")');
+    expect(updated).toContain('name: "MiSans Latin"');
   });
 
   test("detects the dominant complex script", () => {
@@ -101,7 +130,7 @@ describe("document typography", () => {
     expect(detectDocumentScripts("ខ្មែរ ខ្មែរ ລາວ العربية").map(script => script.id)).toEqual(["khmer", "arabic", "lao"]);
   });
 
-  test("detects a primary script and embedded scripts in dominance order", () => {
+  test("detects typography scripts in dominance order", () => {
     expect(detectTypographyScripts("English English English ខ្មែរ العربية").map(script => script.id))
       .toEqual(["latin", "arabic", "khmer"]);
     expect(detectTypographyScripts("ខ្មែរ ខ្មែរ English").map(script => script.id))

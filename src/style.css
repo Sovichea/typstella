@@ -1776,7 +1776,7 @@ body.typsastra-resizing #input-container-wrapper::after {
   background: var(--ui-hover);
 }
 
-#toolbar-add-embedded,
+#toolbar-add-script-font,
 .toolbar-remove-fallback {
   border: 0;
   color: var(--editor-bracket-0, #0969da);

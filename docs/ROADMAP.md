@@ -24,7 +24,7 @@ broader multilingual work:
 - Portable workspace state, lazy restored tabs, and guarded large-file loading.
 - Font-free schema-v2 project archives and explicit Tinymist process lifecycle.
 - Signed update detection, recent-project search, pane keyboard navigation, and cross-platform application refinements.
-- Primary and embedded-script document typography with portable ordered font stacks.
+- Script-specific document typography with Unicode `scx` coverage and independent scaling.
 - Warmed source-map sessions for reliable first-use synchronization in very long documents.
 
 ## v0.5.1 — examples, tutorials, and maintenance
@@ -35,7 +35,7 @@ continuing the v0.5.x maintenance line:
 - Restructure the bundled examples into a guided path from Typst basics through
   multilingual language scopes, language providers, research projects, and
   project portability.
-- Add focused examples for primary and embedded scripts, scope-aware
+- Add focused examples for script-specific font assignments, scope-aware
   spellcheck, keyboard-language completion, optional-provider warnings, and
   document typography.
 - Add a user-facing documentation landing page and task-oriented tutorials for

@@ -1,7 +1,11 @@
 #set document(title: "Typsastra Examples")
 #set page(margin: 24mm)
 // typsastra:typography:start
-#set text(font: "MiSans Latin", size: 11pt)
+// typsastra:script-fonts [{"family":"MiSans Latin","script":"latin","scale":1}]
+#set text(
+  font: ((name: "MiSans Latin", covers: regex("\p{scx=Latin}")),),
+  size: 11pt,
+)
 // typsastra:typography:end
 #set heading(numbering: "1.")
 
@@ -18,7 +22,8 @@ example that matches the feature you want to learn.
 
 == 02. Multilingual writing
 
-- `01-primary-and-embedded-scripts`: document typography and ordered font fallbacks.
+- `01-script-font-assignments`: script-specific fonts, Unicode coverage, and
+  independent visual scaling.
 - `02-language-scoped-spellcheck`: Typst language scopes, same-script isolation,
   terminology, and missing-provider warnings.
 - `03-keyboard-language-completion`: typing suggestions selected independently

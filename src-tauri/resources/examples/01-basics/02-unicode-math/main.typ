@@ -11,7 +11,9 @@ Typst supports readable mathematical input and direct Unicode symbols in surroun
 
 == Symbols in prose
 
-Common symbols include arrows → ← ↔, relations ≤ ≥ ≠ ≈, sets ∅ ℕ ℤ ℚ ℝ ℂ, and operators ∑ ∏ ∫.
+Common symbols include arrows $arrow.r, arrow.l, arrow.l.r$, relations
+$<=, >=, !=, approx$, sets $emptyset, NN, ZZ, QQ, RR, CC$, and operators
+$sum, product, integral$.
 
 == Equations
 

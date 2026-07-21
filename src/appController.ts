@@ -61,7 +61,7 @@ import { EditorToolbarController } from "./editor/toolbarController";
 import { ContextMenuController } from "./components/contextMenuController";
 import { ToolchainController, type ToolchainStatus } from "./toolchain/toolchainController";
 import { DocumentOutlineController, type DocumentHeading } from "./outline/documentOutline";
-import { parseTypographyBlock, typographyEdit, type DocumentEmbeddedFont, type DocumentTypography } from "./editor/documentTypography";
+import { parseTypographyBlock, typographyEdit, type DocumentScriptFont, type DocumentTypography } from "./editor/documentTypography";
 import {
   SpellcheckController,
   type SpellcheckDebugEvent,
@@ -294,7 +294,7 @@ export class TypsastraWorkspaceController {
   private typographyScaleCheckGeneration = 0;
   private typographyScaleConfirmationOpen = false;
   private suppressTypographyScaleConfirmation = false;
-  private acceptedTypographyScales = new Map<string, DocumentEmbeddedFont[]>();
+  private acceptedTypographyScales = new Map<string, DocumentScriptFont[]>();
   private typographyFontUpdateInProgress = false;
   private deferredTypographyPreviewContents: string | null = null;
   private lastPdfBase64 = "";
@@ -1701,7 +1701,7 @@ export class TypsastraWorkspaceController {
     path = tab.path;
     this.acceptedTypographyScales.set(
       filePathKey(path),
-      parseTypographyBlock(tab.content)?.embedded.map(font => ({ ...font })) ?? []
+      parseTypographyBlock(tab.content)?.fonts.map(font => ({ ...font })) ?? []
     );
     this.currentVersion = tab.version;
     this.latestDocumentVersion = tab.latestVersion;
@@ -2343,7 +2343,7 @@ export class TypsastraWorkspaceController {
     if (!this.activeFilePath) return;
     const typographyDocumentKey = filePathKey(this.activeFilePath);
     const previousAcceptedScale = this.acceptedTypographyScales.get(typographyDocumentKey) ?? [];
-    this.acceptedTypographyScales.set(typographyDocumentKey, config.embedded.map(font => ({ ...font })));
+    this.acceptedTypographyScales.set(typographyDocumentKey, config.fonts.map(font => ({ ...font })));
     try {
       if (target === "document") {
         const editor = this.editorInstance;
@@ -2445,10 +2445,10 @@ export class TypsastraWorkspaceController {
 
   private async prepareWorkspaceTypographyFont(config: DocumentTypography): Promise<boolean> {
     if (!this.workspaceRootPath) return false;
-    const scaled = config.embedded.filter(font => Math.abs(font.scale - 1) > 0.0001);
+    const scaled = config.fonts.filter(font => Math.abs(font.scale - 1) > 0.0001);
     const updateRequired = await invoke<boolean>("scaled_workspace_font_set_update_required", {
       workspaceRootPath: this.workspaceRootPath,
-      fonts: scaled
+      fonts: config.fonts
     });
     if (!updateRequired) return false;
     this.typographyFontUpdateInProgress = true;
@@ -3098,23 +3098,23 @@ export class TypsastraWorkspaceController {
     const documentKey = filePathKey(filePath);
     const config = parseTypographyBlock(this.editorInstance.state.doc.toString());
     if (!config) return;
-    const previousEmbedded = this.acceptedTypographyScales.get(documentKey) ?? [];
-    const signature = (fonts: DocumentEmbeddedFont[]) => JSON.stringify(fonts.map(font => ({
+    const previousFonts = this.acceptedTypographyScales.get(documentKey) ?? [];
+    const signature = (fonts: DocumentScriptFont[]) => JSON.stringify(fonts.map(font => ({
       family: font.family,
       script: font.script,
       scale: Number(font.scale.toFixed(4))
     })));
-    if (signature(previousEmbedded) === signature(config.embedded)) return;
-    const requiresConfirmation = config.embedded.some(font => {
+    if (signature(previousFonts) === signature(config.fonts)) return;
+    const requiresConfirmation = config.fonts.some(font => {
       if (Math.abs(font.scale - 1) <= 0.0001) return false;
-      const previous = previousEmbedded.find(candidate =>
+      const previous = previousFonts.find(candidate =>
         candidate.script === font.script && candidate.family === font.family
       );
       return !previous || Math.abs(previous.scale - font.scale) > 0.0001;
     });
 
     if (!requiresConfirmation) {
-      this.acceptedTypographyScales.set(documentKey, config.embedded.map(font => ({ ...font })));
+      this.acceptedTypographyScales.set(documentKey, config.fonts.map(font => ({ ...font })));
       await this.applyManualTypographyFontChange(config, filePath);
       return;
     }
@@ -3123,7 +3123,7 @@ export class TypsastraWorkspaceController {
     let accepted = false;
     try {
       accepted = await confirm(
-        `Apply these document font scales?\n\n${config.embedded.map(font => `${font.family}: ${font.scale}×`).join("\n")}\n\nTypsastra will generate scaled workspace fonts and restart the preview compiler.`,
+        `Apply these document font scales?\n\n${config.fonts.map(font => `${font.family}: ${font.scale}×`).join("\n")}\n\nTypsastra will generate scaled workspace fonts and restart the preview compiler.`,
         { title: "Confirm Font Scaling", kind: "warning" }
       );
     } finally {
@@ -3133,21 +3133,21 @@ export class TypsastraWorkspaceController {
     if (!this.activeFilePath || filePathKey(this.activeFilePath) !== documentKey) return;
     const currentText = this.editorInstance.state.doc.toString();
     const currentConfig = parseTypographyBlock(currentText);
-    if (!currentConfig || signature(currentConfig.embedded) !== signature(config.embedded)) {
+    if (!currentConfig || signature(currentConfig.fonts) !== signature(config.fonts)) {
       this.scheduleManualTypographyScaleCheck();
       return;
     }
     if (accepted) {
-      this.acceptedTypographyScales.set(documentKey, currentConfig.embedded.map(font => ({ ...font })));
+      this.acceptedTypographyScales.set(documentKey, currentConfig.fonts.map(font => ({ ...font })));
       await this.applyManualTypographyFontChange(currentConfig, filePath);
       return;
     }
 
     const edit = typographyEdit(currentText, {
       ...currentConfig,
-      embedded: currentConfig.embedded.map(font => ({
+      fonts: currentConfig.fonts.map(font => ({
         ...font,
-        scale: previousEmbedded.find(candidate =>
+        scale: previousFonts.find(candidate =>
           candidate.script === font.script && candidate.family === font.family
         )?.scale ?? 1
       }))

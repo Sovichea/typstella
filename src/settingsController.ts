@@ -578,7 +578,7 @@ export class SettingsController {
       }));
       checkbox.addEventListener("change", () => { embedded.disabled = !checkbox.checked; });
       const embeddedLabel = document.createElement("small");
-      embeddedLabel.textContent = "Embedded";
+      embeddedLabel.textContent = "Embedded spellcheck";
       controls.append(checkbox, embedded, embeddedLabel);
       label.append(text, controls);
       return label;

@@ -46,7 +46,7 @@ a newly prepared examples workspace.
   examples may be pruned after their replacements are installed; edited copies
   must remain in place and be clearly treated as user-owned legacy examples.
 - [x] **V051-P.3 Establish terminology and support labels.** Use the same names
-  everywhere for primary script, embedded script, explicit language scope,
+  everywhere for script-font assignments, explicit language scope,
   provider, project main file, included file, standalone preview, and workspace
   state.
 - [ ] **V051-P.4 Capture a clean-install baseline.** Record the current Open
@@ -73,7 +73,7 @@ src-tauri/resources/examples/
 │   ├── 01-writing-basics/
 │   └── 02-unicode-math/
 ├── 02-multilingual-writing/
-│   ├── 01-primary-and-embedded-scripts/
+│   ├── 01-script-font-assignments/
 │   ├── 02-language-scoped-spellcheck/
 │   ├── 03-keyboard-language-completion/
 │   ├── 04-complex-script-typography/
@@ -101,7 +101,7 @@ src-tauri/resources/examples/
   copies are installed and updated, how to reset an untouched example, and why
   an edited legacy example may remain after an application update.
 - [x] **V051-E.3 Build the primary/embedded-script example.** Demonstrate one
-  primary script with disjoint embedded scripts, typography font stacks, and
+  script-specific font assignments, typography font stacks, and
   the boundary between document typography and language-provider routing.
 - [x] **V051-E.4 Build the language-scope example.** Cover `#set text(lang: ...)`,
   `#text(lang: ...)[...]`, `#block[...]`, anonymous `#[...]`, nested scopes,
