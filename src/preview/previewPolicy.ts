@@ -59,6 +59,18 @@ export function participatesInPreviewCompilation(
   );
 }
 
+export function activeFileCanRenderPreview(
+  activePath: string | null,
+  pinnedMainPath: string | null,
+  importedByMain: boolean,
+  previewDisabled: boolean
+): boolean {
+  return !previewDisabled
+    && !!activePath
+    && activePath.toLocaleLowerCase().endsWith(".typ")
+    && participatesInPreviewCompilation(activePath, pinnedMainPath, importedByMain);
+}
+
 export function tinymistPreviewSourceColumn(lineText: string, utf16Offset: number): number {
   const offset = Math.max(0, Math.min(utf16Offset, lineText.length));
   return [...lineText.slice(0, offset)].length;

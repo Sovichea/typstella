@@ -32,7 +32,7 @@ import {
   tinymistDataPlaneFrameKind,
   tinymistDataPlanePositionText
 } from "./preview/tinymistDataPlane";
-import { allowsStandalonePreview, participatesInPreviewCompilation, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, tinymistPreviewPreferredSourceColumn, usesTemplateAwareStandaloneRoot, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
+import { activeFileCanRenderPreview, allowsStandalonePreview, participatesInPreviewCompilation, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, tinymistPreviewPreferredSourceColumn, usesTemplateAwareStandaloneRoot, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
 import { LogConsoleController, spellcheckConsoleGroupKey, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
 import { EditorFontManager } from "./editor/fontManager";
 import { TabStripController } from "./editor/tabStripController";
@@ -1919,6 +1919,7 @@ export class TypsastraWorkspaceController {
       });
       if (previewTarget.disabled) {
         this.applyPreviewTargetToTab(tab, previewTarget);
+        this.invalidatePreviewWork(`${path} does not participate in the configured main preview`);
       } else {
         previewTarget = await this.prepareTemplateAwarePreview(previewTarget, path, tab.content);
         const existingMainSession = this.captureCurrentMainSessionForImportedTarget(previewTarget);
@@ -2831,6 +2832,19 @@ export class TypsastraWorkspaceController {
       this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: "Render skipped: preview is disabled." });
       return;
     }
+    if (!activeFileCanRenderPreview(
+      this.activeFilePath,
+      this.pinnedMainFilePath,
+      this.previewImported,
+      this.previewDisabled
+    )) {
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "preview scheduler",
+        message: `Render skipped: ${this.activeFilePath ?? "no active file"} does not participate in the configured main preview.`
+      });
+      return;
+    }
     if (this.typographyFontUpdateInProgress) {
       this.deferredTypographyPreviewContents = contents;
       this.appendDeveloperLog({
@@ -3133,6 +3147,19 @@ export class TypsastraWorkspaceController {
       this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: "On-type schedule skipped: preview is disabled." });
       return;
     }
+    if (!activeFileCanRenderPreview(
+      this.activeFilePath,
+      this.pinnedMainFilePath,
+      this.previewImported,
+      this.previewDisabled
+    )) {
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "preview scheduler",
+        message: `On-type schedule skipped: ${this.activeFilePath ?? "no active file"} does not participate in the configured main preview.`
+      });
+      return;
+    }
     if (this.settingsController.value.preview.renderMode !== "on-type") {
       this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `On-type schedule skipped: mode=${this.settingsController.value.preview.renderMode}.` });
       return;
@@ -3151,7 +3178,16 @@ export class TypsastraWorkspaceController {
     });
     this.pdfPreviewTimer = window.setTimeout(() => {
       this.pdfPreviewTimer = null;
-      if (this.activeFilePath && filePathKey(this.activeFilePath) === filePathKey(scheduledPath ?? "")) {
+      if (
+        this.activeFilePath
+        && filePathKey(this.activeFilePath) === filePathKey(scheduledPath ?? "")
+        && activeFileCanRenderPreview(
+          this.activeFilePath,
+          this.pinnedMainFilePath,
+          this.previewImported,
+          this.previewDisabled
+        )
+      ) {
         this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `On-type timer ${scheduleGeneration} fired.` });
         void this.renderPdfPreview(contents);
       } else {
@@ -3165,7 +3201,13 @@ export class TypsastraWorkspaceController {
   }
 
   private handleContentMutation(rawText: string) {
-    if (!this.isLoadingFile) {
+    const canRenderPreview = activeFileCanRenderPreview(
+      this.activeFilePath,
+      this.pinnedMainFilePath,
+      this.previewImported,
+      this.previewDisabled
+    );
+    if (!this.isLoadingFile && canRenderPreview) {
       this.pdfPreparationRevision += 1;
       if (this.settingsController.value.preview.renderMode === "on-type") {
         void invoke("cancel_render_preparation").catch(() => {});
@@ -3217,11 +3259,28 @@ export class TypsastraWorkspaceController {
       !this.isLoadingFile
       && this.activeFilePath
       && this.activeFilePath.toLowerCase().endsWith(".typ")
+      && canRenderPreview
       && this.settingsController.value.preview.renderMode === "on-type"
       && !this.previewDisabled
     ) {
       this.schedulePdfPreview(rawText);
     }
+  }
+
+  private invalidatePreviewWork(reason: string): void {
+    this.pdfPreparationRevision += 1;
+    this.pdfPreviewScheduleGeneration += 1;
+    this.pdfPreviewGeneration += 1;
+    if (this.pdfPreviewTimer !== null) window.clearTimeout(this.pdfPreviewTimer);
+    this.pdfPreviewTimer = null;
+    this.queuedPdfPreviewContents = null;
+    this.queuedPdfPreviewForced = false;
+    void invoke("cancel_render_preparation").catch(() => {});
+    this.appendDeveloperLog({
+      kind: "info",
+      source: "preview scheduler",
+      message: `Preview work invalidated: ${reason}.`
+    });
   }
 
   private scheduleManualTypographyScaleCheck(): void {
@@ -5589,6 +5648,7 @@ export class TypsastraWorkspaceController {
     if (target.disabled) {
       const activeTab = this.getActiveTab();
       if (activeTab) this.applyPreviewTargetToTab(activeTab, target);
+      this.invalidatePreviewWork(`${this.activeFilePath} does not participate in the configured main preview`);
       this.previewFrame.setMessage(this.disabledPreviewMessage());
       return;
     }
@@ -7030,6 +7090,19 @@ export class TypsastraWorkspaceController {
     if (!this.workspaceRootPath
       || !this.settingsController.value.preview.khmerRenderPreparation
       || this.settingsController.value.preview.renderMode !== "on-type") {
+      return;
+    }
+    if (!activeFileCanRenderPreview(
+      this.activeFilePath,
+      this.pinnedMainFilePath,
+      this.previewImported,
+      this.previewDisabled
+    )) {
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "preview scheduler",
+        message: `Render preparation skipped: ${this.activeFilePath ?? "no active file"} does not participate in the configured main preview.`
+      });
       return;
     }
     const cacheRoot = this.getCacheRootPath();

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { allowsStandalonePreview, participatesInPreviewCompilation, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, supportsResponsivePartialRendering, tinymistPreviewArguments, tinymistPreviewByteColumn, tinymistPreviewNearbyByteColumns, tinymistPreviewNearbySourceColumns, tinymistPreviewPreferredSourceColumn, tinymistPreviewSourceColumn, usesTemplateAwareStandaloneRoot } from "../src/preview/previewPolicy";
+import { activeFileCanRenderPreview, allowsStandalonePreview, participatesInPreviewCompilation, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, supportsResponsivePartialRendering, tinymistPreviewArguments, tinymistPreviewByteColumn, tinymistPreviewNearbyByteColumns, tinymistPreviewNearbySourceColumns, tinymistPreviewPreferredSourceColumn, tinymistPreviewSourceColumn, usesTemplateAwareStandaloneRoot } from "../src/preview/previewPolicy";
 
 describe("preview policy", () => {
   test("keeps unrelated files out of preview compilation", () => {
@@ -7,6 +7,32 @@ describe("preview policy", () => {
     expect(participatesInPreviewCompilation("C:/work/chapter.typ", "C:/work/main.typ", true)).toBe(true);
     expect(participatesInPreviewCompilation("C:/work/notes.typ", "C:/work/main.typ", false)).toBe(false);
     expect(participatesInPreviewCompilation("C:/work/main.typ", null, false)).toBe(false);
+  });
+
+  test("blocks unrelated active files at every preview scheduling boundary", () => {
+    expect(activeFileCanRenderPreview("C:/work/main.typ", "C:/work/main.typ", false, false)).toBe(true);
+    expect(activeFileCanRenderPreview("C:/work/chapter.typ", "C:/work/main.typ", true, false)).toBe(true);
+    expect(activeFileCanRenderPreview("C:/work/notes.typ", "C:/work/main.typ", false, false)).toBe(false);
+    expect(activeFileCanRenderPreview("C:/work/main.typ", "C:/work/main.typ", false, true)).toBe(false);
+    expect(activeFileCanRenderPreview("C:/work/data.csv", "C:/work/data.csv", false, false)).toBe(false);
+  });
+
+  test("applies preview ownership to mutation, scheduling, rendering, and preparation", async () => {
+    const source = await Bun.file(new URL("../src/appController.ts", import.meta.url)).text();
+    const methodSource = (name: string) => {
+      const start = source.indexOf(`  private ${name}`);
+      expect(start).toBeGreaterThanOrEqual(0);
+      const end = source.indexOf("\n  private ", start + 10);
+      return source.slice(start, end < 0 ? source.length : end);
+    };
+    for (const method of [
+      "async renderPdfPreview",
+      "schedulePdfPreview",
+      "handleContentMutation",
+      "async prepareRenderProjectIfNeeded"
+    ]) {
+      expect(methodSource(method)).toContain("activeFileCanRenderPreview(");
+    }
   });
   test("keeps standalone preview disabled for v1.0", () => {
     expect(allowsStandalonePreview("// @standalone-preview\n= Chapter")).toBe(false);
