@@ -1,5 +1,6 @@
 #set document(title: "Portable Workspace State")
 #set page(margin: 24mm)
+#set text(font: "New Computer Modern")
 
 = Portable workspace state
 

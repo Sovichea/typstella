@@ -1,7 +1,7 @@
 #set document(title: "Mixed Scripts")
 #set page(margin: 22mm)
 // typsastra:typography:start
-#set text(font: "MiSans Latin", size: 12pt)
+#set text(font: "New Computer Modern", size: 12pt)
 // typsastra:typography:end
 #set par(leading: 0.8em)
 

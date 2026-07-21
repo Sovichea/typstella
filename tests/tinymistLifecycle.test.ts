@@ -29,4 +29,11 @@ describe("Tinymist workspace lifecycle", () => {
     expect(source).toContain('stopTinymistSession("Project closed")');
     expect(source).toContain("tinymistLifecycleQueue");
   });
+
+  test("corrects unsupported compiler-font scales after reporting them", async () => {
+    const source = await Bun.file(new URL("../src/appController.ts", import.meta.url)).text();
+    expect(source).toContain('userEvent: "input.typography-scale-correction"');
+    expect(source).toContain("this.resetUnsupportedInternalScales");
+    expect(source).toContain("Typsastra will reset their scale to 1×");
+  });
 });

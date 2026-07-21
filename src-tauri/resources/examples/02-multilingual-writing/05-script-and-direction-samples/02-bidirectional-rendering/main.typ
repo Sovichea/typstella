@@ -1,7 +1,7 @@
 #set document(title: "Bidirectional Text")
 #set page(margin: 22mm)
 // typsastra:typography:start
-#set text(font: "MiSans Latin", size: 12pt)
+#set text(font: "New Computer Modern", size: 12pt)
 // typsastra:typography:end
 
 = Bidirectional Text

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { detectDocumentScript, detectDocumentScripts, detectTypographyScripts, documentScriptsEdit, isTypstInternalOnlyFont, parseDocumentScripts, parseTypographyBlock, renderTypographyBlock, typographyEdit, typographyScaleChange, typographyScaleExceedsFineAdjustment, TYPST_INTERNAL_FONT_FAMILIES } from "../src/editor/documentTypography";
+import { detectDocumentScript, detectDocumentScripts, detectTypographyScripts, documentScriptsEdit, isTypstInternalOnlyFont, parseDocumentScripts, parseTypographyBlock, renderTypographyBlock, typographyEdit, typographyScaleChange, typographyScaleExceedsFineAdjustment, TYPST_INTERNAL_FONT_FAMILIES, unsupportedTypstInternalFontScales } from "../src/editor/documentTypography";
 
 describe("document typography", () => {
   test("distinguishes compiler-only fonts from locally installed copies", () => {
@@ -7,6 +7,19 @@ describe("document typography", () => {
     expect(isTypstInternalOnlyFont("New Computer Modern", ["Arial"])).toBe(true);
     expect(isTypstInternalOnlyFont("New Computer Modern", ["New Computer Modern"])).toBe(false);
     expect(isTypstInternalOnlyFont("MiSans Latin", ["MiSans Latin"])).toBe(false);
+  });
+
+  test("rejects non-unit scales for compiler-only fonts", () => {
+    const fonts = [
+      { family: "New Computer Modern", script: "latin", scale: 1.05, language: "en-US" },
+      { family: "MiSans Khmer", script: "khmer", scale: 0.95, language: "km" },
+    ];
+    expect(unsupportedTypstInternalFontScales(fonts, ["MiSans Khmer"]))
+      .toEqual([fonts[0]]);
+    expect(unsupportedTypstInternalFontScales(fonts, ["New Computer Modern", "MiSans Khmer"]))
+      .toEqual([]);
+    expect(unsupportedTypstInternalFontScales([{ ...fonts[0], scale: 1 }], []))
+      .toEqual([]);
   });
 
   test("confirms only manual changes to a non-unit font scale", () => {

@@ -1,6 +1,6 @@
 #let lao_document(body) = {
   // typsastra:typography:start
-  set text(font: ("MiSans Latin", "Noto Sans Lao", "Phetsarath OT"), size: 11pt)
+  set text(font: ("New Computer Modern", "Noto Sans Lao", "Phetsarath OT"), size: 11pt)
   // typsastra:typography:end
   
   set page(

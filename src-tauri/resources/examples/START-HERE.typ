@@ -1,9 +1,9 @@
 #set document(title: "Typsastra Examples")
 #set page(margin: 24mm)
 // typsastra:typography:start
-// typsastra:document-scripts [{"family":"MiSans Latin","script":"latin","scale":1,"language":"en-US"}]
+// typsastra:document-scripts [{"family":"New Computer Modern","script":"latin","scale":1,"language":"en-US"}]
 #set text(
-  font: ((name: "MiSans Latin", covers: regex("\p{scx=Latin}")),),
+  font: ((name: "New Computer Modern", covers: regex("\p{scx=Latin}")),),
   size: 11pt,
 )
 // typsastra:typography:end

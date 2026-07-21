@@ -65,6 +65,14 @@ Every script entry accepts a uniform scale from `0.5` to `2.0`, relative to the
 shared document point size. For an `11pt` document, Latin can use `1.1`, Khmer
 `0.95`, and Arabic `1.0`; no script has a special base-font role.
 
+Fonts supplied internally by the Typst compiler, such as New Computer Modern,
+must remain at `1.0` unless that family is also installed locally. Typsastra
+cannot access or extract the compiler's embedded font files to create a scaled
+variant. The typography dialog disables the scale field for these fonts. A
+manually edited non-unit directive produces an error and is reset to `1.0`
+instead of starting font generation. Install a local copy of the family to
+enable scaling.
+
 Typsastra treats `0.90×` through `1.10×` as the recommended fine-adjustment
 range. Values outside that range require confirmation because script scaling
 is intended to balance fonts optically, not to double or substantially change

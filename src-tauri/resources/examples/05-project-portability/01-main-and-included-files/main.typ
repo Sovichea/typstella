@@ -1,5 +1,6 @@
 #set document(title: "Main and Included Files")
 #set page(margin: 24mm)
+#set text(font: "New Computer Modern")
 #set heading(numbering: "1.")
 
 = Main-document preview ownership

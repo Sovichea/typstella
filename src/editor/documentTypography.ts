@@ -42,6 +42,14 @@ export function isTypstInternalOnlyFont(family: string, systemFamilies: readonly
     && !systemFamilies.some(candidate => sameFontFamily(candidate, family));
 }
 
+export function unsupportedTypstInternalFontScales(
+  fonts: readonly DocumentScriptFont[],
+  systemFamilies: readonly string[],
+): DocumentScriptFont[] {
+  return fonts.filter(font => Math.abs(font.scale - 1) > 0.0001
+    && isTypstInternalOnlyFont(font.family, systemFamilies));
+}
+
 export function typographyScaleExceedsFineAdjustment(scale: number): boolean {
   return scale < TYPOGRAPHY_FINE_ADJUSTMENT_MIN - 0.0001
     || scale > TYPOGRAPHY_FINE_ADJUSTMENT_MAX + 0.0001;

@@ -1,6 +1,6 @@
 // Select another compatible family from Document typography if MiSans Khmer is not installed.
 // typsastra:typography:start
-#set text(font: ("MiSans Latin", "MiSans Khmer"))
+#set text(font: ("New Computer Modern", "MiSans Khmer"))
 // typsastra:typography:end
 #set document(title: "Complex Script Shaping")
 #set page(margin: 22mm)

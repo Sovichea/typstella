@@ -1,6 +1,6 @@
 #set document(title: "Optional Language Providers")
 #set page(margin: 24mm)
-#set text(lang: "en", size: 11pt)
+#set text(font: "New Computer Modern", lang: "en", size: 11pt)
 
 = Optional language providers
 

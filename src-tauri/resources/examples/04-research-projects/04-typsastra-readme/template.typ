@@ -19,7 +19,7 @@
       ])
     },
   )
-  set text(font: ("MiSans Latin", "MiSans Khmer", "Noto Sans Khmer", "Liberation Sans", "Arial"), size: 11pt)
+  set text(font: ("New Computer Modern", "MiSans Khmer", "Noto Sans Khmer", "Liberation Sans", "Arial"), size: 11pt)
   set par(justify: true, leading: 0.75em)
 
   // Title Page

@@ -1,7 +1,7 @@
 #set document(title: "Unicode and Mathematics")
 #set page(margin: 24mm)
 // typsastra:typography:start
-#set text(font: "MiSans Latin", size: 11pt)
+#set text(font: "New Computer Modern", size: 11pt)
 // typsastra:typography:end
 #set heading(numbering: "1.")
 

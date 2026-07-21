@@ -5,7 +5,7 @@
   body,
 ) = {
   // typsastra:typography:start
-  set text(font: ("MiSans Latin", "MiSans Khmer"), size: 11pt)
+  set text(font: ("New Computer Modern", "MiSans Khmer"), size: 11pt)
   // typsastra:typography:end
   set document(title: title, author: author)
   set page(

@@ -6,8 +6,8 @@
 )
 
 // typsastra:typography:start
-#set text(font: "MiSans Latin", size: 11pt)
-#set text(font: ("MiSans Latin", "MiSans Khmer"))
+#set text(font: "New Computer Modern", size: 11pt)
+#set text(font: ("New Computer Modern", "MiSans Khmer"))
 // typsastra:typography:end
 
 #let draw-line = cetz.draw.line

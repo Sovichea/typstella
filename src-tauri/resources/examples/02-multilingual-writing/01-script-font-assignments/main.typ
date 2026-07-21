@@ -1,11 +1,11 @@
 #set document(title: "Script-Specific Font Assignments")
 #set page(margin: 24mm)
 // typsastra:typography:start
-// typsastra:document-scripts [{"family":"MiSans Khmer","script":"khmer","scale":1,"language":"km"},{"family":"MiSans Latin","script":"latin","scale":1,"language":"en-US"},{"family":"MiSans Arabic","script":"arabic","scale":1,"language":"ar"}]
+// typsastra:document-scripts [{"family":"MiSans Khmer","script":"khmer","scale":1,"language":"km"},{"family":"New Computer Modern","script":"latin","scale":1,"language":"en-US"},{"family":"MiSans Arabic","script":"arabic","scale":1,"language":"ar"}]
 #set text(
   font: (
     (name: "MiSans Khmer", covers: regex("\p{scx=Khmer}")),
-    (name: "MiSans Latin", covers: regex("\p{scx=Latin}")),
+    (name: "New Computer Modern", covers: regex("\p{scx=Latin}")),
     (name: "MiSans Arabic", covers: regex("\p{scx=Arabic}")),
   ),
   size: 11pt,
@@ -21,7 +21,7 @@ for different scripts may therefore look unbalanced at the same point size.
 
 A second problem appears when a script font includes extra glyphs. MiSans Khmer
 contains Latin characters, so placing it first in an unrestricted stack can
-prevent MiSans Latin from being used.
+prevent New Computer Modern from being used.
 
 == Typsastra's solution
 
@@ -42,10 +42,13 @@ assignment even though it appears later.
 Open the `Aa` toolbar control and try these values:
 
 ```text
-Khmer  MiSans Khmer   0.95×
-Latin  MiSans Latin   1.10×
-Arabic MiSans Arabic  1.00×
+Khmer  MiSans Khmer        0.95×
+Latin  New Computer Modern 1.00× (Typst built-in)
+Arabic MiSans Arabic       1.00×
 ```
+
+The Latin scale is locked because New Computer Modern is supplied internally
+by Typst. Install a local copy if you need to create scaled variants of it.
 
 Typsastra prepares uniformly scaled local fonts without wrapping or replacing
 source runs. Forward and inverse synchronization therefore retain the original

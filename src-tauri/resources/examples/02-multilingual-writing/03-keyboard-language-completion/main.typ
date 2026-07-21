@@ -1,10 +1,10 @@
 #set document(title: "Document-script Word Completion")
 #set page(margin: 24mm)
 // typsastra:typography:start
-// typsastra:document-scripts [{"family":"MiSans Latin","script":"latin","scale":1,"language":"en-US"},{"family":"MiSans Khmer","script":"khmer","scale":1,"language":"km"}]
+// typsastra:document-scripts [{"family":"New Computer Modern","script":"latin","scale":1,"language":"en-US"},{"family":"MiSans Khmer","script":"khmer","scale":1,"language":"km"}]
 #set text(
   font: (
-    (name: "MiSans Latin", covers: regex("\p{scx=Latin}")),
+    (name: "New Computer Modern", covers: regex("\p{scx=Latin}")),
     (name: "MiSans Khmer", covers: regex("\p{scx=Khmer}")),
   ),
   size: 11pt,

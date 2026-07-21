@@ -67,6 +67,7 @@ import {
   documentScriptsEdit,
   typographyEdit,
   typographyScaleExceedsFineAdjustment,
+  unsupportedTypstInternalFontScales,
   type DocumentScriptFont,
   type DocumentTypography
 } from "./editor/documentTypography";
@@ -317,6 +318,7 @@ export class TypsastraWorkspaceController {
   private typographyScaleCheckTimer: number | null = null;
   private typographyScaleCheckGeneration = 0;
   private typographyScaleConfirmationOpen = false;
+  private lastTypographyInternalScaleError = "";
   private suppressTypographyScaleConfirmation = false;
   private acceptedTypographyScales = new Map<string, DocumentScriptFont[]>();
   private typographyFontUpdateInProgress = false;
@@ -1781,7 +1783,7 @@ export class TypsastraWorkspaceController {
     path = tab.path;
     this.acceptedTypographyScales.set(
       filePathKey(path),
-      parseTypographyBlock(tab.content)?.fonts.map(font => ({ ...font })) ?? []
+      this.documentTypographyFromText(tab.content)?.fonts.map(font => ({ ...font })) ?? []
     );
     this.currentVersion = tab.version;
     this.latestDocumentVersion = tab.latestVersion;
@@ -2559,6 +2561,41 @@ export class TypsastraWorkspaceController {
     return `The following font scales exceed the recommended 0.90×–1.10× fine-adjustment range:\n\n${outsideFineRange.map(font => `${font.family}: ${font.scale}×`).join("\n")}\n\nFont scaling is intended for small optical adjustments between script families, not for doubling or substantially changing text size. Beyond ±10%, accurate representation is not guaranteed and results vary from one font to another. Use the document text size for larger size changes.\n\nContinue anyway?`;
   }
 
+  private async unsupportedInternalScaleError(config: DocumentTypography): Promise<{
+    message: string;
+    fonts: DocumentScriptFont[];
+  } | null> {
+    const catalog = await invoke<{ all: string[] }>("list_system_fonts");
+    const unsupported = unsupportedTypstInternalFontScales(config.fonts, catalog.all);
+    if (unsupported.length === 0) return null;
+    return {
+      fonts: unsupported,
+      message: `The following fonts are provided internally by the Typst compiler and cannot be scaled by Typsastra:\n\n${unsupported.map(font => `${font.family}: ${font.scale}×`).join("\n")}\n\nTypsastra will reset their scale to 1×. Install the corresponding font family locally before using a custom scale. Typsastra will not generate or extract variants from compiler-embedded fonts.`,
+    };
+  }
+
+  private resetUnsupportedInternalScales(
+    config: DocumentTypography,
+    unsupported: readonly DocumentScriptFont[],
+  ): DocumentTypography {
+    return {
+      ...config,
+      fonts: config.fonts.map(font => ({
+        ...font,
+        scale: unsupported.some(candidate =>
+          candidate.script === font.script && candidate.family === font.family
+        ) ? 1 : font.scale,
+      })),
+    };
+  }
+
+  private documentTypographyFromText(text: string): DocumentTypography | null {
+    const managed = parseTypographyBlock(text);
+    if (managed) return managed;
+    const fonts = parseDocumentScripts(text);
+    return fonts.length > 0 ? { baseSizePt: 11, fonts } : null;
+  }
+
   private async confirmTypographyScaleRange(config: DocumentTypography): Promise<boolean> {
     const warning = this.typographyScaleRangeWarning(config);
     if (!warning) return true;
@@ -3315,7 +3352,7 @@ export class TypsastraWorkspaceController {
     }
     const filePath = this.activeFilePath;
     const documentKey = filePathKey(filePath);
-    const config = parseTypographyBlock(this.editorInstance.state.doc.toString());
+    const config = this.documentTypographyFromText(this.editorInstance.state.doc.toString());
     if (!config) return;
     const previousFonts = this.acceptedTypographyScales.get(documentKey) ?? [];
     const signature = (fonts: DocumentScriptFont[]) => JSON.stringify(fonts.map(font => ({
@@ -3336,6 +3373,47 @@ export class TypsastraWorkspaceController {
       });
       return;
     }
+    const unsupportedInternalScale = await this.unsupportedInternalScaleError(config);
+    if (unsupportedInternalScale) {
+      const errorKey = `${documentKey}\u0000${signature(config.fonts)}`;
+      if (this.lastTypographyInternalScaleError !== errorKey) {
+        this.lastTypographyInternalScaleError = errorKey;
+        this.appendLspLog({
+          kind: "error",
+          source: "typography",
+          message: unsupportedInternalScale.message,
+        });
+        await message(unsupportedInternalScale.message, {
+          title: "Unsupported Built-in Font Scale",
+          kind: "error",
+        });
+      }
+      if (!this.activeFilePath || filePathKey(this.activeFilePath) !== documentKey) return;
+      const currentText = this.editorInstance.state.doc.toString();
+      const currentConfig = this.documentTypographyFromText(currentText);
+      if (!currentConfig || signature(currentConfig.fonts) !== signature(config.fonts)) {
+        this.scheduleManualTypographyScaleCheck();
+        return;
+      }
+      const corrected = this.resetUnsupportedInternalScales(currentConfig, unsupportedInternalScale.fonts);
+      const edit = parseTypographyBlock(currentText)
+        ? typographyEdit(currentText, corrected)
+        : documentScriptsEdit(currentText, corrected.fonts);
+      this.suppressTypographyScaleConfirmation = true;
+      try {
+        this.editorInstance.dispatch({
+          changes: edit,
+          userEvent: "input.typography-scale-correction",
+        });
+      } finally {
+        this.suppressTypographyScaleConfirmation = false;
+      }
+      this.lastTypographyInternalScaleError = "";
+      this.acceptedTypographyScales.set(documentKey, corrected.fonts.map(font => ({ ...font })));
+      await this.applyManualTypographyFontChange(corrected, filePath);
+      return;
+    }
+    this.lastTypographyInternalScaleError = "";
     const requiresConfirmation = config.fonts.some(font => {
       if (Math.abs(font.scale - 1) <= 0.0001) return false;
       const previous = previousFonts.find(candidate =>
@@ -3372,7 +3450,7 @@ export class TypsastraWorkspaceController {
 
     if (!this.activeFilePath || filePathKey(this.activeFilePath) !== documentKey) return;
     const currentText = this.editorInstance.state.doc.toString();
-    const currentConfig = parseTypographyBlock(currentText);
+    const currentConfig = this.documentTypographyFromText(currentText);
     if (!currentConfig || signature(currentConfig.fonts) !== signature(config.fonts)) {
       this.scheduleManualTypographyScaleCheck();
       return;
@@ -3383,7 +3461,7 @@ export class TypsastraWorkspaceController {
       return;
     }
 
-    const edit = typographyEdit(currentText, {
+    const revertedConfig = {
       ...currentConfig,
       fonts: currentConfig.fonts.map(font => ({
         ...font,
@@ -3391,7 +3469,10 @@ export class TypsastraWorkspaceController {
           candidate.script === font.script && candidate.family === font.family
         )?.scale ?? 1
       }))
-    });
+    };
+    const edit = parseTypographyBlock(currentText)
+      ? typographyEdit(currentText, revertedConfig)
+      : documentScriptsEdit(currentText, revertedConfig.fonts);
     this.suppressTypographyScaleConfirmation = true;
     try {
       this.editorInstance.dispatch({
@@ -6119,7 +6200,28 @@ export class TypsastraWorkspaceController {
 
   private async preparePinnedMainTypography(path: string): Promise<DocumentTypography | null | false> {
     try {
-      const config = parseTypographyBlock(await this.workspaceText(path));
+      let source = await this.workspaceText(path);
+      let config = this.documentTypographyFromText(source);
+      if (config) {
+        const unsupportedInternalScale = await this.unsupportedInternalScaleError(config);
+        if (unsupportedInternalScale) {
+          this.appendLspLog({
+            kind: "error",
+            source: "typography",
+            message: unsupportedInternalScale.message,
+          });
+          await message(unsupportedInternalScale.message, {
+            title: "Unsupported Built-in Font Scale",
+            kind: "error",
+          });
+          config = this.resetUnsupportedInternalScales(config, unsupportedInternalScale.fonts);
+          const edit = parseTypographyBlock(source)
+            ? typographyEdit(source, config)
+            : documentScriptsEdit(source, config.fonts);
+          source = this.applyEdit(source, edit);
+          await this.writeWorkspaceText(path, source);
+        }
+      }
       if (!this.workspaceRootPath) return config;
       const typography = config ?? { baseSizePt: 11, fonts: [] };
       const status = await this.scaledFontSetStatus(typography);
@@ -6253,6 +6355,7 @@ export class TypsastraWorkspaceController {
     this.typographyScaleCheckTimer = null;
     this.typographyScaleCheckGeneration += 1;
     this.acceptedTypographyScales.clear();
+    this.lastTypographyInternalScaleError = "";
     this.pdfPreviewGeneration += 1;
     this.pdfForwardSyncGeneration += 1;
     this.queuedPdfPreviewContents = null;
