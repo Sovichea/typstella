@@ -26,5 +26,8 @@ describe("modal focus navigation", () => {
     const source = await Bun.file(new URL("../src/editor/toolbarController.ts", import.meta.url)).text();
     expect(source).toContain('data-typography-drag-handle');
     expect(source).toContain('event.key === "ArrowUp"');
+    expect(source).toContain('window.addEventListener("pointermove", this.onTypographyPointerMove');
+    expect(source).toContain('dragHandle.setAttribute("draggable", "false")');
+    expect(source).toContain('dragHandle.addEventListener("dragstart", event => event.preventDefault())');
   });
 });

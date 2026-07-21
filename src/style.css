@@ -1793,6 +1793,9 @@ body.typsastra-resizing #input-container-wrapper::after {
   color: var(--ui-header-text);
   background: transparent;
   cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .document-typography-drag-handle::before {
@@ -1816,6 +1819,10 @@ body.typsastra-resizing #input-container-wrapper::after {
 .toolbar-font-fallback-row.is-dragging {
   opacity: 0.55;
   background: color-mix(in srgb, var(--ui-accent-color) 10%, transparent);
+}
+
+.toolbar-font-fallback-row.is-dragging .document-typography-drag-handle {
+  cursor: grabbing;
 }
 
 .visually-hidden {

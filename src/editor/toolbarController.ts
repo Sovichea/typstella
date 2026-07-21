@@ -79,11 +79,28 @@ export class EditorToolbarController {
   private coverageGeneration = 0;
   private typographyReturnFocus: HTMLElement | null = null;
   private draggedTypographyRow: HTMLElement | null = null;
+  private typographyDragPointerId: number | null = null;
+
+  private readonly onTypographyPointerMove = (event: PointerEvent): void => {
+    const row = this.draggedTypographyRow;
+    if (!row || this.typographyDragPointerId !== event.pointerId) return;
+    event.preventDefault();
+    this.reorderTypographyRowAt(row, event.clientY);
+  };
+
+  private readonly onTypographyPointerUp = (event: PointerEvent): void => {
+    if (!this.draggedTypographyRow || this.typographyDragPointerId !== event.pointerId) return;
+    event.preventDefault();
+    this.finishTypographyDrag(event.type === "pointerup");
+  };
 
   constructor(private readonly dependencies: EditorToolbarDependencies) {}
 
   public initialize(): void {
     void this.initializeTypographyControls();
+    window.addEventListener("pointermove", this.onTypographyPointerMove, { passive: false });
+    window.addEventListener("pointerup", this.onTypographyPointerUp);
+    window.addEventListener("pointercancel", this.onTypographyPointerUp);
     document.addEventListener("typsastra:system-fonts-changed", () => void this.initializeTypographyControls());
     document.addEventListener("typsastra:language-providers-changed", () => void this.initializeTypographyControls());
     document.getElementById("toolbar-typography-apply")?.addEventListener("click", event => {
@@ -265,6 +282,27 @@ export class EditorToolbarController {
     row.querySelector<HTMLButtonElement>("[data-typography-drag-handle]")?.focus();
   }
 
+  private reorderTypographyRowAt(row: HTMLElement, clientY: number): void {
+    const container = this.fallbackContainer();
+    if (!container) return;
+    const insertionTarget = this.fallbackRows()
+      .filter(candidate => candidate !== row)
+      .find(candidate => {
+        const bounds = candidate.getBoundingClientRect();
+        return clientY < bounds.top + bounds.height / 2;
+      });
+    container.insertBefore(row, insertionTarget ?? null);
+  }
+
+  private finishTypographyDrag(announce: boolean): void {
+    const dragged = this.draggedTypographyRow;
+    if (!dragged) return;
+    if (announce) this.announceTypographyOrder(dragged);
+    dragged.classList.remove("is-dragging");
+    this.draggedTypographyRow = null;
+    this.typographyDragPointerId = null;
+  }
+
   private languageOptions(scriptId: string): Array<{ tag: string; label: string; installed: boolean }> {
     const script = typographyScripts.find((candidate) => candidate.id === scriptId);
     if (!script) return [];
@@ -370,7 +408,8 @@ export class EditorToolbarController {
     dragHandle.type = "button";
     dragHandle.className = "document-typography-drag-handle";
     dragHandle.dataset.typographyDragHandle = "";
-    dragHandle.draggable = true;
+    dragHandle.draggable = false;
+    dragHandle.setAttribute("draggable", "false");
     dragHandle.setAttribute("aria-label", `Reorder ${typographyScripts.find(candidate => candidate.id === fallback.script)?.label ?? fallback.script} script`);
     dragHandle.title = "Drag to reorder; use Up or Down Arrow while focused";
     const script = document.createElement("select");
@@ -470,32 +509,15 @@ export class EditorToolbarController {
       event.preventDefault();
       this.moveTypographyRow(row, event.key === "ArrowUp" ? -1 : 1);
     });
-    dragHandle.addEventListener("dragstart", event => {
+    dragHandle.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      dragHandle.focus();
       this.draggedTypographyRow = row;
+      this.typographyDragPointerId = event.pointerId;
       row.classList.add("is-dragging");
-      if (event.dataTransfer) {
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", this.rowScript(row).value);
-      }
     });
-    row.addEventListener("dragover", event => {
-      const dragged = this.draggedTypographyRow;
-      const container = this.fallbackContainer();
-      if (!dragged || !container || dragged === row) return;
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
-      const before = event.clientY < row.getBoundingClientRect().top + row.getBoundingClientRect().height / 2;
-      container.insertBefore(dragged, before ? row : row.nextSibling);
-    });
-    row.addEventListener("drop", event => {
-      if (!this.draggedTypographyRow) return;
-      event.preventDefault();
-      this.announceTypographyOrder(this.draggedTypographyRow);
-    });
-    dragHandle.addEventListener("dragend", () => {
-      this.draggedTypographyRow?.classList.remove("is-dragging");
-      this.draggedTypographyRow = null;
-    });
+    dragHandle.addEventListener("dragstart", event => event.preventDefault());
     return row;
   }
 
