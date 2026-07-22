@@ -6694,6 +6694,7 @@ export class TypsastraWorkspaceController {
     this.clearPendingLspSync();
     this.previewSyncController.clearForward();
     this.clearDiagnostics();
+    this.logConsoleController.clearLogs();
 
     this.isLoadingFile = true;
     try {
@@ -7158,6 +7159,7 @@ export class TypsastraWorkspaceController {
 
     document.getElementById("action-restart-lsp")?.addEventListener("click", async () => {
       const activePath = this.activeFilePath;
+      this.logConsoleController.clearLogs();
       this.previewFrame.clear();
       try {
         await this.restartTinymistSession("Restarting LSP...");

@@ -7,6 +7,15 @@ const explorer = readFileSync(new URL("../src/components/explorer.ts", import.me
 const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
 
 describe("theme-aware application accents", () => {
+  test("uses the shared UI typography for log-console actions", async () => {
+    const css = await Bun.file(new URL("../src/style.css", import.meta.url)).text();
+    const actions = css.slice(
+      css.indexOf(".log-console-actions button"),
+      css.indexOf(".log-console-actions button:hover")
+    );
+    expect(actions).toContain("font: 11px var(--font-family-sans)");
+  });
+
   test("uses the active theme for the no-main-file placeholder", () => {
     expect(controller).toContain("preview-disabled-title preview-accent-title");
     expect(controller).not.toContain("color:#3db489");

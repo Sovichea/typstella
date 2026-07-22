@@ -2260,8 +2260,12 @@ body.typsastra-resizing #input-container-wrapper::after {
   border-radius: 4px;
   background: var(--ui-bg);
   color: var(--ui-text);
-  font: inherit;
+  font: 11px var(--font-family-sans);
   cursor: pointer;
+}
+
+#log-console-close {
+  font-size: 14px;
 }
 
 .log-console-actions button:hover {

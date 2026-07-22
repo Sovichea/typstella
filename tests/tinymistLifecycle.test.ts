@@ -61,4 +61,16 @@ describe("Tinymist workspace lifecycle", () => {
     expect(source).toContain("this.resetUnsupportedInternalScales");
     expect(source).toContain("Typsastra will reset their scale to 1×");
   });
+
+  test("clears logs at user-requested lifecycle boundaries", async () => {
+    const source = await Bun.file(new URL("../src/appController.ts", import.meta.url)).text();
+    const closeProject = source.indexOf("private async closeProject");
+    const closeClear = source.indexOf("this.logConsoleController.clearLogs();", closeProject);
+    const manualRestart = source.indexOf('document.getElementById("action-restart-lsp")');
+    const restartClear = source.indexOf("this.logConsoleController.clearLogs();", manualRestart);
+    const restartCall = source.indexOf('restartTinymistSession("Restarting LSP..."', manualRestart);
+    expect(closeClear).toBeGreaterThan(closeProject);
+    expect(restartClear).toBeGreaterThan(manualRestart);
+    expect(restartClear).toBeLessThan(restartCall);
+  });
 });
