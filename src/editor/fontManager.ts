@@ -1,4 +1,5 @@
 import type { EditorView } from "@codemirror/view";
+import type { StateEffect } from "@codemirror/state";
 import { invoke } from "@tauri-apps/api/core";
 import { editorFontCompartment } from "./extensions";
 import {
@@ -65,12 +66,17 @@ export class EditorFontManager {
   }
 
   public updateDocument(text: string): void {
+    const effect = this.prepareDocument(text);
+    if (effect) this.getEditorView()?.dispatch({ effects: effect });
+  }
+
+  public prepareDocument(text: string): StateEffect<unknown> | null {
     if (this.documentUpdateTimer !== null) {
       window.clearTimeout(this.documentUpdateTimer);
       this.documentUpdateTimer = null;
     }
     this.documentText = text;
-    this.refresh();
+    return this.refresh(false);
   }
 
   public scheduleDocumentUpdate(text: string, delay = 160): void {
@@ -93,7 +99,7 @@ export class EditorFontManager {
     }
   }
 
-  private refresh(): void {
+  private refresh(dispatchEffect = true): StateEffect<unknown> | null {
     const detected = detectUnicodeEditorFonts(this.documentText);
     const families: string[] = [];
     const missing: UnicodeFontCandidate[] = [];
@@ -109,19 +115,20 @@ export class EditorFontManager {
     if (detected.length === 0 && this.unicodePreference !== "auto" && this.unicodePreference !== "none") {
       families.push(this.unicodePreference);
     }
-    this.applyStack(families);
+    const effect = this.applyStack(families, dispatchEffect);
     this.activeCandidates = missing;
     if (missing.length === 0) {
       this.hide();
-      return;
+      return effect;
     }
     const declined = this.declinedIds();
     this.activeCandidates = missing.filter(candidate => !declined.has(candidate.id));
     if (this.activeCandidates.length === 0) {
       this.hide();
-      return;
+      return effect;
     }
     this.renderPrompt(this.activeCandidates);
+    return effect;
   }
 
   private renderPrompt(candidates: UnicodeFontCandidate[]): void {
@@ -218,7 +225,10 @@ export class EditorFontManager {
     }
   }
 
-  private applyStack(unicodeFamilies: readonly string[] = []): void {
+  private applyStack(
+    unicodeFamilies: readonly string[] = [],
+    dispatchEffect = true
+  ): StateEffect<unknown> | null {
     const stack = codeEditorFontStack(this.codeFont, unicodeFamilies);
     const uiStack = [...new Set(["MiSans Latin", ...unicodeFamilies])]
       .map(family => `"${family.replace(/"/g, '\\"')}"`)
@@ -226,8 +236,10 @@ export class EditorFontManager {
     document.documentElement.style.setProperty("--ui-font", uiStack);
     document.documentElement.style.setProperty("--editor-code-font", stack);
     document.documentElement.style.setProperty("--editor-unicode-font", unicodeFamilies.length > 0 ? uiStack : "sans-serif");
-    if (this.appliedStack === stack) return;
+    if (this.appliedStack === stack) return null;
     this.appliedStack = stack;
-    this.getEditorView()?.dispatch({ effects: editorFontCompartment.reconfigure(editorFontTheme(stack)) });
+    const effect = editorFontCompartment.reconfigure(editorFontTheme(stack));
+    if (dispatchEffect) this.getEditorView()?.dispatch({ effects: effect });
+    return effect;
   }
 }

@@ -7,6 +7,17 @@ import {
 } from "../src/editor/fontCatalog";
 
 describe("editor font catalog", () => {
+  test("applies a tab's Unicode font policy before installing its text", async () => {
+    const source = await Bun.file(new URL("../src/appController.ts", import.meta.url)).text();
+    const activation = source.indexOf("private async activateEditorTab");
+    const fontUpdate = source.indexOf("this.editorFontManager.prepareDocument(tab.content);", activation);
+    const documentDispatch = source.indexOf("this.editorInstance.dispatch({", fontUpdate);
+    expect(fontUpdate).toBeGreaterThan(activation);
+    expect(documentDispatch).toBeGreaterThan(fontUpdate);
+    expect(source.slice(documentDispatch, source.indexOf("});", documentDispatch) + 3))
+      .toContain("effects: editorFontEffect ? [editorFontEffect] : undefined");
+  });
+
   test("defaults to bundled Fira Mono and contains no UI fonts", () => {
     expect(codeEditorFonts[0].id).toBe("Fira Mono");
     expect(codeEditorFonts.every(font => font.fontFamily !== "MiSans Latin")).toBe(true);

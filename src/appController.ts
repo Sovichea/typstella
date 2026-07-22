@@ -1816,7 +1816,10 @@ export class TypsastraWorkspaceController {
   private async activateEditorTab(path: string, persistCurrent = true, options: ActivateEditorTabOptions = {}) {
     this.explorer.setActiveFile(path);
     if (this.workspaceRootPath) {
-      await this.explorer.revealPath(path);
+      // Revealing may rescan expanded directories. It must not delay the tab
+      // highlight or editor swap; the explorer generation guard ensures only
+      // the latest requested reveal commits.
+      void this.explorer.revealPath(path);
     }
     const tab = this.openTabs.find((candidate) => filePathKey(candidate.path) === filePathKey(path));
     const sameActivePath = this.activeFilePath !== null && filePathKey(this.activeFilePath) === filePathKey(path);
@@ -1962,6 +1965,11 @@ export class TypsastraWorkspaceController {
         }
       }
 
+      // Apply the destination document's script-aware font stack before its
+      // text becomes visible. Updating it later allows one paint with the
+      // previous tab's fallback stack, which is especially noticeable for
+      // Khmer text.
+      const editorFontEffect = this.editorFontManager.prepareDocument(tab.content);
       this.editorInstance.dispatch({
         changes: { from: 0, to: this.editorInstance.state.doc.length, insert: tab.content },
         selection: {
@@ -1971,12 +1979,17 @@ export class TypsastraWorkspaceController {
         // A tab load is navigation, not an edit. Recording full-document
         // replacements in the shared history retains every visited document
         // and makes undo cross file boundaries.
-        annotations: Transaction.addToHistory.of(false)
+        annotations: Transaction.addToHistory.of(false),
+        effects: editorFontEffect ? [editorFontEffect] : undefined
       });
     } finally {
       this.isLoadingFile = false;
     }
     this.restoreTabFoldState(tab);
+    // Commit the visible tab selection before resolving typography through a
+    // potentially unloaded template file.
+    this.activeFilePath = path;
+    this.renderEditorTabs();
     const activeTypography = await this.effectiveDocumentTypography(path, tab.content);
     if (activeTypography) {
       this.editorToolbarController.synchronizeDocumentTypography(activeTypography);
@@ -1989,7 +2002,6 @@ export class TypsastraWorkspaceController {
       });
     }
 
-    this.activeFilePath = path;
     if (path.toLowerCase().endsWith(".typ")) this.diagnosticWaitStartedAt = performance.now();
     let previewPresentationReused = false;
     let previewGuarded = false;
@@ -2045,7 +2057,6 @@ export class TypsastraWorkspaceController {
     this.clearPendingLspSync();
     this.previewSyncController.clearForward();
     this.renderEditorTabs();
-    this.editorFontManager.updateDocument(tab.content);
     this.spellcheckController.schedule();
     if (path.toLowerCase().endsWith(".typ")) {
       this.scheduleDocumentOutlineUpdate(path, 0);
@@ -5542,19 +5553,22 @@ export class TypsastraWorkspaceController {
     const selection = this.editorInstance.state.selection.main;
     this.isLoadingFile = true;
     try {
+      // Keep external reloads atomic from the user's perspective as well: the
+      // matching Unicode font policy must precede the replacement text.
+      const editorFontEffect = this.editorFontManager.prepareDocument(contents);
       this.editorInstance.dispatch({
         changes: { from: 0, to: this.editorInstance.state.doc.length, insert: contents },
         selection: {
           anchor: Math.min(selection.anchor, contents.length),
           head: Math.min(selection.head, contents.length)
-        }
+        },
+        effects: editorFontEffect ? [editorFontEffect] : undefined
       });
     } finally {
       this.isLoadingFile = false;
     }
 
     this.renderEditorTabs();
-    this.editorFontManager.updateDocument(contents);
     if (tab.path.toLowerCase().endsWith(".typ")) {
       void this.documentOutlineController.update(
         tab.path, 

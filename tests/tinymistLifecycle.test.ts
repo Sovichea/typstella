@@ -47,7 +47,11 @@ describe("Tinymist workspace lifecycle", () => {
       "this.editorToolbarController.synchronizeDocumentTypography(activeTypography)",
       tabDispatch,
     );
+    const activeTabCommit = source.indexOf("this.activeFilePath = path;", tabDispatch);
+    const typographyResolve = source.indexOf("await this.effectiveDocumentTypography(path, tab.content)", tabDispatch);
     expect(tabDispatch).toBeGreaterThan(activation);
+    expect(activeTabCommit).toBeGreaterThan(tabDispatch);
+    expect(activeTabCommit).toBeLessThan(typographyResolve);
     expect(typographySync).toBeGreaterThan(tabDispatch);
   });
 
