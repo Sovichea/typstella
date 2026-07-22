@@ -32,7 +32,7 @@ import {
   tinymistDataPlaneFrameKind,
   tinymistDataPlanePositionText
 } from "./preview/tinymistDataPlane";
-import { activeFileCanRenderPreview, allowsStandalonePreview, participatesInPreviewCompilation, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, tinymistPreviewPreferredSourceColumn, usesTemplateAwareStandaloneRoot, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
+import { activeFileCanRenderPreview, allowsStandalonePreview, participatesInPreviewCompilation, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, previewTargetStartsMainCompiler, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, tinymistPreviewPreferredSourceColumn, usesTemplateAwareStandaloneRoot, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
 import { LogConsoleController, spellcheckConsoleGroupKey, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
 import { EditorFontManager } from "./editor/fontManager";
 import { TabStripController } from "./editor/tabStripController";
@@ -54,7 +54,7 @@ import {
 import { RecentProjectsController, recentProjectShortcutIndex } from "./workspace/recentProjectsController";
 import { WorkspaceWatcher, type WorkspaceChange } from "./workspace/workspaceWatcher";
 import { workspaceViewportState } from "./workspace/workspaceVisibility";
-import { formatFileSize, largeFileOpeningNotice, type LargeFileOpeningNotice } from "./workspace/largeFileOpening";
+import { formatFileSize, largeFileOpeningNotice, largeMainPreviewOpeningNotice, type LargeFileOpeningNotice } from "./workspace/largeFileOpening";
 import { installWelcomeKeyboardNavigation } from "./workspace/welcomeNavigation";
 import { PerformanceDiagnostics, type PerformanceMetric } from "./performance/diagnostics";
 import { EditorToolbarController } from "./editor/toolbarController";
@@ -1657,7 +1657,65 @@ export class TypsastraWorkspaceController {
         return null;
       }
     }
-    return largeFileOpeningNotice(tab.path, tab.sizeBytes, tab.lineCount);
+    const lineNotice = largeFileOpeningNotice(tab.path, tab.sizeBytes, tab.lineCount);
+    if (lineNotice) return lineNotice;
+    return this.largeMainPreviewNoticeForTab(tab);
+  }
+
+  private activeCompilerPreviewMatchesRoot(rootPath: string): boolean {
+    const activeRootMatches = [this.previewRootPath, this.previewMainPath]
+      .some(path => path !== null && filePathKey(path) === filePathKey(rootPath));
+    const mountedSessionMatches = Boolean(
+      this.previewSessionKey
+      && this.previewFrame.currentSessionKey === this.previewSessionKey
+      && this.previewFrame.currentUrl
+    );
+    const lspAlreadyOwnsRoot = Boolean(
+      this.lspReady
+      && this.pinnedLspMainPath
+      && filePathKey(this.pinnedLspMainPath) === filePathKey(rootPath)
+    );
+    return lspAlreadyOwnsRoot || (activeRootMatches && mountedSessionMatches);
+  }
+
+  private async largeMainPreviewNoticeForTab(tab: EditorTab): Promise<LargeFileOpeningNotice | null> {
+    if (
+      !this.workspaceRootPath
+      || !this.pinnedMainFilePath
+      || !isTypstDocumentPath(tab.path)
+      || filePathKey(tab.path) === filePathKey(this.pinnedMainFilePath)
+    ) return null;
+
+    let target: PreviewTarget;
+    try {
+      target = await invoke<PreviewTarget>("resolve_preview_main", {
+        filePath: tab.path,
+        workspaceRootPath: this.workspaceRootPath,
+        fileContents: null,
+        pinnedMainPath: this.pinnedMainFilePath
+      });
+    } catch {
+      return null;
+    }
+    if (!previewTargetStartsMainCompiler(tab.path, target)) return null;
+    const rootPath = target.rootPath;
+    if (this.activeCompilerPreviewMatchesRoot(rootPath)) return null;
+
+    let sizeBytes: number;
+    try {
+      sizeBytes = await invoke<number>("workspace_file_size", { path: rootPath });
+    } catch {
+      return null;
+    }
+    const sizeNotice = largeMainPreviewOpeningNotice(rootPath, sizeBytes);
+    if (sizeNotice) return sizeNotice;
+
+    try {
+      const lineCount = await invoke<number>("workspace_text_line_count", { path: rootPath });
+      return largeMainPreviewOpeningNotice(rootPath, sizeBytes, lineCount);
+    } catch {
+      return null;
+    }
   }
 
   private async showReleaseSummaryIfNeeded(): Promise<void> {
@@ -5496,7 +5554,11 @@ export class TypsastraWorkspaceController {
 
       const title = document.createElement("div");
       title.className = "preview-disabled-title";
-      title.textContent = notice.kind === "pdf" ? "Large PDF Document" : "Large Text File";
+      title.textContent = notice.kind === "pdf"
+        ? "Large PDF Document"
+        : notice.kind === "main-preview"
+          ? "Large Main Document Preview"
+          : "Large Text File";
 
       const fileName = document.createElement("div");
       fileName.className = "editor-file-placeholder-name";
@@ -5506,23 +5568,28 @@ export class TypsastraWorkspaceController {
       description.className = "preview-disabled-msg";
       const work = notice.kind === "pdf"
         ? "Opening it will decode the PDF and begin rendering visible pages."
-        : "Opening it will initialize the editor, folding, outline, and language tools.";
+        : notice.kind === "main-preview"
+          ? `This project dependency previews through ${fileNameFromPath(notice.previewRootPath ?? "the configured main file")}. Opening it will start the compiler for that large main document.`
+          : "Opening it will initialize the editor, folding, outline, and language tools.";
       const scale = notice.lineCount !== undefined
         ? `${notice.lineCount.toLocaleString()} lines, ${formatFileSize(notice.sizeBytes)}`
         : formatFileSize(notice.sizeBytes);
-      description.textContent = `This file is ${scale}. ${work}`;
+      description.textContent = notice.kind === "main-preview"
+        ? `The effective preview root is ${scale}. ${work}`
+        : `This file is ${scale}. ${work}`;
 
       const confirmButton = document.createElement("button");
       confirmButton.type = "button";
       confirmButton.className = "editor-file-placeholder-action";
-      confirmButton.textContent = "Open Large File";
+      const confirmLabel = notice.kind === "main-preview" ? "Open and Compile Main" : "Open Large File";
+      confirmButton.textContent = confirmLabel;
       confirmButton.addEventListener("click", () => {
         confirmButton.disabled = true;
         confirmButton.textContent = "Opening…";
         void this.activateEditorTab(path, false, { largeFileConfirmed: true }).catch(error => {
           console.error("Failed to open large file:", error);
           confirmButton.disabled = false;
-          confirmButton.textContent = "Open Large File";
+          confirmButton.textContent = confirmLabel;
           void message(`Could not open ${fileNameFromPath(path)}: ${String(error)}`, {
             title: "Unable to Open File",
             kind: "error"
@@ -5551,8 +5618,8 @@ export class TypsastraWorkspaceController {
     this.updatePreviewActionsToolbar(path);
     this.previewFrame.setMessage(
       `<div class="preview-disabled-placeholder">`
-      + `<div class="preview-disabled-title">Large file not loaded</div>`
-      + `<div class="preview-disabled-msg">Confirm opening this file in the editor pane to start processing it.</div>`
+      + `<div class="preview-disabled-title">${notice.kind === "main-preview" ? "Large main preview not started" : "Large file not loaded"}</div>`
+      + `<div class="preview-disabled-msg">${notice.kind === "main-preview" ? "Confirm in the editor pane before Typsastra compiles the configured main document." : "Confirm opening this file in the editor pane to start processing it."}</div>`
       + `</div>`
     );
     this.updateManualForwardSyncAction();

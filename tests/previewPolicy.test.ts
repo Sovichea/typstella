@@ -1,7 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { activeFileCanRenderPreview, allowsStandalonePreview, participatesInPreviewCompilation, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, supportsResponsivePartialRendering, tinymistPreviewArguments, tinymistPreviewByteColumn, tinymistPreviewNearbyByteColumns, tinymistPreviewNearbySourceColumns, tinymistPreviewPreferredSourceColumn, tinymistPreviewSourceColumn, usesTemplateAwareStandaloneRoot } from "../src/preview/previewPolicy";
+import { activeFileCanRenderPreview, allowsStandalonePreview, participatesInPreviewCompilation, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, previewTargetStartsMainCompiler, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, supportsResponsivePartialRendering, tinymistPreviewArguments, tinymistPreviewByteColumn, tinymistPreviewNearbyByteColumns, tinymistPreviewNearbySourceColumns, tinymistPreviewPreferredSourceColumn, tinymistPreviewSourceColumn, usesTemplateAwareStandaloneRoot } from "../src/preview/previewPolicy";
 
 describe("preview policy", () => {
+  test("guards the main compiler for included chapters and imported libraries", () => {
+    const mainTarget = {
+      rootPath: "C:\\project\\main.typ",
+      mainPath: "C:\\project\\main.typ",
+      imported: true,
+      standalone: false,
+      disabled: false,
+    };
+    expect(previewTargetStartsMainCompiler("C:\\project\\chapter.typ", mainTarget)).toBe(true);
+    expect(previewTargetStartsMainCompiler("C:\\project\\template.typ", mainTarget)).toBe(true);
+    expect(previewTargetStartsMainCompiler("C:\\project\\main.typ", mainTarget)).toBe(false);
+    expect(previewTargetStartsMainCompiler("C:\\project\\unrelated.typ", {
+      ...mainTarget,
+      rootPath: "C:\\project\\unrelated.typ",
+      imported: false,
+      standalone: true,
+      disabled: true,
+    })).toBe(false);
+  });
   test("keeps unrelated files out of preview compilation", () => {
     expect(participatesInPreviewCompilation("C:\\work\\main.typ", "c:/work/main.typ", false)).toBe(true);
     expect(participatesInPreviewCompilation("C:/work/chapter.typ", "C:/work/main.typ", true)).toBe(true);

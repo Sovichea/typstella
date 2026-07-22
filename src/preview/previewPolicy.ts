@@ -47,6 +47,19 @@ export function previewLspMainPath(target: Pick<PreviewTarget, "rootPath" | "mai
   return target.standalone ? target.rootPath : (target.mainPath ?? target.rootPath);
 }
 
+export function previewTargetStartsMainCompiler(
+  activePath: string,
+  target: Pick<PreviewTarget, "rootPath" | "imported" | "standalone" | "disabled">
+): target is typeof target & { rootPath: string } {
+  return Boolean(
+    target.rootPath
+    && !target.disabled
+    && target.imported
+    && !target.standalone
+    && filePathKey(target.rootPath) !== filePathKey(activePath)
+  );
+}
+
 export function participatesInPreviewCompilation(
   activePath: string | null,
   pinnedMainPath: string | null,

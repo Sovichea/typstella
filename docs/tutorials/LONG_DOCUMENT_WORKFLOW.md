@@ -10,7 +10,10 @@ work than an ordinary chapter.
 Typsastra restores inactive tabs lazily. A large text file or PDF is not loaded
 until activated, and activation asks for confirmation in the editor pane. This
 keeps workspace startup responsive even when the previous session contained
-large files.
+large files. The same guard applies when a small included chapter, imported
+template, or imported library would start a large configured main-document
+preview: Typsastra reports the effective main preview size and waits for
+confirmation before starting Tinymist.
 
 ## Navigate the preview directly
 

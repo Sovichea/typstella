@@ -5,6 +5,7 @@ import {
   LARGE_TEXT_FILE_LINES,
   formatFileSize,
   largeFileOpeningNotice,
+  largeMainPreviewOpeningNotice,
 } from "../src/workspace/largeFileOpening";
 
 describe("large file opening notice", () => {
@@ -32,6 +33,26 @@ describe("large file opening notice", () => {
   test("does not classify binary images or unsupported files as large text", () => {
     expect(largeFileOpeningNotice("figure.png", LARGE_PDF_FILE_BYTES)).toBeNull();
     expect(largeFileOpeningNotice("archive.zip", LARGE_PDF_FILE_BYTES)).toBeNull();
+  });
+
+  test("describes a large Typst preview root separately from the opened chapter", () => {
+    expect(largeMainPreviewOpeningNotice("book.typ", LARGE_TEXT_FILE_BYTES)).toEqual({
+      kind: "main-preview",
+      sizeBytes: LARGE_TEXT_FILE_BYTES,
+      previewRootPath: "book.typ",
+    });
+    expect(largeMainPreviewOpeningNotice(
+      "book.typ",
+      200 * 1024,
+      LARGE_TEXT_FILE_LINES,
+    )).toEqual({
+      kind: "main-preview",
+      sizeBytes: 200 * 1024,
+      lineCount: LARGE_TEXT_FILE_LINES,
+      previewRootPath: "book.typ",
+    });
+    expect(largeMainPreviewOpeningNotice("book.typ", LARGE_TEXT_FILE_BYTES - 1)).toBeNull();
+    expect(largeMainPreviewOpeningNotice("book.pdf", LARGE_PDF_FILE_BYTES)).toBeNull();
   });
 
   test("formats the size for the user-facing status", () => {

@@ -1843,7 +1843,7 @@ mod preview_main_tests {
             draft_path.to_string_lossy().to_string(),
             Some(workspace.path().to_string_lossy().to_string()),
             Some("// @standalone-preview\nUnsaved chapter".to_string()),
-            None,
+            Some(main_path.to_string_lossy().to_string()),
         )
         .expect("resolve preview");
 

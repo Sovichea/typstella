@@ -160,6 +160,10 @@ export class PreviewFrame {
     return this.mountedUrl;
   }
 
+  public get currentSessionKey(): string {
+    return this.mountedSessionKey;
+  }
+
   public get currentZoomPercent(): number {
     return this.previewZoomPercent;
   }

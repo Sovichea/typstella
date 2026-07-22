@@ -5,9 +5,10 @@ export const LARGE_TEXT_FILE_LINES = 10_000;
 export const LARGE_PDF_FILE_BYTES = 20 * 1024 * 1024;
 
 export type LargeFileOpeningNotice = {
-  kind: "text" | "pdf";
+  kind: "text" | "pdf" | "main-preview";
   sizeBytes: number;
   lineCount?: number;
+  previewRootPath?: string;
 };
 
 export function largeFileOpeningNotice(path: string, sizeBytes: number, lineCount?: number): LargeFileOpeningNotice | null {
@@ -20,6 +21,22 @@ export function largeFileOpeningNotice(path: string, sizeBytes: number, lineCoun
   return lineCount === undefined
     ? { kind: "text", sizeBytes }
     : { kind: "text", sizeBytes, lineCount };
+}
+
+export function largeMainPreviewOpeningNotice(
+  previewRootPath: string,
+  sizeBytes: number,
+  lineCount?: number,
+): LargeFileOpeningNotice | null {
+  if (fileExtension(previewRootPath) !== "typ") return null;
+  const sourceNotice = largeFileOpeningNotice(previewRootPath, sizeBytes, lineCount);
+  if (sourceNotice?.kind !== "text") return null;
+  return {
+    kind: "main-preview",
+    sizeBytes: sourceNotice.sizeBytes,
+    lineCount: sourceNotice.lineCount,
+    previewRootPath,
+  };
 }
 
 export function formatFileSize(sizeBytes: number): string {
