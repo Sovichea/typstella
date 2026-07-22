@@ -28,6 +28,10 @@ describe("Tinymist workspace lifecycle", () => {
     expect(source).toContain('restartTinymistSession("Restarting Tinymist for the new main file..."');
     expect(source).toContain('stopTinymistSession("Project closed")');
     expect(source).toContain("tinymistLifecycleQueue");
+    const unpinReset = source.indexOf("this.blockedLargePreviewRoot = null", source.indexOf("private async setPinnedMainFile"));
+    const previewGate = source.indexOf("ensureLargePreviewApproved(path", source.indexOf("private async setPinnedMainFile"));
+    expect(unpinReset).toBeGreaterThan(-1);
+    expect(unpinReset).toBeLessThan(previewGate);
   });
 
   test("corrects unsupported compiler-font scales after reporting them", async () => {

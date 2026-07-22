@@ -9,6 +9,7 @@ export type LargeFileOpeningNotice = {
   sizeBytes: number;
   lineCount?: number;
   previewRootPath?: string;
+  previewSourceFiles?: number;
 };
 
 export function largeFileOpeningNotice(path: string, sizeBytes: number, lineCount?: number): LargeFileOpeningNotice | null {
@@ -27,6 +28,7 @@ export function largeMainPreviewOpeningNotice(
   previewRootPath: string,
   sizeBytes: number,
   lineCount?: number,
+  previewSourceFiles?: number,
 ): LargeFileOpeningNotice | null {
   if (fileExtension(previewRootPath) !== "typ") return null;
   const sourceNotice = largeFileOpeningNotice(previewRootPath, sizeBytes, lineCount);
@@ -36,6 +38,7 @@ export function largeMainPreviewOpeningNotice(
     sizeBytes: sourceNotice.sizeBytes,
     lineCount: sourceNotice.lineCount,
     previewRootPath,
+    previewSourceFiles,
   };
 }
 

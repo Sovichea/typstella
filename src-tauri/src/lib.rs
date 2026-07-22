@@ -1141,6 +1141,51 @@ fn local_typst_dependencies(contents: &str, parent: &std::path::Path) -> Vec<std
     dependencies
 }
 
+#[derive(serde::Serialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct TypstPreviewSourceStats {
+    size_bytes: u64,
+    line_count: u64,
+    file_count: u64,
+}
+
+fn collect_typst_preview_source_stats(root_path: &std::path::Path) -> TypstPreviewSourceStats {
+    use std::collections::{HashSet, VecDeque};
+
+    let mut stats = TypstPreviewSourceStats {
+        size_bytes: 0,
+        line_count: 0,
+        file_count: 0,
+    };
+    let mut visited = HashSet::new();
+    let mut pending = VecDeque::from([normalized_existing_path(root_path)]);
+    while let Some(path) = pending.pop_front() {
+        if !visited.insert(path.clone()) {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        stats.size_bytes = stats.size_bytes.saturating_add(bytes.len() as u64);
+        stats.line_count = stats.line_count.saturating_add(
+            bytes.iter().filter(|byte| **byte == b'\n').count() as u64
+                + u64::from(!bytes.is_empty() && !bytes.ends_with(b"\n")),
+        );
+        stats.file_count = stats.file_count.saturating_add(1);
+        let Ok(contents) = std::str::from_utf8(&bytes) else {
+            continue;
+        };
+        let parent = path.parent().unwrap_or(std::path::Path::new(""));
+        pending.extend(local_typst_dependencies(contents, parent));
+    }
+    stats
+}
+
+#[tauri::command]
+fn typst_preview_source_stats(root_path: String) -> TypstPreviewSourceStats {
+    collect_typst_preview_source_stats(std::path::Path::new(&root_path))
+}
+
 fn collect_typst_files(root: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
@@ -1731,7 +1776,43 @@ async fn compile_typst_pdf_preview(
 
 #[cfg(test)]
 mod preview_main_tests {
-    use super::{cleanup_workspace_preview_files, resolve_preview_target};
+    use super::{
+        cleanup_workspace_preview_files, collect_typst_preview_source_stats,
+        resolve_preview_target, TypstPreviewSourceStats,
+    };
+
+    #[test]
+    fn preview_stats_include_reachable_chapters_and_templates_once() {
+        let workspace = tempfile::tempdir().expect("create workspace");
+        let main_path = workspace.path().join("main.typ");
+        let chapter_path = workspace.path().join("chapter.typ");
+        let template_path = workspace.path().join("template.typ");
+        std::fs::write(
+            &main_path,
+            "#import \"template.typ\": *\n#include \"chapter.typ\"\n",
+        )
+        .expect("write main");
+        std::fs::write(
+            &chapter_path,
+            "#import \"template.typ\": *\nChapter\n",
+        )
+        .expect("write chapter");
+        std::fs::write(&template_path, "Template\n").expect("write template");
+
+        let stats = collect_typst_preview_source_stats(&main_path);
+        let expected_size = [&main_path, &chapter_path, &template_path]
+            .iter()
+            .map(|path| std::fs::metadata(path).expect("metadata").len())
+            .sum();
+        assert_eq!(
+            stats,
+            TypstPreviewSourceStats {
+                size_bytes: expected_size,
+                line_count: 5,
+                file_count: 3,
+            }
+        );
+    }
 
     #[test]
     fn cleanup_only_removes_managed_preview_entries() {
@@ -2737,6 +2818,7 @@ pub fn run() {
             move_to_trash,
             reveal_in_explorer,
             resolve_preview_main,
+            typst_preview_source_stats,
             ensure_toolchain,
             get_toolchain_status,
             list_system_fonts,

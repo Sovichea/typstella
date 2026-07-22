@@ -1278,6 +1278,40 @@ export class PreviewFrame {
     this.messageHost = host;
   }
 
+  public setConfirmationMessage(options: {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    onConfirm: () => void | Promise<void>;
+  }): void {
+    this.setMessage("");
+    const host = this.messageHost;
+    if (!host) return;
+    const placeholder = document.createElement("div");
+    placeholder.className = "preview-disabled-placeholder";
+    const title = document.createElement("div");
+    title.className = "preview-disabled-title";
+    title.textContent = options.title;
+    const description = document.createElement("div");
+    description.className = "preview-disabled-msg";
+    description.textContent = options.message;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "editor-file-placeholder-action";
+    button.textContent = options.confirmLabel;
+    button.addEventListener("click", () => {
+      button.disabled = true;
+      button.textContent = "Loading…";
+      void Promise.resolve(options.onConfirm()).catch(error => {
+        console.error("Preview confirmation action failed:", error);
+        button.disabled = false;
+        button.textContent = options.confirmLabel;
+      });
+    });
+    placeholder.append(title, description, button);
+    host.appendChild(placeholder);
+  }
+
   public setMessageOverlay(html: string): void {
     this.clearErrorOverlay();
     this.clearMessageHost();

@@ -32,7 +32,7 @@ import {
   tinymistDataPlaneFrameKind,
   tinymistDataPlanePositionText
 } from "./preview/tinymistDataPlane";
-import { activeFileCanRenderPreview, allowsStandalonePreview, participatesInPreviewCompilation, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, previewTargetStartsMainCompiler, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, tinymistPreviewPreferredSourceColumn, usesTemplateAwareStandaloneRoot, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
+import { activeFileCanRenderPreview, allowsStandalonePreview, participatesInPreviewCompilation, previewLspMainPath, previewRefreshStyle, previewSessionIdentity, researchDocumentIdentity, sourceMapPreviewTaskId, staleSourceMapTaskIds, tinymistPreviewPreferredSourceColumn, usesTemplateAwareStandaloneRoot, type PreviewTarget, type PreviewRefreshStyle } from "./preview/previewPolicy";
 import { LogConsoleController, spellcheckConsoleGroupKey, type LogConsoleEntryInput } from "./diagnostics/logConsoleController";
 import { EditorFontManager } from "./editor/fontManager";
 import { TabStripController } from "./editor/tabStripController";
@@ -258,6 +258,9 @@ export class TypsastraWorkspaceController {
   private workspaceMetadata: WorkspaceMetadata | null = null;
   private workspaceLoading = false;
   private workspaceServicesDeferredForLargeFile = false;
+  private readonly approvedLargePreviewRoots = new Set<string>();
+  private readonly inspectedPreviewRoots = new Set<string>();
+  private blockedLargePreviewRoot: string | null = null;
   private wordWrapDeferredForResize = false;
   private recommendedWorkspaceToolchain: { tinymistVersion: string; typstVersion: string } | null = null;
   private selectedWorkspaceToolchain: { tinymistVersion: string; typstVersion: string } | null = null;
@@ -1657,9 +1660,7 @@ export class TypsastraWorkspaceController {
         return null;
       }
     }
-    const lineNotice = largeFileOpeningNotice(tab.path, tab.sizeBytes, tab.lineCount);
-    if (lineNotice) return lineNotice;
-    return this.largeMainPreviewNoticeForTab(tab);
+    return largeFileOpeningNotice(tab.path, tab.sizeBytes, tab.lineCount);
   }
 
   private activeCompilerPreviewMatchesRoot(rootPath: string): boolean {
@@ -1678,44 +1679,60 @@ export class TypsastraWorkspaceController {
     return lspAlreadyOwnsRoot || (activeRootMatches && mountedSessionMatches);
   }
 
-  private async largeMainPreviewNoticeForTab(tab: EditorTab): Promise<LargeFileOpeningNotice | null> {
-    if (
-      !this.workspaceRootPath
-      || !this.pinnedMainFilePath
-      || !isTypstDocumentPath(tab.path)
-      || filePathKey(tab.path) === filePathKey(this.pinnedMainFilePath)
-    ) return null;
-
-    let target: PreviewTarget;
+  private async largePreviewNoticeForRoot(rootPath: string): Promise<LargeFileOpeningNotice | null> {
     try {
-      target = await invoke<PreviewTarget>("resolve_preview_main", {
-        filePath: tab.path,
-        workspaceRootPath: this.workspaceRootPath,
-        fileContents: null,
-        pinnedMainPath: this.pinnedMainFilePath
-      });
+      const stats = await invoke<{ sizeBytes: number; lineCount: number; fileCount: number }>(
+        "typst_preview_source_stats",
+        { rootPath }
+      );
+      return largeMainPreviewOpeningNotice(
+        rootPath,
+        stats.sizeBytes,
+        stats.lineCount,
+        stats.fileCount
+      );
     } catch {
       return null;
     }
-    if (!previewTargetStartsMainCompiler(tab.path, target)) return null;
-    const rootPath = target.rootPath;
-    if (this.activeCompilerPreviewMatchesRoot(rootPath)) return null;
+  }
 
-    let sizeBytes: number;
-    try {
-      sizeBytes = await invoke<number>("workspace_file_size", { path: rootPath });
-    } catch {
-      return null;
+  private async ensureLargePreviewApproved(
+    rootPath: string | null,
+    onApproved?: () => void | Promise<void>
+  ): Promise<boolean> {
+    if (!rootPath || this.activeCompilerPreviewMatchesRoot(rootPath)) return true;
+    const rootKey = filePathKey(rootPath);
+    if (this.approvedLargePreviewRoots.has(rootKey)) return true;
+    if (this.inspectedPreviewRoots.has(rootKey)) return true;
+    if (this.blockedLargePreviewRoot && filePathKey(this.blockedLargePreviewRoot) === rootKey) return false;
+    const notice = await this.largePreviewNoticeForRoot(rootPath);
+    if (!notice) {
+      this.inspectedPreviewRoots.add(rootKey);
+      return true;
     }
-    const sizeNotice = largeMainPreviewOpeningNotice(rootPath, sizeBytes);
-    if (sizeNotice) return sizeNotice;
 
-    try {
-      const lineCount = await invoke<number>("workspace_text_line_count", { path: rootPath });
-      return largeMainPreviewOpeningNotice(rootPath, sizeBytes, lineCount);
-    } catch {
-      return null;
-    }
+    this.blockedLargePreviewRoot = rootPath;
+    const scale = notice.lineCount !== undefined
+      ? `${notice.lineCount.toLocaleString()} lines, ${formatFileSize(notice.sizeBytes)}`
+      : formatFileSize(notice.sizeBytes);
+    const sourceSummary = notice.previewSourceFiles && notice.previewSourceFiles > 1
+      ? ` across ${notice.previewSourceFiles.toLocaleString()} local source files`
+      : "";
+    this.previewFrame.setConfirmationMessage({
+      title: "Large Preview Not Started",
+      message: `${fileNameFromPath(rootPath)} is a large preview root (${scale}${sourceSummary}). Loading this preview can use significant CPU and memory. The editor remains available until you choose to start it.`,
+      confirmLabel: "Load Large Preview",
+      onConfirm: async () => {
+        this.approvedLargePreviewRoots.add(rootKey);
+        this.inspectedPreviewRoots.add(rootKey);
+        if (this.blockedLargePreviewRoot && filePathKey(this.blockedLargePreviewRoot) === rootKey) {
+          this.blockedLargePreviewRoot = null;
+        }
+        if (onApproved) await onApproved();
+        else await this.refreshActivePreviewRoot(true);
+      }
+    });
+    return false;
   }
 
   private async showReleaseSummaryIfNeeded(): Promise<void> {
@@ -1964,6 +1981,7 @@ export class TypsastraWorkspaceController {
     this.activateSpellcheckDocument(path);
     if (path.toLowerCase().endsWith(".typ")) this.diagnosticWaitStartedAt = performance.now();
     let previewPresentationReused = false;
+    let previewGuarded = false;
     let previewTarget: PreviewTarget | null = null;
     if (options.skipPreviewActivation) {
       // Restore editor/tab state first. Preview and LSP setup will run when the
@@ -1990,16 +2008,21 @@ export class TypsastraWorkspaceController {
         this.invalidatePreviewWork(`${path} does not participate in the configured main preview`);
       } else {
         previewTarget = await this.prepareTemplateAwarePreview(previewTarget, path, tab.content);
-        const existingMainSession = this.captureCurrentMainSessionForImportedTarget(previewTarget);
-        if (existingMainSession) {
-          this.applyPreviewSessionToTab(tab, existingMainSession);
-          if (existingMainSession.previewSessionKey) {
-            previewPresentationReused = this.previewFrame.activateSession(existingMainSession.previewSessionKey);
-          }
-        } else {
+        previewGuarded = !(await this.ensureLargePreviewApproved(previewTarget.rootPath));
+        if (previewGuarded) {
           this.applyPreviewTargetToTab(tab, previewTarget);
-          if (tab.previewSessionKey) {
-            previewPresentationReused = this.previewFrame.activateSession(tab.previewSessionKey);
+        } else {
+          const existingMainSession = this.captureCurrentMainSessionForImportedTarget(previewTarget);
+          if (existingMainSession) {
+            this.applyPreviewSessionToTab(tab, existingMainSession);
+            if (existingMainSession.previewSessionKey) {
+              previewPresentationReused = this.previewFrame.activateSession(existingMainSession.previewSessionKey);
+            }
+          } else {
+            this.applyPreviewTargetToTab(tab, previewTarget);
+            if (tab.previewSessionKey) {
+              previewPresentationReused = this.previewFrame.activateSession(tab.previewSessionKey);
+            }
           }
         }
       }
@@ -2023,15 +2046,19 @@ export class TypsastraWorkspaceController {
         const { uri: lspUri, content: lspContent } = lspRes;
         await this.openDocumentIfNeeded(lspUri, lspContent, this.currentVersion);
       }
-      const lspMainPath = previewTarget
-        ? previewLspMainPath(previewTarget)
-        : (this.previewStandalone ? this.previewRootPath : (this.previewMainPath ?? this.previewRootPath));
-      const pinChanged = await this.updatePinnedMain(lspMainPath);
-      if (pinChanged) {
-        await this.recheckActiveDocumentAfterPin(tab.content);
+      if (!previewGuarded) {
+        const lspMainPath = previewTarget
+          ? previewLspMainPath(previewTarget)
+          : (this.previewStandalone ? this.previewRootPath : (this.previewMainPath ?? this.previewRootPath));
+        const pinChanged = await this.updatePinnedMain(lspMainPath);
+        if (pinChanged) {
+          await this.recheckActiveDocumentAfterPin(tab.content);
+        }
       }
 
-      if (options.preservePreviewSession) {
+      if (previewGuarded) {
+        // The source editor remains active while preview startup waits for consent.
+      } else if (options.preservePreviewSession) {
         // preserve
       } else if (!this.pinnedMainFilePath) {
         this.previewFrame.setMessage(this.noMainFileMessage());
@@ -2043,7 +2070,7 @@ export class TypsastraWorkspaceController {
         this.previewFrame.setMessage(`<div style="padding: 20px; color: var(--ui-header-text); font-family: var(--font-family-sans);">No preview root found for this library/template file. Diagnostics are still active.</div>`);
       }
     } else if (!options.skipPreviewActivation && isTypstDocument) {
-      if (!options.preservePreviewSession && this.previewRootPath && !this.previewDisabled) {
+      if (!previewGuarded && !options.preservePreviewSession && this.previewRootPath && !this.previewDisabled) {
         void this.renderPdfPreview(tab.content);
       }
     }
@@ -2999,6 +3026,14 @@ export class TypsastraWorkspaceController {
         kind: "info",
         source: "preview scheduler",
         message: `Render skipped: ${this.activeFilePath ?? "no active file"} does not participate in the configured main preview.`
+      });
+      return;
+    }
+    if (!await this.ensureLargePreviewApproved(this.previewRootPath)) {
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "preview scheduler",
+        message: `Render deferred until the large preview is approved: ${this.previewRootPath ?? "unknown root"}.`
       });
       return;
     }
@@ -5642,13 +5677,6 @@ export class TypsastraWorkspaceController {
     }
 
     this.activeFilePath = path;
-    this.previewRootPath = null;
-    this.previewMainPath = null;
-    this.previewTaskId = null;
-    this.previewSessionKey = null;
-    this.previewImported = false;
-    this.previewStandalone = true;
-    this.previewDisabled = false;
     this.activateSpellcheckDocument(null);
     this.documentOutlineController.clear();
     this.clearDiagnostics();
@@ -5656,12 +5684,6 @@ export class TypsastraWorkspaceController {
     this.previewSyncController.clearForward();
     this.editorToolbarController.setDisabled(true);
     this.updatePreviewActionsToolbar(path);
-    this.previewFrame.setMessage(
-      `<div class="preview-disabled-placeholder">`
-      + `<div class="preview-disabled-title">${notice.kind === "main-preview" ? "Large main preview not started" : "Large file not loaded"}</div>`
-      + `<div class="preview-disabled-msg">${notice.kind === "main-preview" ? "Confirm in the editor pane before Typsastra compiles the configured main document." : "Confirm opening this file in the editor pane to start processing it."}</div>`
-      + `</div>`
-    );
     this.updateManualForwardSyncAction();
     this.updateWorkspaceViewportVisibility();
     this.renderEditorTabs();
@@ -5865,7 +5887,10 @@ export class TypsastraWorkspaceController {
       this.previewFrame.setMessage(this.noMainFileMessage());
       return;
     }
-    const contents = this.editorInstance.state.doc.toString();
+    const activeTab = this.getActiveTab();
+    const contents = activeTab?.contentLoaded
+      ? this.editorInstance.state.doc.toString()
+      : normalizeEditorText(await invoke<string>("read_workspace_file", { path }));
     let target = await invoke<PreviewTarget>("resolve_preview_main", {
       filePath: this.activeFilePath,
       workspaceRootPath: this.workspaceRootPath,
@@ -5873,13 +5898,17 @@ export class TypsastraWorkspaceController {
       pinnedMainPath: this.pinnedMainFilePath
     });
     if (target.disabled) {
-      const activeTab = this.getActiveTab();
       if (activeTab) this.applyPreviewTargetToTab(activeTab, target);
       this.invalidatePreviewWork(`${this.activeFilePath} does not participate in the configured main preview`);
       this.previewFrame.setMessage(this.disabledPreviewMessage());
       return;
     }
     target = await this.prepareTemplateAwarePreview(target, this.activeFilePath, contents);
+    if (!await this.ensureLargePreviewApproved(target.rootPath)) {
+      const activeTab = this.getActiveTab();
+      if (activeTab) this.applyPreviewTargetToTab(activeTab, target);
+      return;
+    }
     await this.updatePinnedMain(previewLspMainPath(target));
     const docIdentity = target.rootPath
       ? researchDocumentIdentity(
@@ -5898,7 +5927,6 @@ export class TypsastraWorkspaceController {
     const unchanged = identity?.key === this.previewSessionKey;
     if (unchanged && !forceRender) return;
 
-    const activeTab = this.getActiveTab();
     if (!activeTab) return;
     this.applyPreviewTargetToTab(activeTab, target);
 
@@ -5992,8 +6020,13 @@ export class TypsastraWorkspaceController {
   private async startWorkspaceServices(selected: string): Promise<void> {
     try {
       if (this.workspaceRootPath !== selected) return;
-      if (this.activeFilePath && !this.getActiveTab()?.contentLoaded) {
-        this.workspaceServicesDeferredForLargeFile = true;
+      if (
+        this.pinnedMainFilePath
+        && !await this.ensureLargePreviewApproved(
+          this.pinnedMainFilePath,
+          () => this.startWorkspaceServices(selected)
+        )
+      ) {
         return;
       }
       this.workspaceServicesDeferredForLargeFile = false;
@@ -6400,11 +6433,25 @@ export class TypsastraWorkspaceController {
       && this.activeFilePath !== null
       && filePathKey(path) === filePathKey(this.activeFilePath);
     this.pinnedMainFilePath = path;
+    if (!path) {
+      // The confirmation host is replaced by the no-main preview below. Drop
+      // its pending identity as well so selecting the same main can create a
+      // fresh actionable confirmation instead of returning a silent block.
+      this.blockedLargePreviewRoot = null;
+    }
     this.mainDocumentScripts = path ? parseDocumentScripts(await this.workspaceText(path)) : [];
     this.configureDocumentLanguageTools(this.activeFilePath ? this.editorInstance.state.doc.toString() : "");
     this.saveWorkspaceState();
 
-    if (mainChanged && this.lspClient) {
+    const previewApproved = !path || !mainChanged || await this.ensureLargePreviewApproved(path, async () => {
+      if (this.lspClient) {
+        await this.restartTinymistSession("Starting Tinymist for the approved main preview...");
+      }
+      if (this.activeFilePath) await this.refreshActivePreviewRoot(true);
+      else await this.loadFile(path, { temporary: false });
+    });
+
+    if (mainChanged && this.lspClient && previewApproved) {
       if (this.pdfPreviewTimer !== null) window.clearTimeout(this.pdfPreviewTimer);
       this.pdfPreviewTimer = null;
       this.pdfPreviewScheduleGeneration += 1;
@@ -6423,9 +6470,11 @@ export class TypsastraWorkspaceController {
           message: `Failed to restart Tinymist after changing the main file: ${String(error)}`
         });
       }
+    } else if (mainChanged && this.lspClient && !previewApproved) {
+      await this.stopTinymistSession("Large preview waiting for confirmation");
     }
     
-    if (path) {
+    if (path && previewApproved) {
       await this.loadFile(path, { temporary: false });
       this.sortPinnedMainTabFirst();
     } else if (!mainChanged) {
@@ -6436,6 +6485,11 @@ export class TypsastraWorkspaceController {
     
     if (this.workspaceRootPath) {
       await this.explorer.loadWorkspace(this.workspaceRootPath);
+    }
+
+    if (!previewApproved) {
+      this.renderEditorTabs();
+      return;
     }
 
     if (path && !this.getActiveTab()?.contentLoaded) return;
@@ -6483,6 +6537,9 @@ export class TypsastraWorkspaceController {
     this.typographyScaleCheckTimer = null;
     this.typographyScaleCheckGeneration += 1;
     this.acceptedTypographyScales.clear();
+    this.approvedLargePreviewRoots.clear();
+    this.inspectedPreviewRoots.clear();
+    this.blockedLargePreviewRoot = null;
     this.lastTypographyInternalScaleError = "";
     this.pdfPreviewGeneration += 1;
     this.pdfForwardSyncGeneration += 1;

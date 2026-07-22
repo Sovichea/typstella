@@ -7,13 +7,12 @@ compile after each edit. Language analysis and editor extensions are bounded or
 deferred where possible, but a 20,000-line active source still requires more
 work than an ordinary chapter.
 
-Typsastra restores inactive tabs lazily. A large text file or PDF is not loaded
-until activated, and activation asks for confirmation in the editor pane. This
-keeps workspace startup responsive even when the previous session contained
-large files. The same guard applies when a small included chapter, imported
-template, or imported library would start a large configured main-document
-preview: Typsastra reports the effective main preview size and waits for
-confirmation before starting Tinymist.
+Typsastra uses two independent guard rails. A large text file or PDF is not
+loaded into the editor until you confirm it in the editor pane. Separately, a
+large preview does not start Tinymist or render until you confirm it in the
+preview pane. The preview check measures the configured root together with its
+reachable local includes, templates, and libraries. It therefore applies
+whether the editor currently shows the main file or one of its dependencies.
 
 ## Navigate the preview directly
 

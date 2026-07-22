@@ -40,6 +40,7 @@ describe("large file opening notice", () => {
       kind: "main-preview",
       sizeBytes: LARGE_TEXT_FILE_BYTES,
       previewRootPath: "book.typ",
+      previewSourceFiles: undefined,
     });
     expect(largeMainPreviewOpeningNotice(
       "book.typ",
@@ -50,7 +51,14 @@ describe("large file opening notice", () => {
       sizeBytes: 200 * 1024,
       lineCount: LARGE_TEXT_FILE_LINES,
       previewRootPath: "book.typ",
+      previewSourceFiles: undefined,
     });
+    expect(largeMainPreviewOpeningNotice(
+      "book.typ",
+      LARGE_TEXT_FILE_BYTES,
+      LARGE_TEXT_FILE_LINES,
+      8,
+    )?.previewSourceFiles).toBe(8);
     expect(largeMainPreviewOpeningNotice("book.typ", LARGE_TEXT_FILE_BYTES - 1)).toBeNull();
     expect(largeMainPreviewOpeningNotice("book.pdf", LARGE_PDF_FILE_BYTES)).toBeNull();
   });
