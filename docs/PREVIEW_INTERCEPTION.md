@@ -85,7 +85,7 @@ The preview setting `renderMode` controls refresh timing:
 - `on-type`: compile after edits for live preview.
 - `on-save`: compile only when files are saved.
 
-Imported files preview through their configured main document. Independent standalone roots are disabled for v1.0 pending the `V1X-P.1` source-sync redesign.
+Imported files currently preview through their configured main document. Independent standalone roots remain disabled pending the portable v0.5.3 Full Document/Active File implementation plan; `V1X-P.1` owns later qualification and hardening.
 
 PDF forward and inverse sync use one hidden Tinymist web-preview task solely for its source-map data plane. The task ID ends in `-source-map`; Typsastra serializes concurrent startup requests and calls `tinymist.doKillPreview` before replacing a stale task. Do not start a normal-task fallback: Tinymist can reject a second registration against the same compiler instance with `cannot register preview to the compiler instance`.
 

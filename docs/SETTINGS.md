@@ -54,7 +54,7 @@ The Toolchain panel installs stable Tinymist releases and shows each release's e
 
 ## Preview
 
-`renderMode` accepts `"on-type"` or `"on-save"`. Imported files preview through their configured main document. The former standalone-preview directive is disabled for v1.0 and tracked for redesign in the v1.x plan.
+`renderMode` accepts `"on-type"` or `"on-save"`. Imported files currently preview through their configured main document. The former standalone-preview directive remains disabled; its portable replacement is planned for v0.5.3 and hardened in v1.x.
 
 `syncDebounceMs` controls the quiet period before on-type cache preparation and PDF compilation. Increasing it reduces editor contention while typing quickly; the default is 500 ms.
 

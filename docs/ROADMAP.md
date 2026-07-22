@@ -52,11 +52,34 @@ The detailed tasks and acceptance criteria are in the
 
 ## v0.5.2 — font-variant cache management
 
+- Keep the release focused on bug fixes, regressions, performance, and minor
+  refinements to the existing v0.5.1 feature set.
 - Add advanced settings for inspecting the private global scaled-font cache.
 - Show cached variants by font face, scale, disk usage, and last use.
 - Allow users to delete selected or unused variants and renew stale variants.
 - Preserve the 10-variant recommendation while keeping deletion explicitly
   user-controlled.
+
+## v0.5.3 — portable active-file preview
+
+- Add explicit **Full Document** and **Active File** preview modes.
+- Restrict Active File preview to the configured main file and documents
+  directly or transitively reachable through `#include`.
+- Replace the preview with an unavailable-state message for import-only,
+  unrelated, and unsupported files instead of showing stale output.
+- Create visible, standard Typst preview entry points backed by a common
+  template; never require hidden `.typsastra` source to compile them.
+- Warn when an included file has no common formatting entry point or no explicit
+  preceding page break, while allowing intentional continuous flow.
+- Provide a lightweight project reference catalog for completion and source
+  navigation in isolated previews.
+- Render known cross-chapter references as portable placeholders while keeping
+  unknown or misspelled labels as errors.
+- Replace rather than retain the full-document Tinymist context so Active File
+  mode delivers a measurable, bounded memory reduction.
+
+The detailed tasks and acceptance criteria are in the
+[v0.5.3 Active File preview implementation plan](./V0_5_3_ACTIVE_FILE_PREVIEW_IMPLEMENTATION_PLAN.md).
 
 ## v0.6.0 — research productivity and discoverability
 
@@ -150,5 +173,5 @@ The long-term research tasks and gates are in the [v2 implementation plan](./V2_
 
 Typsastra is beta software. The latest release is v0.5.1; see the
 [release notes](./RELEASE_NOTES_V0.5.1.md). Planned development continues with
-the v0.5.2 font-variant cache manager before the v0.6.0 research-productivity
-milestone.
+the v0.5.2 font-variant cache manager and v0.5.3 portable Active File preview
+before the v0.6.0 research-productivity milestone.

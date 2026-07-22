@@ -27,7 +27,7 @@ The application operates across distinct processes and contexts:
 - **File Explorer (`components/explorer.ts`):** A custom DOM tree renderer that loads only the workspace root initially and reads child directories on first expansion. Do not restore eager recursive scanning.
 - **CodeMirror Integration (`editor/`):** Contains `extensions.ts` and `themes.ts`. Implements a highly customized, dark-themed Unicode-compliant editor layout with basic Typst token matching.
 - **LSP Interface (`compiler/`):** `lspTransport.ts` exclusively owns Tauri IPC transport, `jsonRpc.ts` validates the JSON-RPC boundary, and `lsp.ts` maps typed Tinymist operations such as changes, diagnostics, hover/completion, preview startup, and inverse sync.
-- **Preview (`preview/`):** Preview tasks use deterministic unique IDs per root and the user-selected refresh policy. Imported files use the configured main-document preview. Independent standalone roots are disabled for v1.0 and tracked by `V1X-P.1`.
+- **Preview (`preview/`):** Preview tasks use deterministic unique IDs per root and the user-selected refresh policy. Imported files currently use the configured main-document preview. Independent standalone roots remain disabled pending the portable v0.5.3 replacement and v1.x hardening under `V1X-P.1`.
 - **Toolchain UI (`toolchain/`):** Owns stable Tinymist release selection and displays the embedded Typst version read-only.
 
 ## 3. Implementation Rules & Best Practices
