@@ -15,7 +15,7 @@ describe("editor font catalog", () => {
     expect(fontUpdate).toBeGreaterThan(activation);
     expect(documentDispatch).toBeGreaterThan(fontUpdate);
     expect(source.slice(documentDispatch, source.indexOf("});", documentDispatch) + 3))
-      .toContain("effects: editorFontEffect ? [editorFontEffect] : undefined");
+      .toContain("...(editorFontEffect ? [editorFontEffect] : [])");
   });
 
   test("defaults to bundled Fira Mono and contains no UI fonts", () => {

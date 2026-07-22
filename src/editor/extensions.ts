@@ -34,6 +34,7 @@ export const indentationGuidesCompartment = new Compartment();
 export const tabSizeCompartment = new Compartment();
 export const completionCompartment = new Compartment();
 export const showZwsCompartment = new Compartment();
+export const languageCompartment = new Compartment();
 
 const completionNavigationHandler = Prec.highest(EditorView.domEventHandlers({
   keydown(event, view) {
@@ -314,7 +315,7 @@ export function getEditorExtensions(
     }),
     activeLineCompartment.of([highlightActiveLineGutter(), highlightActiveLine()]),
     drawSelection(), dropCursor(), history(), 
-    typstLanguage,
+    languageCompartment.of(typstLanguage),
     baseEditorLayoutTheme,
     codeFolding({
       preparePlaceholder: foldedTypstPlaceholderSuffix,

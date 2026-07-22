@@ -11,7 +11,8 @@ import { undo, redo, undoDepth } from "@codemirror/commands";
 import { foldAll, foldable, foldEffect, foldedRanges, indentUnit, unfoldAll, unfoldEffect } from "@codemirror/language";
 import { closeBrackets, completionStatus } from "@codemirror/autocomplete";
 import { indentationMarkers } from "@replit/codemirror-indentation-markers";
-import { getEditorExtensions, themeCompartment, getThemeExtension, applyUIThemeVariables, wrapCompartment, lineNumbersCompartment, activeLineCompartment, closeBracketsCompartment, indentationGuidesCompartment, tabSizeCompartment, completionCompartment, showZwsCompartment, showZeroWidthSpaces } from "./editor/extensions";
+import { getEditorExtensions, themeCompartment, getThemeExtension, applyUIThemeVariables, wrapCompartment, lineNumbersCompartment, activeLineCompartment, closeBracketsCompartment, indentationGuidesCompartment, tabSizeCompartment, completionCompartment, languageCompartment, showZwsCompartment, showZeroWidthSpaces } from "./editor/extensions";
+import { typstLanguage } from "./editor/typstLanguage";
 import { createTypstAutocomplete } from "./editor/autocomplete";
 import { cursorRowColumn } from "./editor/verticalCursor";
 import type { EditorFoldRange } from "./editor/folding";
@@ -1980,7 +1981,10 @@ export class TypsastraWorkspaceController {
         // replacements in the shared history retains every visited document
         // and makes undo cross file boundaries.
         annotations: Transaction.addToHistory.of(false),
-        effects: editorFontEffect ? [editorFontEffect] : undefined
+        effects: [
+          ...(editorFontEffect ? [editorFontEffect] : []),
+          languageCompartment.reconfigure(isTypstDocument ? typstLanguage : [])
+        ]
       });
     } finally {
       this.isLoadingFile = false;

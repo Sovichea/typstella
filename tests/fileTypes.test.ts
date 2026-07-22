@@ -2,6 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { fileExtension, isBinaryImagePath, isSupportedInAppPath, isTypstDocumentPath } from "../src/platform/fileTypes";
 
 describe("file types", () => {
+  test("switches non-Typst text files to the plain-text editor mode", async () => {
+    const extensions = await Bun.file(new URL("../src/editor/extensions.ts", import.meta.url)).text();
+    const controller = await Bun.file(new URL("../src/appController.ts", import.meta.url)).text();
+    expect(extensions).toContain("languageCompartment.of(typstLanguage)");
+    expect(controller).toContain("languageCompartment.reconfigure(isTypstDocument ? typstLanguage : [])");
+  });
+
   test("recognizes supported editor and image formats case-insensitively", () => {
     expect(isSupportedInAppPath("C:\\docs\\main.TYP")).toBe(true);
     expect(isSupportedInAppPath("/docs/references.bib")).toBe(true);
