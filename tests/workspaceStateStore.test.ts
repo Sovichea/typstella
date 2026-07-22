@@ -69,6 +69,24 @@ describe("workspace state store", () => {
     expect(workspaceRestoreCandidates(metadata)).toEqual(["main.typ", "chapter.typ"]);
   });
 
+  test("removes duplicate persisted tabs while preserving their first state", () => {
+    const metadata = normalizeWorkspaceMetadata({
+      project: { projectId: "project-1", mainFile: "main.typ" },
+      workspace: {
+        activeFile: "main.typ",
+        openTabs: [
+          { path: "main.typ", selectionAnchor: 4 },
+          { path: "main.typ", selectionAnchor: 99 },
+          { path: "chapter.typ", selectionAnchor: 8 }
+        ]
+      }
+    });
+    expect(metadata.workspace.openTabs.map(tab => [tab.path, tab.selectionAnchor])).toEqual([
+      ["main.typ", 4],
+      ["chapter.typ", 8]
+    ]);
+  });
+
   test("reads and removes legacy absolute-path state for one-time migration", () => {
     values.set("typsastra-workspace-C:/work", JSON.stringify({
       activeFilePath: "C:/work/main.typ",

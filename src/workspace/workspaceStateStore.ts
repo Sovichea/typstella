@@ -77,7 +77,7 @@ export function normalizeWorkspaceMetadata(
   const project = objectValue(payload.project);
   const workspace = objectValue(payload.workspace);
   const layout = objectValue(workspace.layout);
-  const openTabs = Array.isArray(workspace.openTabs)
+  const normalizedOpenTabs = Array.isArray(workspace.openTabs)
     ? workspace.openTabs.flatMap(value => {
         const tab = objectValue(value);
         const path = safeRelativeWorkspacePath(tab.path);
@@ -92,6 +92,12 @@ export function normalizeWorkspaceMetadata(
         }];
       })
     : [];
+  const seenOpenTabs = new Set<string>();
+  const openTabs = normalizedOpenTabs.filter(tab => {
+    if (seenOpenTabs.has(tab.path)) return false;
+    seenOpenTabs.add(tab.path);
+    return true;
+  });
   return {
     project: {
       schemaVersion: 2,

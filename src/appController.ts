@@ -5245,6 +5245,7 @@ export class TypsastraWorkspaceController {
       })));
       for (const { tabInfo, path } of restoredTabs) {
         if (!path) continue;
+        if (this.openTabs.some(tab => filePathKey(tab.path) === filePathKey(path))) continue;
         this.openTabs.push({
           path,
           content: "",
@@ -6047,15 +6048,21 @@ export class TypsastraWorkspaceController {
   }
 
   private async openWorkspace(selected: string) {
+    if (this.workspaceRootPath && filePathKey(this.workspaceRootPath) === filePathKey(selected)) {
+      this.recentProjectsController.add(selected);
+      return;
+    }
     if (this.workspaceRootPath && this.workspaceRootPath !== selected) {
       const closed = await this.closeProject();
       if (!closed) return;
     }
     this.workspaceLoading = true;
     this.updateWorkspaceViewportVisibility();
+    // Claim the target before the first asynchronous operation so repeated
+    // open commands cannot start a second restoration of the same workspace.
+    this.workspaceRootPath = selected;
     try {
       await invoke("cleanup_workspace_preview_files", { workspaceRootPath: selected });
-      this.workspaceRootPath = selected;
       this.lspReady = false;
       this.workspaceMetadata = await this.loadWorkspaceMetadata(selected);
       this.spellcheckController.setTerminology(
