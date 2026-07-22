@@ -10,6 +10,7 @@ import {
   parseLanguageCatalog,
   parseLanguageProviderCapabilitiesList,
   providerFeatureLabels,
+  rankAndFilterLanguageProviders,
   supplementalLanguageProviders,
   supportLevelPresentation,
   type LanguageCatalogCapabilities,
@@ -57,6 +58,7 @@ export class SettingsController {
   private projectTerminology: TerminologyEntry[] = [];
   private rendererCompatibility: LinuxRendererCompatibility | null = null;
   private rendererCompatibilityError: string | null = null;
+  private languageCatalogQuery = "";
   private updateProjectTerminology: (entries: TerminologyEntry[]) => void = () => {};
 
   constructor(
@@ -546,9 +548,11 @@ export class SettingsController {
       catalog.classList.add("hidden");
       return;
     }
+    this.languageCatalogQuery = "";
     catalog.classList.remove("hidden");
     catalog.textContent = "Loading language catalog...";
     await this.populateLanguageCatalog();
+    catalog.querySelector<HTMLInputElement>(".settings-language-catalog-search")?.focus();
   }
 
   private async populateLanguageCatalog(): Promise<void> {
@@ -574,14 +578,50 @@ export class SettingsController {
     const header = document.createElement("div");
     header.className = "settings-language-catalog-header";
     header.textContent = "Downloadable dictionaries provide Basic support unless Typsastra has a tested language-specific provider. Basic support does not imply reliable segmentation or word completion.";
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "settings-language-catalog-search";
+    search.placeholder = "Search languages...";
+    search.setAttribute("aria-label", "Search language providers");
+    search.autocomplete = "off";
+    search.spellcheck = false;
+    search.value = this.languageCatalogQuery;
     const list = document.createElement("div");
     list.className = "settings-language-catalog-list";
-    const rows = [
-      ...entries.map(entry => ({ name: entry.displayName, row: this.renderLanguageCatalogRow(entry) })),
-      ...supplemental.map(entry => ({ name: entry.displayName, row: this.renderBundledLanguageProviderRow(entry) })),
-    ].sort((left, right) => left.name.localeCompare(right.name));
-    list.replaceChildren(...rows.map(entry => entry.row));
-    catalog.replaceChildren(header, list);
+    const providers = [
+      ...entries.map(entry => ({
+        displayName: entry.displayName,
+        languageTag: entry.languageTag,
+        locale: entry.locale,
+        scripts: entry.scripts,
+        installed: entry.installed || entry.bundled,
+        row: this.renderLanguageCatalogRow(entry),
+      })),
+      ...supplemental.map(entry => ({
+        displayName: entry.displayName,
+        languageTag: entry.languageTag,
+        scripts: entry.scripts,
+        installed: true,
+        row: this.renderBundledLanguageProviderRow(entry),
+      })),
+    ];
+    const renderFilteredProviders = () => {
+      const visible = rankAndFilterLanguageProviders(providers, this.languageCatalogQuery);
+      if (visible.length) {
+        list.replaceChildren(...visible.map(entry => entry.row));
+        return;
+      }
+      const empty = document.createElement("div");
+      empty.className = "settings-language-catalog-empty";
+      empty.textContent = "No languages match your search.";
+      list.replaceChildren(empty);
+    };
+    search.addEventListener("input", () => {
+      this.languageCatalogQuery = search.value;
+      renderFilteredProviders();
+    });
+    renderFilteredProviders();
+    catalog.replaceChildren(header, search, list);
   }
 
   private renderBundledLanguageProviderRow(entry: LanguageProviderCapabilities): HTMLElement {

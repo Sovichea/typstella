@@ -1592,9 +1592,22 @@ body.typsastra-resizing #input-container-wrapper::after {
   color: var(--ui-header-text);
   font-size: 11px;
 }
+.settings-language-catalog-search {
+  display: block;
+  width: calc(100% - 20px);
+  margin: 9px 10px;
+  box-sizing: border-box;
+}
 .settings-language-catalog-list {
   max-height: 260px;
   overflow-y: auto;
+  border-top: 1px solid var(--ui-border);
+}
+.settings-language-catalog-empty {
+  padding: 16px 10px;
+  color: var(--ui-header-text);
+  font-size: 11px;
+  text-align: center;
 }
 .settings-language-catalog-row {
   display: grid;

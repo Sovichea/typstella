@@ -6,6 +6,7 @@ import {
   parseLanguageProviderCapabilitiesList,
   providerFeatureLabels,
   providerStabilityLabel,
+  rankAndFilterLanguageProviders,
   supplementalLanguageProviders,
   supportLevelPresentation
 } from "../src/languageSupport";
@@ -39,6 +40,34 @@ describe("language support taxonomy", () => {
     const [khmer] = parseLanguageProviderCapabilitiesList([serializedProvider]);
     expect(supplementalLanguageProviders([{ id: "hunspell:en_US" }], [khmer])).toEqual([khmer]);
     expect(supplementalLanguageProviders([{ id: "khmer-segmenter" }], [khmer])).toEqual([]);
+  });
+
+  test("ranks installed providers before available providers", () => {
+    const providers = [
+      { displayName: "Arabic", languageTag: "ar", locale: "ar", scripts: ["Arab"], installed: false },
+      { displayName: "Khmer", languageTag: "km", scripts: ["Khmr"], installed: true },
+      { displayName: "English (US)", languageTag: "en-US", locale: "en_US", scripts: ["Latn"], installed: true },
+      { displayName: "French", languageTag: "fr-FR", locale: "fr_FR", scripts: ["Latn"], installed: false },
+    ];
+
+    expect(rankAndFilterLanguageProviders(providers, "").map(provider => provider.displayName)).toEqual([
+      "English (US)",
+      "Khmer",
+      "Arabic",
+      "French",
+    ]);
+  });
+
+  test("searches language names, tags, locales, and scripts", () => {
+    const providers = [
+      { displayName: "Español", languageTag: "es-ES", locale: "es_ES", scripts: ["Latn"], installed: false },
+      { displayName: "Khmer", languageTag: "km", scripts: ["Khmr"], installed: true },
+    ];
+
+    expect(rankAndFilterLanguageProviders(providers, "espanol")).toHaveLength(1);
+    expect(rankAndFilterLanguageProviders(providers, "es_ES")[0]?.displayName).toBe("Español");
+    expect(rankAndFilterLanguageProviders(providers, "khmr")[0]?.displayName).toBe("Khmer");
+    expect(rankAndFilterLanguageProviders(providers, "missing")).toEqual([]);
   });
 
   test("refreshes provider-dependent UI after deferred provider startup", async () => {

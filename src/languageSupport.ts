@@ -46,6 +46,14 @@ export type SupportLevelPresentation = {
   description: string;
 };
 
+export type SearchableLanguageProvider = {
+  displayName: string;
+  languageTag: string;
+  scripts: readonly string[];
+  installed: boolean;
+  locale?: string;
+};
+
 const SUPPORT_LEVELS: Record<LanguageSupportLevel, SupportLevelPresentation> = {
   basic: {
     level: "basic",
@@ -143,6 +151,37 @@ export function supplementalLanguageProviders(
 ): LanguageProviderCapabilities[] {
   const catalogIds = new Set(catalog.map(entry => entry.id.toLocaleLowerCase()));
   return installed.filter(provider => !catalogIds.has(provider.id.toLocaleLowerCase()));
+}
+
+export function rankAndFilterLanguageProviders<T extends SearchableLanguageProvider>(
+  providers: readonly T[],
+  query: string,
+): T[] {
+  const terms = normalizeLanguageSearchText(query).split(/\s+/).filter(Boolean);
+  return providers
+    .filter(provider => {
+      if (!terms.length) return true;
+      const haystack = normalizeLanguageSearchText([
+        provider.displayName,
+        provider.languageTag,
+        provider.locale ?? "",
+        ...provider.scripts,
+      ].join(" "));
+      return terms.every(term => haystack.includes(term));
+    })
+    .sort((left, right) => {
+      if (left.installed !== right.installed) return left.installed ? -1 : 1;
+      return left.displayName.localeCompare(right.displayName)
+        || left.languageTag.localeCompare(right.languageTag);
+    });
+}
+
+function normalizeLanguageSearchText(value: string): string {
+  return value
+    .normalize("NFKD")
+    .replace(/\p{Mark}/gu, "")
+    .toLocaleLowerCase()
+    .trim();
 }
 
 function parseLanguageProviderCapabilities(value: unknown, path: string): LanguageProviderCapabilities {
