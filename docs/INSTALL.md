@@ -10,15 +10,16 @@ Available packages:
 
 - Windows: `.msi`
 - Linux: `.AppImage` and `.deb`
-- macOS: experimental, currently unsigned and unnotarized build
+- macOS: experimental, unsigned and unnotarized build
 
 Typsastra is currently beta software. The latest release is v0.5.1.
 
-### Open the current unsigned macOS release
+### Open an unsigned macOS release
 
-The experimental macOS release is not yet signed or notarized. When it is
+Typsastra is an open-source project and does not plan to purchase Apple
+Developer ID signing or notarization. When the experimental macOS release is
 downloaded through a browser, Gatekeeper may therefore report that
-`Typsastra.app` is damaged and cannot be opened.
+`Typsastra.app` is damaged and cannot be opened even when the bundle is intact.
 
 Only continue if the app came from the official
 [Typsastra GitHub releases page](https://github.com/Sovichea/typsastra/releases).
@@ -46,8 +47,17 @@ that globally disable Gatekeeper. If Typsastra still cannot be opened after a
 fresh download and this targeted removal, report the release filename, Mac
 model, processor architecture, and macOS version.
 
-This procedure is temporary. Public macOS distribution ultimately requires a
-Developer ID signature and Apple notarization.
+### Automatic updates on macOS
+
+Typsastra's in-app update artifacts are cryptographically signed and verified
+by Tauri before installation. Updater signing is mandatory and remains enabled;
+it is independent of Apple Developer ID signing and notarization.
+
+An in-app update normally should not require the quarantine workaround again
+because it is not downloaded through a browser. This behavior remains
+experimental until it has been validated through real unsigned updates on
+macOS. A release downloaded manually through a browser may require the targeted
+workaround again.
 
 ## Build from source
 
@@ -165,4 +175,8 @@ bun run tauri build
 
 The native executable is written under `src-tauri/target/release/`. Installers and application bundles are written under `src-tauri/target/release/bundle/`, with platform-specific subdirectories such as `nsis`/`msi`, `deb`/`rpm`/`appimage`, or `dmg`/`macos`.
 
-Windows signing and macOS signing/notarization are not required for local development, but they are required for trusted public distribution.
+Platform signing is not required for local development. Typsastra's release
+pipeline always signs automatic-update artifacts with the separate Tauri
+updater key. Public macOS builds intentionally remain without Apple Developer
+ID signing or notarization and consequently do not receive native Gatekeeper
+trust.
