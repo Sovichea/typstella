@@ -2912,6 +2912,7 @@ export class TypsastraWorkspaceController {
       });
       return;
     }
+    const reportRenderStatus = force || !this.previewFrame.currentUrl;
     if (force) {
       this.previewFrame.setLoading("Recompiling PDF preview...");
     }
@@ -2936,7 +2937,9 @@ export class TypsastraWorkspaceController {
       source: "preview scheduler",
       message: `Render generation ${generation} started: mode=${this.settingsController.value.preview.renderMode}; active=${this.activeFilePath}; sourceUtf16=${contents.length}.`
     });
-    this.setLspStatus({ kind: "syncing", message: "Compiling PDF preview..." });
+    if (reportRenderStatus) {
+      this.setLspStatus({ kind: "syncing", message: "Compiling preview" });
+    }
     if (!force && !this.previewFrame.currentUrl) {
       this.previewFrame.setLoading("Compiling PDF preview...");
     }
@@ -2996,7 +2999,6 @@ export class TypsastraWorkspaceController {
         });
         return;
       }
-      this.setLspStatus({ kind: "preview-ready", message: "PDF Preview Ready" });
       const sourceMapTaskId = previewSessionIdentity(
         previewPath,
         previewRefreshStyle(this.settingsController.value.preview.renderMode)
@@ -3007,6 +3009,9 @@ export class TypsastraWorkspaceController {
       this.pdfPreviewSourceMapTaskId = sourceMapTaskId;
       this.lastPdfBase64 = pdf.data!;
       await this.previewFrame.loadPdfData(pdf.data!, previewPath);
+      if (reportRenderStatus) {
+        this.setLspStatus({ kind: "preview-ready", message: "Preview ready" });
+      }
       this.appendDeveloperLog({ kind: "info", source: "preview scheduler", message: `Render generation ${generation}: PDF presentation complete.` });
       void this.warmPdfSourceMapSession(generation);
       await this.logMemoryDiagnostics(`render ${generation}: after PDF cleanup/presentation`);
@@ -3294,7 +3299,6 @@ export class TypsastraWorkspaceController {
       this.pendingLspSyncPath = this.activeFilePath;
       this.pendingLspSyncText = rawText;
       this.pendingLspSyncVersion = version;
-      this.setLspStatus({ kind: "sync-pending", message: "Preview update queued" });
 
       if (this.pendingLspSyncTimer) {
         window.clearTimeout(this.pendingLspSyncTimer);
@@ -3522,7 +3526,6 @@ export class TypsastraWorkspaceController {
     this.pendingLspSyncText = null;
     this.pendingLspSyncVersion = null;
 
-    this.setLspStatus({ kind: "syncing", message: "Syncing preview" });
     this.previewSyncController.reset();
     if (this.workspaceRootPath && this.previewStandalone && this.settingsController.value.preview.renderMode === "on-type") {
       let target = await invoke<PreviewTarget>("resolve_preview_main", {
@@ -3552,11 +3555,6 @@ export class TypsastraWorkspaceController {
     await this.openDocumentIfNeeded(lspUri, lspContent, version);
     if (!this.isLspSyncVersionCurrent(path, version)) return;
     await this.lspClient.notifyTextChange(lspUri, lspContent, version);
-    window.setTimeout(() => {
-      if (this.lspReady && !this.pendingLspSyncTimer && this.pendingLspSyncText === null) {
-        this.setLspStatus({ kind: "preview-ready", message: "Preview update sent" });
-      }
-    }, 250);
   }
 
 
