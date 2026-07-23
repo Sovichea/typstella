@@ -44,6 +44,7 @@ the reference documents when you need exact behavior or contributor contracts.
 - [v0.5.0 release notes](RELEASE_NOTES_V0.5.0.md)
 - [v0.5.1 implementation plan](V0_5_1_EXAMPLES_DOCUMENTATION_IMPLEMENTATION_PLAN.md)
 - [v0.5.3 Active File preview implementation plan](V0_5_3_ACTIVE_FILE_PREVIEW_IMPLEMENTATION_PLAN.md)
+- [v0.6.0 Markdown live preview implementation plan](V0_6_0_MARKDOWN_LIVE_PREVIEW_IMPLEMENTATION_PLAN.md)
 - [v1.0 implementation plan](V1_RELEASE_IMPLEMENTATION_PLAN.md)
 
 First-class RTL editor behavior is planned for v0.9.0. Current Arabic and

@@ -117,6 +117,11 @@ The detailed tasks and acceptance criteria are in the
 
 Make Typsastra's document-engineering strengths easier to discover while adding broadly useful research-authoring tools. This milestone does not expand into discipline-specific computation or visual tooling.
 
+- Add a separate, sanitized Markdown live-preview renderer for `.md` files,
+  with debounced updates, theme-aware typography, local images, common
+  GitHub-Flavored Markdown constructs, link navigation, and preserved scroll
+  position. Markdown preview must not start Tinymist, compile Typst, or discard
+  the existing PDF session when switching tabs.
 - Add table, figure, caption, equation, and matrix builders that produce clean, editable, portable Typst source.
 - Add bibliography entry management with DOI/arXiv-assisted metadata retrieval, duplicate detection, citation-key control, and ordinary `.bib` output.
 - Add a template browser with rendered previews, compatibility metadata, and a clear distinction between bundled, local, and Typst Universe templates.
@@ -126,6 +131,9 @@ Make Typsastra's document-engineering strengths easier to discover while adding 
 - Publish reproducible benchmark reports covering startup, compilation, long-document preview, project indexing/search, memory boundaries, installer size, and enabled language-provider cost.
 - Improve feature visibility with short demonstrations of complex-script editing, included-file preview ownership, source synchronization, language installation, long-document virtualization, and compiler-failure recovery.
 - Add an onboarding project that deliberately demonstrates Khmer and mixed-script editing, Unicode-safe navigation, project structure, bibliography/figure relationships, and preview behavior.
+
+The Markdown scope, security boundaries, lifecycle, and release gates are in
+the [v0.6.0 Markdown live preview implementation plan](./V0_6_0_MARKDOWN_LIVE_PREVIEW_IMPLEMENTATION_PLAN.md).
 
 ## v0.9.0 — pre-release hardening and right-to-left writing
 
