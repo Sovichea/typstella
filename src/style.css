@@ -2921,7 +2921,8 @@ body.typsastra-resizing #input-container-wrapper::after {
 #input-container-wrapper:focus-within,
 #preview-container-wrapper:focus-within,
 #log-console:focus-within {
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ui-accent-color) 42%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--ui-accent-color) 42%, transparent);
+  outline-offset: -1px;
 }
 
 .tree-chevron,

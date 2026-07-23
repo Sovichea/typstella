@@ -34,4 +34,14 @@ describe("theme-aware application accents", () => {
     expect(style).not.toMatch(/\.log-console-tab\.active\s*\{[^}]*editor-cursor-color/s);
     expect(style).toMatch(/\.workspace-loading-spinner\s*\{[^}]*var\(--ui-accent-color\)/s);
   });
+
+  test("draws pane focus indicators above opaque pane headers", () => {
+    const focusRule = style.slice(
+      style.indexOf(".workspace-explorer-section:focus-within"),
+      style.indexOf(".tree-chevron", style.indexOf(".workspace-explorer-section:focus-within"))
+    );
+    expect(focusRule).toContain("outline: 1px solid color-mix(in srgb, var(--ui-accent-color) 42%, transparent)");
+    expect(focusRule).toContain("outline-offset: -1px");
+    expect(focusRule).not.toContain("box-shadow:");
+  });
 });
