@@ -45,9 +45,10 @@ describe("document typography", () => {
     ]
   };
 
-  test("renders reliable Typst font rules", () => {
-    expect(renderTypographyBlock(config)).toContain('(name: "Calibri", covers: regex("[\\p{scx=Latin}\\p{scx=Common}]"))');
-    expect(renderTypographyBlock(config)).toContain('(name: "MiSans Khmer", covers: regex("[\\p{scx=Khmer}\\p{scx=Common}]"))');
+  test("uses ordinary Typst fallback order by default", () => {
+    expect(renderTypographyBlock(config)).toContain('    "Calibri",');
+    expect(renderTypographyBlock(config)).toContain('    "MiSans Khmer",');
+    expect(renderTypographyBlock(config)).not.toContain("covers:");
     expect(renderTypographyBlock(config)).toContain('// typsastra:document-scripts [{"family":"Calibri","script":"latin","scale":1,"language":"en-US"},{"family":"MiSans Khmer","script":"khmer","scale":1.05,"language":"km"},{"family":"MiSans Lao","script":"lao","scale":1}]');
     expect(renderTypographyBlock(config)).not.toContain("#show regex(");
     expect(renderTypographyBlock(config)).not.toContain("show raw");
@@ -59,6 +60,11 @@ describe("document typography", () => {
       .toEqual([{ family: "Latin", script: "latin", scale: 1, language: "fr-FR" }]);
     expect(parseDocumentScripts('// typsastra:script-fonts [{"family":"Khmer","script":"khmer","scale":1}]'))
       .toEqual([{ family: "Khmer", script: "khmer", scale: 1, language: null }]);
+    expect(parseDocumentScripts('// typsastra:document-scripts [{"family":"Latin","script":"latin","scale":1,"common":true},{"family":"Khmer","script":"khmer","scale":1,"common":true}]'))
+      .toEqual([
+        { family: "Latin", script: "latin", scale: 1, language: null, common: true },
+        { family: "Khmer", script: "khmer", scale: 1, language: null }
+      ]);
   });
 
   test("adds document-script metadata to a main file without rewriting its Typst content", () => {
@@ -120,7 +126,7 @@ describe("document typography", () => {
     });
   });
 
-  test("supports arbitrary script order and single-script documents", () => {
+  test("supports arbitrary fallback order and single-script documents", () => {
     const khmerFirst = {
       baseSizePt: 11,
       fonts: [
@@ -129,16 +135,50 @@ describe("document typography", () => {
       ]
     };
     const complexBlock = renderTypographyBlock(khmerFirst);
-    expect(complexBlock.indexOf('name: "MiSans Khmer"')).toBeLessThan(complexBlock.indexOf('name: "Calibri"'));
-    expect(complexBlock).toContain('covers: regex("[\\p{scx=Khmer}\\p{scx=Common}]")');
-    expect(complexBlock).toContain('covers: regex("[\\p{scx=Latin}\\p{scx=Common}]")');
+    expect(complexBlock.indexOf('"MiSans Khmer"')).toBeLessThan(complexBlock.indexOf('"Calibri"'));
+    expect(complexBlock).not.toContain("covers:");
     expect(parseTypographyBlock(complexBlock)).toEqual(khmerFirst);
 
     const latinOnly = { baseSizePt: 11, fonts: [{ family: "Calibri", script: "latin", scale: 1, language: null }] };
     const latinBlock = renderTypographyBlock(latinOnly);
-    expect(latinBlock).toContain('(name: "Calibri", covers: regex("[\\p{scx=Latin}\\p{scx=Common}]"))');
+    expect(latinBlock).toContain('"Calibri",');
+    expect(latinBlock).not.toContain("covers:");
     expect(latinBlock).not.toContain("#show regex(");
     expect(parseTypographyBlock(latinBlock)).toEqual(latinOnly);
+  });
+
+  test("lets exactly one script override fallback for shared characters", () => {
+    const advanced = {
+      baseSizePt: 11,
+      fonts: [
+        { family: "Siemreap", script: "khmer", scale: 1, language: "km" },
+        { family: "Calibri", script: "latin", scale: 1, language: "en-US", common: true }
+      ]
+    };
+    const block = renderTypographyBlock(advanced);
+    expect(block).toContain('(name: "Siemreap", covers: regex("\\p{scx=Khmer}"))');
+    expect(block).toContain('(name: "Calibri", covers: regex("[\\p{scx=Latin}\\p{scx=Common}]"))');
+    expect(block).toContain('"common":true');
+    expect(parseTypographyBlock(block)).toEqual(advanced);
+  });
+
+  test("preserves the first-row priority of the former all-Common format", () => {
+    const legacy = [
+      "// typsastra:typography:start",
+      '// typsastra:document-scripts [{"family":"Khmer","script":"khmer","scale":1},{"family":"Latin","script":"latin","scale":1}]',
+      "#set text(",
+      "  font: (",
+      '    (name: "Khmer", covers: regex("[\\p{scx=Khmer}\\p{scx=Common}]")),',
+      '    (name: "Latin", covers: regex("[\\p{scx=Latin}\\p{scx=Common}]")),',
+      "  ),",
+      "  size: 11pt,",
+      ")",
+      "// typsastra:typography:end"
+    ].join("\n");
+    expect(parseTypographyBlock(legacy)?.fonts).toEqual([
+      { family: "Khmer", script: "khmer", scale: 1, language: null, common: true },
+      { family: "Latin", script: "latin", scale: 1, language: null }
+    ]);
   });
 
   test("supports disabling managed typography", () => {
@@ -161,7 +201,7 @@ describe("document typography", () => {
     });
     const updated = withBlock.slice(0, second.from) + second.insert + withBlock.slice(second.to);
     expect(updated.match(/typsastra:typography:start/g)?.length).toBe(1);
-    expect(updated).toContain('name: "MiSans Latin"');
+    expect(updated).toContain('"MiSans Latin",');
   });
 
   test("detects the dominant complex script", () => {

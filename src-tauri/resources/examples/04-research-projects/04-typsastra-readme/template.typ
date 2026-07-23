@@ -22,8 +22,8 @@
   // typsastra:typography:start
   set text(
     font: (
-      (name: "New Computer Modern", covers: regex("[\p{scx=Latin}\p{scx=Common}]")),
-      (name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]")),
+      "New Computer Modern",
+      "MiSans Khmer",
     ),
     size: 11pt,
   )

@@ -12,30 +12,58 @@ point size may not look balanced.
 
 A font may also contain glyphs for several scripts. For example, a Khmer family
 may contain Latin glyphs. In an ordinary ordered stack, placing that family
-first prevents the intended Latin family from being reached.
+first can prevent the intended Latin family from being reached. Typsastra keeps
+ordinary fallback as the default and offers an explicit shared-character
+override when an author needs strict script ownership.
 
 Regex show rules can force another font or size onto a script, but they
 reconstruct matching content. Forward and inverse sync can then resolve to a
 match or paragraph boundary instead of the intended source character. Typsastra
 does not use that approach.
 
-## Managed Typst rule
+## Default managed Typst rule
 
-Typsastra writes native Typst font descriptors with a `covers` restriction:
+By default, Typsastra writes an ordinary Typst fallback stack. Row order has
+the same meaning it has in a handwritten Typst document:
 
 ```typst
 // typsastra:typography:start
 // typsastra:document-scripts [{"family":"MiSans Khmer","script":"khmer","scale":0.95,"language":"km"},{"family":"MiSans Latin","script":"latin","scale":1.1,"language":"en-US"},{"family":"MiSans Arabic","script":"arabic","scale":1,"language":"ar"}]
 #set text(
   font: (
-    (name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]")),
-    (name: "MiSans Latin", covers: regex("[\p{scx=Latin}\p{scx=Common}]")),
-    (name: "MiSans Arabic", covers: regex("[\p{scx=Arabic}\p{scx=Common}]")),
+    "MiSans Khmer",
+    "MiSans Latin",
+    "MiSans Arabic",
   ),
   size: 11pt,
 )
 // typsastra:typography:end
 ```
+
+This is the most portable and predictable default. If an earlier font contains
+a requested glyph, Typst uses it; otherwise Typst proceeds through the stack.
+
+## Optional numbers and punctuation override
+
+The **Override** checkbox beside a script is optional. At most one row can be
+selected. Selecting it asks that font to own Unicode `Common` characters,
+including spaces, Western digits, generic punctuation, and many shared symbols.
+Typsastra then restricts every configured font to its assigned script:
+
+```typst
+// typsastra:document-scripts [{"family":"Siemreap","script":"khmer","scale":1,"language":"km"},{"family":"Calibri","script":"latin","scale":1,"language":"en-US","common":true}]
+#set text(
+  font: (
+    (name: "Siemreap", covers: regex("\p{scx=Khmer}")),
+    (name: "Calibri", covers: regex("[\p{scx=Latin}\p{scx=Common}]")),
+  ),
+  size: 11pt,
+)
+```
+
+Clearing the checkbox returns the document to ordinary fallback mode. Selecting
+another row moves ownership to that row; Typsastra never writes more than one
+`"common": true` entry.
 
 `scx` is the Unicode Script Extensions property. It includes characters that
 Unicode associates with a script, including relevant marks that may not have
@@ -44,36 +72,23 @@ that script as their primary `Script` property.
 Font coverage descriptors require Typst 0.13 or newer, matching Typsastra's
 supported managed-toolchain baseline.
 
-The `covers` restriction makes a family eligible for its assigned script and
-for Unicode `Common` characters. `Common` includes spaces, Western digits,
-generic punctuation, and many symbols that Unicode does not assign to Latin,
-Khmer, Arabic, or another single writing script.
-
-Every configured family is eligible for `Common`, so font order determines
-which available family supplies those shared characters. With Latin first,
-`123` and generic punctuation use the Latin font instead of falling through to
-Typst's New Computer Modern default. With Khmer first, a Khmer family that
-contains those glyphs may supply them instead. If the first family lacks a
-glyph, Typst continues through the configured stack.
-
-For script-specific characters, the restriction remains strict.
-MiSans Khmer can therefore appear before MiSans Latin without consuming Latin
-letters that happen to exist in the Khmer font. Order remains meaningful only
-when entries have overlapping coverage, including their intentional shared
-`Common` coverage.
 The Document Typography dialog lets authors drag script rows into the desired
 priority order. A focused drag handle also supports Up and Down Arrow for
-keyboard reordering. For a Khmer-dominant book, placing Khmer before Latin is a
-useful default; order is a tie-breaker, not a primary-font or scaling role.
+keyboard reordering. In default mode this is the actual Typst fallback order.
+In override mode, script restrictions prevent one font's extra glyphs from
+capturing another configured script, so reordering does not change ownership
+of the selected shared characters.
 
-Inherited marks are not automatically assigned to every font. Typst continues
+Inherited marks are not automatically assigned to the override font. Typst continues
 to resolve them through its shaping and fallback context; script-specific
 letters and Script Extensions marks remain restricted by the descriptors above.
 
 The metadata comment is ignored by Typst. Typsastra uses it to restore the
 toolbar configuration, prepare private cached font variants, and select one
 optional language-tools provider per script. Older typography metadata is
-migrated when Typsastra reads and reapplies the configuration.
+migrated when Typsastra reads and reapplies the configuration. The former
+format that gave `Common` coverage to every row is interpreted as an override
+owned by its first row, preserving its effective shared-character priority.
 
 ## Uniform script scaling
 

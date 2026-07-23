@@ -1,12 +1,12 @@
 #set document(title: "Script-Specific Font Assignments")
 #set page(margin: 24mm)
 // typsastra:typography:start
-// typsastra:document-scripts [{"family":"MiSans Khmer","script":"khmer","scale":1,"language":"km"},{"family":"New Computer Modern","script":"latin","scale":1,"language":"en-US"},{"family":"MiSans Arabic","script":"arabic","scale":1,"language":"ar"}]
+// typsastra:document-scripts [{"family":"New Computer Modern","script":"latin","scale":1,"language":"en-US"},{"family":"MiSans Khmer","script":"khmer","scale":1,"language":"km"},{"family":"MiSans Arabic","script":"arabic","scale":1,"language":"ar"}]
 #set text(
   font: (
-    (name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]")),
-    (name: "New Computer Modern", covers: regex("[\p{scx=Latin}\p{scx=Common}]")),
-    (name: "MiSans Arabic", covers: regex("[\p{scx=Arabic}\p{scx=Common}]")),
+    "New Computer Modern",
+    "MiSans Khmer",
+    "MiSans Arabic",
   ),
   size: 11pt,
 )
@@ -25,17 +25,19 @@ prevent New Computer Modern from being used.
 
 == Typsastra's solution
 
-Document Typography assigns a font and optional scale to each script. No entry
-is primary or embedded. In this example Khmer intentionally comes before Latin.
-The order is safe because each entry has a native Typst `covers` restriction:
+Document Typography assigns a font and optional scale to each script. By
+default, the rows produce the same ordered fallback stack you would write in
+Typst. This example puts Latin first, followed by Khmer and Arabic:
 
 ```typ
-(name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]"))
+font: ("New Computer Modern", "MiSans Khmer", "MiSans Arabic")
 ```
 
-`scx` means Unicode Script Extensions. MiSans Khmer is eligible for Khmer text,
-but its built-in Latin glyphs cannot consume Latin text. Latin reaches the Latin
-assignment even though it appears later.
+If a font contains glyphs for several scripts, fallback order remains important.
+For stricter control, select **Override** on one row in Document Typography.
+Typsastra will restrict every row by Unicode Script Extensions (`scx`) and give
+spaces, numbers, punctuation, and shared symbols to that one selected font.
+Clearing the checkbox restores ordinary fallback behavior.
 
 == Independent visual scaling
 

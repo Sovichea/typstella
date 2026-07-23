@@ -33,7 +33,7 @@ Released July 21, 2026.
   Computer Modern family so the examples render consistently without requiring
   another system font.
 - Migrated every bundled main file and managed template to the current
-  `typsastra:document-scripts` and Unicode `scx` typography format, including
+  `typsastra:document-scripts` typography format, including
   the Khmer Folklore, Lao, language-provider, and portability projects.
 
 ## Document typography
@@ -41,9 +41,10 @@ Released July 21, 2026.
 - Replaced primary and embedded typography roles with equal document-script
   assignments. Every configured script can choose its own font and uniform
   scale relative to the shared document size.
-- Added native Typst `covers` descriptors using Unicode Script Extensions
-  (`scx`). A Khmer font that contains Latin glyphs can now appear before the
-  Latin font without consuming Latin text.
+- Kept ordinary Typst font fallback order as the default and added an optional
+  single-owner override for spaces, numbers, punctuation, and shared symbols.
+  When enabled, native `scx` descriptors prevent one script font's extra glyphs
+  from consuming text assigned to another configured script.
 - Preserved existing primary/embedded configurations through automatic metadata
   migration while writing the unified `typsastra:document-scripts` format for new
   changes.

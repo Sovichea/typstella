@@ -17,6 +17,8 @@ export type DocumentScriptFont = {
   family: string;
   scale: number;
   language: string | null;
+  /** When true, this script font also owns Unicode Common characters. */
+  common?: boolean;
 };
 
 export type TypographyEdit = { from: number; to: number; insert: string };
@@ -58,6 +60,18 @@ export function typographyScaleExceedsFineAdjustment(scale: number): boolean {
 export function typographyScaleChange(previousScale: number, nextScale: number): TypographyScaleChange {
   if (Math.abs(previousScale - nextScale) <= 0.0001) return "unchanged";
   return Math.abs(nextScale - 1) <= 0.0001 ? "apply" : "confirm";
+}
+
+export function normalizeCommonOverride(fonts: readonly DocumentScriptFont[]): DocumentScriptFont[] {
+  let claimed = false;
+  return fonts.map(font => {
+    if (font.common === true && !claimed) {
+      claimed = true;
+      return { ...font, common: true };
+    }
+    const { common: _common, ...rest } = font;
+    return rest;
+  });
 }
 
 const blockStart = "// typsastra:typography:start";
@@ -161,10 +175,16 @@ export function renderTypographyBlock(config: DocumentTypography): string {
     lines.push(`// typsastra:document-scripts ${JSON.stringify(fonts)}`);
   }
   if (fonts.length > 0) {
-    const descriptors = fonts.map(font => {
-      const script = typographyScripts.find(candidate => candidate.id === font.script)!;
-      return `(name: "${escapeTypstString(font.family)}", covers: regex("[\\p{scx=${script.unicodeProperty}}\\p{scx=Common}]"))`;
-    });
+    const commonOwner = fonts.find(font => font.common);
+    const descriptors = commonOwner
+      ? fonts.map(font => {
+        const script = typographyScripts.find(candidate => candidate.id === font.script)!;
+        const coverage = font.common
+          ? `[\\p{scx=${script.unicodeProperty}}\\p{scx=Common}]`
+          : `\\p{scx=${script.unicodeProperty}}`;
+        return `(name: "${escapeTypstString(font.family)}", covers: regex("${coverage}"))`;
+      })
+      : fonts.map(font => `"${escapeTypstString(font.family)}"`);
     lines.push(
       "#set text(",
       "  font: (",
@@ -179,11 +199,12 @@ export function renderTypographyBlock(config: DocumentTypography): string {
 }
 
 function documentScriptMetadata(fonts: readonly DocumentScriptFont[]) {
-  return fonts.map(font => ({
+  return normalizeCommonOverride(fonts).map(font => ({
     family: font.family,
     script: font.script,
     scale: Math.max(0.5, Math.min(2, font.scale)),
-    ...(font.language ? { language: font.language } : {})
+    ...(font.language ? { language: font.language } : {}),
+    ...(font.common ? { common: true } : {})
   }));
 }
 
@@ -206,11 +227,14 @@ export function parseDocumentScripts(text: string): DocumentScriptFont[] {
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
+    let commonClaimed = false;
     return parsed.flatMap(item => {
       if (!item || typeof item !== "object") return [];
       const candidate = item as Partial<DocumentScriptFont>;
       if (typeof candidate.family !== "string" || !validScript(candidate.script)) return [];
       const language = normalizeLanguageTag(candidate.language);
+      const common = candidate.common === true && !commonClaimed;
+      if (common) commonClaimed = true;
       return [{
         family: candidate.family,
         script: candidate.script,
@@ -218,6 +242,7 @@ export function parseDocumentScripts(text: string): DocumentScriptFont[] {
           ? Math.max(0.5, Math.min(2, candidate.scale))
           : 1,
         language,
+        ...(common ? { common: true } : {}),
       }];
     });
   } catch {
@@ -237,18 +262,22 @@ export function parseTypographyBlock(text: string): DocumentTypography | null {
   const legacyMetadata = /\/\/ typsastra:complex-font (\{[^\r\n]+\})/.exec(block);
   const validScript = (script: unknown): script is string =>
     typeof script === "string" && typographyScripts.some(candidate => candidate.id === script);
+  let commonClaimed = false;
   const parseFonts = (value: unknown): DocumentScriptFont[] => !Array.isArray(value) ? [] : value.flatMap(item => {
     if (!item || typeof item !== "object") return [];
     const candidate = item as Partial<DocumentScriptFont>;
     if (typeof candidate.family !== "string" || !validScript(candidate.script)) return [];
     const language = normalizeLanguageTag(candidate.language);
+    const common = candidate.common === true && !commonClaimed;
+    if (common) commonClaimed = true;
     return [{
       family: candidate.family,
       script: candidate.script,
       scale: typeof candidate.scale === "number" && Number.isFinite(candidate.scale)
         ? Math.max(0.5, Math.min(2, candidate.scale))
         : 1,
-      language
+      language,
+      ...(common ? { common: true } : {})
     }];
   });
   let fonts: DocumentScriptFont[] = [];
@@ -269,6 +298,12 @@ export function parseTypographyBlock(text: string): DocumentTypography | null {
       fonts = parseFonts(raw);
     }
   } catch { return null; }
+  // The short-lived all-Common format encoded shared-character priority only
+  // through row order. Preserve its effective first-font ownership when read,
+  // while new configurations remain in ordinary fallback mode by default.
+  if (block.includes("scx=Common") && !fonts.some(font => font.common) && fonts[0]) {
+    fonts[0] = { ...fonts[0], common: true };
+  }
   const stack = block.match(/#set text\(font: \(([^\r\n]+)\), size: (-?\d+(?:\.\d+)?)pt\)/);
   const single = block.match(/#set text\(font: "((?:\\.|[^"])*)", size: (-?\d+(?:\.\d+)?)pt\)/);
   const legacyComplex = block.match(/#show regex\("\\p\{([^}]+)\}\+"\): set text\(font: "((?:\\.|[^"])*)", size: 1em ([+-]) (\d+(?:\.\d+)?)pt\)/);

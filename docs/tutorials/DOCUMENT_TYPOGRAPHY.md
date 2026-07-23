@@ -14,8 +14,8 @@ This creates two practical problems:
 - a font listed first may contain another script and prevent that script's
   intended font from being used.
 
-Typsastra solves both without rewriting document content. Each script receives
-its own font, Unicode coverage restriction, and optional visual scale.
+Typsastra preserves the familiar fallback stack by default and can optionally
+restrict each font to one script without rewriting document content.
 
 ## Configure script fonts
 
@@ -26,7 +26,9 @@ its own font, Unicode coverage restriction, and optional visual scale.
 5. Optionally assign the language provider used for spellcheck and completion.
 6. Drag the script rows into priority order. With the drag handle focused, Up
    and Down Arrow provide the same operation from the keyboard.
-7. Choose **Apply to document**, or **Apply as template** for shared project
+7. Optional: select **Override** on one row if that font should own numbers,
+   punctuation, spaces, and other shared symbols.
+8. Choose **Apply to document**, or **Apply as template** for shared project
    typography.
 
 For example:
@@ -38,22 +40,23 @@ Latin          MiSans Latin    1.10×
 Arabic         MiSans Arabic   1.00×
 ```
 
-There is no primary script. The entries may appear in any order. Typsastra
-generates a native Typst descriptor such as:
+With no override selected, Typsastra generates an ordinary ordered fallback:
 
 ```typst
-(name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]"))
+font: ("MiSans Khmer", "MiSans Latin", "MiSans Arabic")
+```
+
+If Latin owns the override, Typsastra instead generates descriptors like:
+
+```typst
+(name: "MiSans Khmer", covers: regex("\p{scx=Khmer}"))
+(name: "MiSans Latin", covers: regex("[\p{scx=Latin}\p{scx=Common}]"))
 ```
 
 `scx` means Unicode Script Extensions. The restriction prevents a Khmer font's
-built-in Latin glyphs from taking ownership of Latin text. It also avoids the
-regex show rules that would interfere with forward and inverse sync.
-
-The added `Common` coverage handles spaces, Western digits, and generic
-punctuation. Every configured font receives this shared coverage, so row order
-selects their preferred font. Put Latin first when `123` and punctuation should
-use the Latin family; put Khmer first when the Khmer family should own shared
-characters. Script-specific letters remain isolated regardless of order.
+built-in Latin glyphs from taking ownership of Latin text. `Common` gives the
+one selected font spaces, Western digits, generic punctuation, and shared
+symbols. Clear the checkbox to return to ordinary fallback behavior.
 
 Typsastra asks for confirmation before generating a scaled font. Generated
 variants live only in Typsastra's private global application-data cache, where

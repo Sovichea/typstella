@@ -39,8 +39,26 @@ try {
   for (const source of findTypFiles(root)) {
     const contents = readFileSync(source, "utf8");
     const managedBlocks = contents.match(/typsastra:typography:start[\s\S]*?typsastra:typography:end/g) ?? [];
-    if (managedBlocks.some(block => /\bset text\s*\(/.test(block) && !block.includes("scx="))) {
-      failures.push(`${relative(root, source).replaceAll("\\", "/")}\nManaged typography still uses a legacy unrestricted font stack.`);
+    for (const block of managedBlocks) {
+      if (!/\bset text\s*\(/.test(block)) continue;
+      const metadata = /typsastra:(?:document-scripts|script-fonts) (\[[^\r\n]+\])/.exec(block);
+      let commonOwners = 0;
+      try {
+        const fonts: unknown = metadata ? JSON.parse(metadata[1]) : [];
+        commonOwners = Array.isArray(fonts)
+          ? fonts.filter(font => font && typeof font === "object" && (font as { common?: unknown }).common === true).length
+          : 0;
+      } catch {
+        failures.push(`${relative(root, source).replaceAll("\\", "/")}\nManaged typography metadata is invalid JSON.`);
+        continue;
+      }
+      if (commonOwners > 1) {
+        failures.push(`${relative(root, source).replaceAll("\\", "/")}\nManaged typography assigns shared characters to more than one script.`);
+      } else if (commonOwners === 1 && !block.includes("scx=Common")) {
+        failures.push(`${relative(root, source).replaceAll("\\", "/")}\nShared-character override is missing its Common coverage descriptor.`);
+      } else if (commonOwners === 0 && block.includes("scx=")) {
+        failures.push(`${relative(root, source).replaceAll("\\", "/")}\nDefault typography should use ordinary Typst fallback order.`);
+      }
     }
   }
   for (const source of mainFiles) {

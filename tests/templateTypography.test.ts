@@ -42,7 +42,8 @@ describe("template typography", () => {
     const edit = templateTypographyEdit(source, "thesis", config)!;
     const updated = source.slice(0, edit.from) + edit.insert + source.slice(edit.to);
     expect(updated).toContain('  set text(');
-    expect(updated).toContain('(name: "MiSans Khmer", covers: regex("[\\p{scx=Khmer}\\p{scx=Common}]"))');
+    expect(updated).toContain('"MiSans Khmer",');
+    expect(updated).not.toContain("covers:");
     expect(updated).toContain("// typsastra:script-fonts ");
     expect(updated).not.toContain("// typsastra:document-scripts ");
     expect(updated).not.toContain('"language"');

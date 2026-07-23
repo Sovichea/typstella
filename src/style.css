@@ -1914,7 +1914,7 @@ body.typsastra-resizing #input-container-wrapper::after {
 
 .toolbar-font-fallback-row {
   display: grid;
-  grid-template-columns: minmax(105px, 0.8fr) minmax(160px, 1.45fr) 80px minmax(165px, 1.25fr) minmax(105px, 0.75fr) 30px;
+  grid-template-columns: minmax(105px, 0.8fr) minmax(150px, 1.35fr) 70px minmax(100px, 0.8fr) minmax(150px, 1.2fr) minmax(95px, 0.7fr) 30px;
   align-items: start;
   gap: 8px;
   padding: 9px 0;
@@ -2034,7 +2034,7 @@ body.typsastra-resizing #input-container-wrapper::after {
 
 .document-typography-table-header {
   display: grid;
-  grid-template-columns: minmax(105px, 0.8fr) minmax(160px, 1.45fr) 80px minmax(165px, 1.25fr) minmax(105px, 0.75fr) 30px;
+  grid-template-columns: minmax(105px, 0.8fr) minmax(150px, 1.35fr) 70px minmax(100px, 0.8fr) minmax(150px, 1.2fr) minmax(95px, 0.7fr) 30px;
   gap: 8px;
   margin-top: 12px;
   padding: 7px 0;
@@ -2053,6 +2053,21 @@ body.typsastra-resizing #input-container-wrapper::after {
 .document-typography-cell > select,
 .document-typography-cell > input {
   width: 100%;
+}
+
+.document-typography-common-control {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ui-text);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.document-typography-common-control > input {
+  width: auto;
+  margin: 0;
 }
 
 .document-typography-field-hint,
@@ -2167,8 +2182,8 @@ body.typsastra-resizing #input-container-wrapper::after {
   }
 
   .document-typography-cell:nth-child(2),
-  .document-typography-cell:nth-child(4),
-  .document-typography-cell:nth-child(5) {
+  .document-typography-cell:nth-child(5),
+  .document-typography-cell:nth-child(6) {
     grid-column: 1 / 3;
   }
 

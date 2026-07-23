@@ -3,7 +3,7 @@
 // typsastra:typography:start
 // typsastra:document-scripts [{"family":"New Computer Modern","script":"latin","scale":1,"language":"en-US"}]
 #set text(
-  font: ((name: "New Computer Modern", covers: regex("[\p{scx=Latin}\p{scx=Common}]")),),
+  font: ("New Computer Modern",),
   size: 12pt,
 )
 // typsastra:typography:end
