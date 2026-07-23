@@ -45,17 +45,30 @@ a requested glyph, Typst uses it; otherwise Typst proceeds through the stack.
 
 ## Optional numbers and punctuation override
 
+Ordinary order cannot always satisfy a mixed-script document. Consider a
+Khmer-dominant document that should use Siemreap for Khmer and shared
+punctuation, but Calibri for embedded English:
+
+- `("Calibri", "Siemreap")` reaches the desired Latin font, but also gives
+  Western digits and shared punctuation to Calibri.
+- `("Siemreap", "Calibri")` gives those shared characters to Siemreap, but
+  Siemreap also contains Latin glyphs, so embedded English may never reach
+  Calibri.
+
+The override resolves these two requirements independently. It is unnecessary
+when ordinary fallback order already produces the intended typography.
+
 The **Override** checkbox beside a script is optional. At most one row can be
 selected. Selecting it asks that font to own Unicode `Common` characters,
 including spaces, Western digits, generic punctuation, and many shared symbols.
 Typsastra then restricts every configured font to its assigned script:
 
 ```typst
-// typsastra:document-scripts [{"family":"Siemreap","script":"khmer","scale":1,"language":"km"},{"family":"Calibri","script":"latin","scale":1,"language":"en-US","common":true}]
+// typsastra:document-scripts [{"family":"Siemreap","script":"khmer","scale":1,"language":"km","common":true},{"family":"Calibri","script":"latin","scale":1,"language":"en-US"}]
 #set text(
   font: (
-    (name: "Siemreap", covers: regex("\p{scx=Khmer}")),
-    (name: "Calibri", covers: regex("[\p{scx=Latin}\p{scx=Common}]")),
+    (name: "Siemreap", covers: regex("[\p{scx=Khmer}\p{scx=Common}]")),
+    (name: "Calibri", covers: regex("\p{scx=Latin}")),
   ),
   size: 11pt,
 )
@@ -63,7 +76,9 @@ Typsastra then restricts every configured font to its assigned script:
 
 Clearing the checkbox returns the document to ordinary fallback mode. Selecting
 another row moves ownership to that row; Typsastra never writes more than one
-`"common": true` entry.
+`"common": true` entry. In the example above, Khmer letters and shared
+characters use Siemreap while Latin letters use Calibri, regardless of the
+extra Latin glyphs bundled in Siemreap.
 
 `scx` is the Unicode Script Extensions property. It includes characters that
 Unicode associates with a script, including relevant marks that may not have

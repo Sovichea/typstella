@@ -46,17 +46,28 @@ With no override selected, Typsastra generates an ordinary ordered fallback:
 font: ("MiSans Khmer", "MiSans Latin", "MiSans Arabic")
 ```
 
-If Latin owns the override, Typsastra instead generates descriptors like:
+For mixed Khmer and English, neither ordinary order can guarantee both desired
+fonts:
+
+- `("MiSans Latin", "MiSans Khmer")` preserves the Latin font, but Western
+  digits and shared punctuation normally come from the Latin family.
+- `("MiSans Khmer", "MiSans Latin")` gives those shared characters to the
+  Khmer family, but many Khmer fonts also contain Latin glyphs. Embedded English
+  may therefore use the Khmer family without ever reaching MiSans Latin.
+
+This overlapping coverage is the main reason to enable **Override**. If Khmer
+owns the override, Typsastra generates descriptors like:
 
 ```typst
-(name: "MiSans Khmer", covers: regex("\p{scx=Khmer}"))
-(name: "MiSans Latin", covers: regex("[\p{scx=Latin}\p{scx=Common}]"))
+(name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]"))
+(name: "MiSans Latin", covers: regex("\p{scx=Latin}"))
 ```
 
 `scx` means Unicode Script Extensions. The restriction prevents a Khmer font's
-built-in Latin glyphs from taking ownership of Latin text. `Common` gives the
-one selected font spaces, Western digits, generic punctuation, and shared
-symbols. Clear the checkbox to return to ordinary fallback behavior.
+built-in Latin glyphs from taking ownership of embedded English. `Common` gives
+the selected Khmer font spaces, Western digits, generic punctuation, and shared
+symbols. The result is Khmer typography for the dominant text and MiSans Latin
+for actual Latin letters. Clear the checkbox to return to ordinary fallback.
 
 Typsastra asks for confirmation before generating a scaled font. Generated
 variants live only in Typsastra's private global application-data cache, where

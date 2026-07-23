@@ -34,10 +34,23 @@ font: ("New Computer Modern", "MiSans Khmer", "MiSans Arabic")
 ```
 
 If a font contains glyphs for several scripts, fallback order remains important.
-For stricter control, select **Override** on one row in Document Typography.
-Typsastra will restrict every row by Unicode Script Extensions (`scx`) and give
-spaces, numbers, punctuation, and shared symbols to that one selected font.
-Clearing the checkbox restores ordinary fallback behavior.
+
+For a Khmer-dominant document, putting Khmer first gives punctuation and
+Western digits to the Khmer font. However, MiSans Khmer also contains Latin
+glyphs, so embedded English may never reach New Computer Modern. Putting Latin
+first fixes English but gives those shared characters to the Latin font.
+
+This is why **Override** exists. Select it on the Khmer row to restrict every
+font by Unicode Script Extensions (`scx`), give shared characters to MiSans
+Khmer, and still route actual Latin letters to New Computer Modern:
+
+```typ
+(name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]"))
+(name: "New Computer Modern", covers: regex("\p{scx=Latin}"))
+```
+
+Use ordinary fallback whenever its order already produces the intended result.
+Clearing the checkbox restores that default behavior.
 
 == Independent visual scaling
 
