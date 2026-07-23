@@ -1,5 +1,6 @@
 import { EditorSelection, EditorState, type Extension, type Text, type Transaction } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
+import { deleteBracketPair } from "@codemirror/autocomplete";
 import { editingPolicyRegistry } from "./editingPolicies/registry";
 
 function getTemporaryEditingBoundary(state: EditorState): number | null {
@@ -75,6 +76,10 @@ export function nextGraphemeBoundary(
 
 export function deletePreviousGrapheme(view: EditorView): boolean {
   return deleteByPolicy(view, "backward");
+}
+
+export function deletePreviousGraphemeOrPair(view: EditorView): boolean {
+  return deleteBracketPair(view) || deletePreviousGrapheme(view);
 }
 
 export function deleteNextGrapheme(view: EditorView): boolean {

@@ -12,14 +12,14 @@ import { indentationMarkers } from '@replit/codemirror-indentation-markers';
 import * as uiwThemes from "@uiw/codemirror-themes-all";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { createTypstAutocomplete, type ProviderCapabilities } from "./autocomplete";
-import { acceptCompletion, completionKeymap, closeBrackets, closeBracketsKeymap, moveCompletionSelection } from "@codemirror/autocomplete";
+import { acceptCompletion, completionKeymap, closeBrackets, moveCompletionSelection } from "@codemirror/autocomplete";
 import { bracketMatching } from "@codemirror/language";
 import { toggleLineComment } from "@codemirror/commands";
 import { bracketColorizer } from "./bracketColorizer";
 import { createHoverTooltip } from "./hover";
 import type { TinymistLspClient } from "../compiler/lsp";
 import { typstFunctionFoldService } from "./folding";
-import { deleteNextGrapheme, deletePreviousGrapheme, graphemeSelectionBoundaryFilter, moveNextGrapheme, movePreviousGrapheme, selectNextGrapheme, selectPreviousGrapheme } from "./grapheme";
+import { deleteNextGrapheme, deletePreviousGraphemeOrPair, graphemeSelectionBoundaryFilter, moveNextGrapheme, movePreviousGrapheme, selectNextGrapheme, selectPreviousGrapheme } from "./grapheme";
 import { editingPolicyRegistry } from "./editingPolicies/registry";
 import { showInvisibleCharacters } from "./invisibles";
 import { TYPSASTRA_GREEN, TYPSASTRA_GREEN_GLOW } from "../ui/brandColors";
@@ -353,7 +353,7 @@ export function getEditorExtensions(
     editorFontCompartment.of(editorFontTheme()),
     keymap.of([
       { key: "Mod-/", run: toggleLineComment },
-      { key: "Backspace", run: deletePreviousGrapheme },
+      { key: "Backspace", run: deletePreviousGraphemeOrPair },
       { key: "Delete", run: deleteNextGrapheme },
       { key: "ArrowLeft", run: movePreviousGrapheme },
       { key: "ArrowRight", run: moveNextGrapheme },
@@ -361,7 +361,6 @@ export function getEditorExtensions(
       { key: "Shift-ArrowRight", run: selectNextGrapheme },
       ...completionKeymap,
       { key: "Tab", run: insertTab }, 
-      ...closeBracketsKeymap, 
       ...defaultKeymap, 
       ...historyKeymap, 
       ...searchKeymap, 

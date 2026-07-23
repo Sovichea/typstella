@@ -1,9 +1,27 @@
 import { describe, expect, test } from "bun:test";
 import { EditorSelection, EditorState, Text } from "@codemirror/state";
-import { codePointDeletionRange, deletionRangesForSelection, graphemeBoundaries, graphemeSelectionBoundaryFilter, moveSelectionByGrapheme, nextGraphemeBoundary, previousGraphemeBoundary, snapPositionToGraphemeBoundary, snapSelectionToGraphemeBoundaries } from "../src/editor/grapheme";
+import { closeBrackets } from "@codemirror/autocomplete";
+import type { EditorView } from "@codemirror/view";
+import { codePointDeletionRange, deletionRangesForSelection, deletePreviousGraphemeOrPair, graphemeBoundaries, graphemeSelectionBoundaryFilter, moveSelectionByGrapheme, nextGraphemeBoundary, previousGraphemeBoundary, snapPositionToGraphemeBoundary, snapSelectionToGraphemeBoundaries } from "../src/editor/grapheme";
 import { getTemporaryKhmerBoundary, khmerCompositionBoundaryState } from "../src/editor/editingPolicies/khmer/composition";
 
 describe("editor grapheme navigation", () => {
+  test("backspace removes both sides of an adjacent quotation pair", () => {
+    let state = EditorState.create({
+      doc: '""',
+      selection: EditorSelection.cursor(1),
+      extensions: [closeBrackets()]
+    });
+    const view = {
+      get state() { return state; },
+      dispatch(transaction: ReturnType<EditorState["update"]>) { state = transaction.state; }
+    } as unknown as EditorView;
+
+    expect(deletePreviousGraphemeOrPair(view)).toBe(true);
+    expect(state.doc.toString()).toBe("");
+    expect(state.selection.main.head).toBe(0);
+  });
+
   test("keeps Khmer coeng clusters together", () => {
     const text = "ខ្មែរ";
     const boundaries = graphemeBoundaries(text);
