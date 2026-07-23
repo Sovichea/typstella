@@ -4,9 +4,9 @@
 // typsastra:document-scripts [{"family":"MiSans Khmer","script":"khmer","scale":1,"language":"km"},{"family":"New Computer Modern","script":"latin","scale":1,"language":"en-US"},{"family":"MiSans Arabic","script":"arabic","scale":1,"language":"ar"}]
 #set text(
   font: (
-    (name: "MiSans Khmer", covers: regex("\p{scx=Khmer}")),
-    (name: "New Computer Modern", covers: regex("\p{scx=Latin}")),
-    (name: "MiSans Arabic", covers: regex("\p{scx=Arabic}")),
+    (name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]")),
+    (name: "New Computer Modern", covers: regex("[\p{scx=Latin}\p{scx=Common}]")),
+    (name: "MiSans Arabic", covers: regex("[\p{scx=Arabic}\p{scx=Common}]")),
   ),
   size: 11pt,
 )
@@ -30,7 +30,7 @@ is primary or embedded. In this example Khmer intentionally comes before Latin.
 The order is safe because each entry has a native Typst `covers` restriction:
 
 ```typ
-(name: "MiSans Khmer", covers: regex("\p{scx=Khmer}"))
+(name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]"))
 ```
 
 `scx` means Unicode Script Extensions. MiSans Khmer is eligible for Khmer text,

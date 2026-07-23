@@ -2,8 +2,8 @@
   // typsastra:typography:start
   set text(
     font: (
-      (name: "New Computer Modern", covers: regex("\p{scx=Latin}")),
-      (name: "Noto Sans Lao", covers: regex("\p{scx=Lao}")),
+      (name: "New Computer Modern", covers: regex("[\p{scx=Latin}\p{scx=Common}]")),
+      (name: "Noto Sans Lao", covers: regex("[\p{scx=Lao}\p{scx=Common}]")),
     ),
     size: 11pt,
   )

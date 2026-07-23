@@ -4,8 +4,8 @@
 // typsastra:document-scripts [{"family":"New Computer Modern","script":"latin","scale":1,"language":"en-US"},{"family":"MiSans Khmer","script":"khmer","scale":1,"language":"km"}]
 #set text(
   font: (
-    (name: "New Computer Modern", covers: regex("\p{scx=Latin}")),
-    (name: "MiSans Khmer", covers: regex("\p{scx=Khmer}")),
+    (name: "New Computer Modern", covers: regex("[\p{scx=Latin}\p{scx=Common}]")),
+    (name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]")),
   ),
   size: 11pt,
 )

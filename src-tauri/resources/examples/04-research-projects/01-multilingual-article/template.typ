@@ -7,9 +7,9 @@
   // typsastra:typography:start
   set text(
     font: (
-      (name: "New Computer Modern", covers: regex("\p{scx=Latin}")),
-      (name: "MiSans Khmer", covers: regex("\p{scx=Khmer}")),
-      (name: "MiSans Arabic", covers: regex("\p{scx=Arabic}")),
+      (name: "New Computer Modern", covers: regex("[\p{scx=Latin}\p{scx=Common}]")),
+      (name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]")),
+      (name: "MiSans Arabic", covers: regex("[\p{scx=Arabic}\p{scx=Common}]")),
     ),
     size: 11pt,
   )

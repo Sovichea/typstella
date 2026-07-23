@@ -46,8 +46,8 @@ describe("document typography", () => {
   };
 
   test("renders reliable Typst font rules", () => {
-    expect(renderTypographyBlock(config)).toContain('(name: "Calibri", covers: regex("\\p{scx=Latin}"))');
-    expect(renderTypographyBlock(config)).toContain('(name: "MiSans Khmer", covers: regex("\\p{scx=Khmer}"))');
+    expect(renderTypographyBlock(config)).toContain('(name: "Calibri", covers: regex("[\\p{scx=Latin}\\p{scx=Common}]"))');
+    expect(renderTypographyBlock(config)).toContain('(name: "MiSans Khmer", covers: regex("[\\p{scx=Khmer}\\p{scx=Common}]"))');
     expect(renderTypographyBlock(config)).toContain('// typsastra:document-scripts [{"family":"Calibri","script":"latin","scale":1,"language":"en-US"},{"family":"MiSans Khmer","script":"khmer","scale":1.05,"language":"km"},{"family":"MiSans Lao","script":"lao","scale":1}]');
     expect(renderTypographyBlock(config)).not.toContain("#show regex(");
     expect(renderTypographyBlock(config)).not.toContain("show raw");
@@ -130,13 +130,13 @@ describe("document typography", () => {
     };
     const complexBlock = renderTypographyBlock(khmerFirst);
     expect(complexBlock.indexOf('name: "MiSans Khmer"')).toBeLessThan(complexBlock.indexOf('name: "Calibri"'));
-    expect(complexBlock).toContain('covers: regex("\\p{scx=Khmer}")');
-    expect(complexBlock).toContain('covers: regex("\\p{scx=Latin}")');
+    expect(complexBlock).toContain('covers: regex("[\\p{scx=Khmer}\\p{scx=Common}]")');
+    expect(complexBlock).toContain('covers: regex("[\\p{scx=Latin}\\p{scx=Common}]")');
     expect(parseTypographyBlock(complexBlock)).toEqual(khmerFirst);
 
     const latinOnly = { baseSizePt: 11, fonts: [{ family: "Calibri", script: "latin", scale: 1, language: null }] };
     const latinBlock = renderTypographyBlock(latinOnly);
-    expect(latinBlock).toContain('(name: "Calibri", covers: regex("\\p{scx=Latin}"))');
+    expect(latinBlock).toContain('(name: "Calibri", covers: regex("[\\p{scx=Latin}\\p{scx=Common}]"))');
     expect(latinBlock).not.toContain("#show regex(");
     expect(parseTypographyBlock(latinBlock)).toEqual(latinOnly);
   });

@@ -42,12 +42,18 @@ There is no primary script. The entries may appear in any order. Typsastra
 generates a native Typst descriptor such as:
 
 ```typst
-(name: "MiSans Khmer", covers: regex("\p{scx=Khmer}"))
+(name: "MiSans Khmer", covers: regex("[\p{scx=Khmer}\p{scx=Common}]"))
 ```
 
 `scx` means Unicode Script Extensions. The restriction prevents a Khmer font's
 built-in Latin glyphs from taking ownership of Latin text. It also avoids the
 regex show rules that would interfere with forward and inverse sync.
+
+The added `Common` coverage handles spaces, Western digits, and generic
+punctuation. Every configured font receives this shared coverage, so row order
+selects their preferred font. Put Latin first when `123` and punctuation should
+use the Latin family; put Khmer first when the Khmer family should own shared
+characters. Script-specific letters remain isolated regardless of order.
 
 Typsastra asks for confirmation before generating a scaled font. Generated
 variants live only in Typsastra's private global application-data cache, where

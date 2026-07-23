@@ -163,7 +163,7 @@ export function renderTypographyBlock(config: DocumentTypography): string {
   if (fonts.length > 0) {
     const descriptors = fonts.map(font => {
       const script = typographyScripts.find(candidate => candidate.id === font.script)!;
-      return `(name: "${escapeTypstString(font.family)}", covers: regex("\\p{scx=${script.unicodeProperty}}"))`;
+      return `(name: "${escapeTypstString(font.family)}", covers: regex("[\\p{scx=${script.unicodeProperty}}\\p{scx=Common}]"))`;
     });
     lines.push(
       "#set text(",

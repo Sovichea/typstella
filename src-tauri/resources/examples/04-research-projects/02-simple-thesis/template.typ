@@ -1,7 +1,7 @@
 #let thesis(title: "Untitled Thesis", author: "Anonymous", body) = {
   // typsastra:typography:start
   set text(
-    font: ((name: "New Computer Modern", covers: regex("\p{scx=Latin}")),),
+    font: ((name: "New Computer Modern", covers: regex("[\p{scx=Latin}\p{scx=Common}]")),),
     size: 11pt,
   )
   // typsastra:typography:end
