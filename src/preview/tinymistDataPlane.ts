@@ -1,6 +1,6 @@
 const decoder = new TextDecoder();
 const positionFrameKinds = new Set(["jump", "viewport"]);
-const documentFrameKinds = new Set(["new", "diff-v1"]);
+const documentFrameKinds = new Set(["new", "diff-v1", "source-map-ready"]);
 
 export type TinymistDataPlaneFrameKind = "position" | "document" | "unknown";
 

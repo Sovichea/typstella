@@ -53,7 +53,12 @@ import {
   type WorkspaceMetadata
 } from "./workspace/workspaceStateStore";
 import { RecentProjectsController, recentProjectShortcutIndex } from "./workspace/recentProjectsController";
-import { WorkspaceWatcher, type WorkspaceChange } from "./workspace/workspaceWatcher";
+import {
+  WorkspaceWatcher,
+  acceptedExternalChangePaths,
+  shouldSuppressWorkspaceSelfSave,
+  type WorkspaceChange
+} from "./workspace/workspaceWatcher";
 import { workspaceViewportState } from "./workspace/workspaceVisibility";
 import { formatFileSize, largeFileOpeningNotice, largeMainPreviewOpeningNotice, type LargeFileOpeningNotice } from "./workspace/largeFileOpening";
 import { installWelcomeKeyboardNavigation } from "./workspace/welcomeNavigation";
@@ -362,6 +367,7 @@ export class TypsastraWorkspaceController {
   private previousMemoryDiagnostic: MemoryDiagnosticTotals | null = null;
   private editorScrollbarPointerActive = false;
   private readonly externalConflictPaths = new Set<string>();
+  private externalPreviewRefreshPending = false;
   private readonly settingsController = new SettingsController(
     settings => this.applySettingsToRuntime(settings),
     providers => this.handleLanguageProvidersChanged(providers)
@@ -4228,11 +4234,18 @@ export class TypsastraWorkspaceController {
     const client = this.lspClient;
     const rootPath = this.pdfPreviewSourceMapRootPath ?? this.previewRootPath;
     const taskId = this.pdfPreviewSourceMapTaskId ?? this.previewTaskId;
-    if (!client || !rootPath || !taskId || !this.lspReady || !this.previewFrame.currentUrl) {
+    if (
+      this.externalPreviewRefreshPending
+      || !client
+      || !rootPath
+      || !taskId
+      || !this.lspReady
+      || !this.previewFrame.currentUrl
+    ) {
       this.appendDeveloperLog({
         kind: "info",
         source: "forward sync",
-        message: `Skipped forward sync: client=${!!client}, root=${rootPath ?? "n/a"}, task=${taskId ?? "n/a"}, lspReady=${this.lspReady}, preview=${this.previewFrame.currentUrl || "n/a"}.`
+        message: `Skipped forward sync: externalRefresh=${this.externalPreviewRefreshPending}, client=${!!client}, root=${rootPath ?? "n/a"}, task=${taskId ?? "n/a"}, lspReady=${this.lspReady}, preview=${this.previewFrame.currentUrl || "n/a"}.`
       });
       return false;
     }
@@ -4389,6 +4402,7 @@ export class TypsastraWorkspaceController {
       && this.lspReady
       && this.previewFrame.currentUrl
       && !this.pdfPreviewRunning
+      && !this.externalPreviewRefreshPending
       && !this.previewDisabled
     );
   }
@@ -4529,6 +4543,14 @@ export class TypsastraWorkspaceController {
       import("@tauri-apps/api/event").then(({ emit }) => {
         emit("pdf-click", point);
       }).catch(err => console.error("Error emitting pdf-click", err));
+      return;
+    }
+    if (this.externalPreviewRefreshPending) {
+      this.appendDeveloperLog({
+        kind: "info",
+        source: "inverse sync",
+        message: "Skipped inverse sync while an externally changed preview revision is being prepared."
+      });
       return;
     }
     const position = point.documentPosition;
@@ -5617,10 +5639,12 @@ export class TypsastraWorkspaceController {
     // reported source path is already open and its disk contents still match
     // the saved editor revision, there is no external change to propagate.
     // Avoid rebuilding the mirror and invalidating Tinymist a second time.
-    if (
-      !openFilesChanged
-      && externalPaths.every(path => openPathKeysBeforeReload.has(filePathKey(path)))
-    ) {
+    const externalPathKeys = externalPaths.map(filePathKey);
+    if (shouldSuppressWorkspaceSelfSave(
+      openFilesChanged,
+      externalPathKeys,
+      openPathKeysBeforeReload
+    )) {
       this.appendDeveloperLog({
         kind: "info",
         source: "memory diagnostics",
@@ -5629,24 +5653,104 @@ export class TypsastraWorkspaceController {
       await this.logMemoryDiagnostics("workspace watcher: self-save suppressed");
       return;
     }
-    await this.prepareRenderProjectIfNeeded();
 
-    if (this.lspReady && this.lspClient) {
-      const defaultType: 1 | 2 | 3 = change.kind === "create" ? 1 : change.kind === "remove" ? 3 : 2;
-      const lastPathIndex = externalPaths.length - 1;
-      const changes = externalPaths.map((path, index) => {
-        return {
-          uri: filePathToUri(path),
-          type: change.kind === "rename" && change.paths.length > 1
-            ? (index === lastPathIndex ? 1 : 3) as 1 | 3
-            : defaultType
-        };
-      });
-      await this.lspClient.notifyWorkspaceFilesChanged(changes);
+    // A dirty tab intentionally keeps its in-memory revision. Do not let the
+    // conflicting disk revision update Tinymist, the prepared render mirror,
+    // or the PDF source-map task behind that editor buffer.
+    const acceptedPaths = acceptedExternalChangePaths(
+      externalPaths,
+      filePathKey,
+      this.externalConflictPaths
+    );
+
+    if (acceptedPaths.length === 0) {
+      await this.explorer.loadWorkspace(workspaceRoot);
+      return;
     }
-    await this.explorer.loadWorkspace(workspaceRoot);
-    if (this.workspaceRootPath !== workspaceRoot) return;
-    await this.refreshActivePreviewRoot();
+
+    // External edits must use the same ordered path as editor-driven renders.
+    // That path rebuilds the mirror and source map, synchronizes Tinymist's
+    // already-open generated documents, exports the replacement PDF, and then
+    // warms a source-map session for that exact revision.
+    this.externalPreviewRefreshPending = true;
+    this.updateManualForwardSyncAction();
+    try {
+      await this.retirePdfSourceMapSession("accepted external workspace change");
+      if (this.lspReady && this.lspClient) {
+        const defaultType: 1 | 2 | 3 = change.kind === "create" ? 1 : change.kind === "remove" ? 3 : 2;
+        const lastPathIndex = acceptedPaths.length - 1;
+        const changes = acceptedPaths.map((path, index) => {
+          return {
+            uri: filePathToUri(path),
+            type: change.kind === "rename" && change.paths.length > 1
+              ? (index === lastPathIndex ? 1 : 3) as 1 | 3
+              : defaultType
+          };
+        });
+        await this.lspClient.notifyWorkspaceFilesChanged(changes);
+      }
+      await this.explorer.loadWorkspace(workspaceRoot);
+      if (this.workspaceRootPath !== workspaceRoot) return;
+      await this.refreshActivePreviewRoot(true);
+      await this.waitForExternalPreviewRefresh();
+    } finally {
+      this.externalPreviewRefreshPending = false;
+      this.updateManualForwardSyncAction();
+    }
+  }
+
+  private async retirePdfSourceMapSession(reason: string): Promise<void> {
+    const taskId = this.pdfSyncRegisteredTaskId;
+    this.cancelManualForwardSync();
+    this.previewSyncController.reset();
+    this.pdfSyncPreviewTaskKey = null;
+    this.pdfSyncRegisteredTaskId = null;
+    this.pdfSourceMapStartup = null;
+    this.pdfSourceMapStartupKey = null;
+    this.clearPdfSourceMapDocumentReadiness();
+    this.pdfSyncSocket?.close();
+    this.pdfSyncSocket = null;
+    this.pdfSyncSocketUrl = "";
+    if (taskId && this.lspClient) {
+      await this.lspClient.stopPreview(taskId).catch(error => {
+        this.appendDeveloperLog({
+          kind: "warning",
+          source: "workspace",
+          message: `Could not stop stale source-map task ${taskId}: ${String(error)}`
+        });
+      });
+    }
+    this.appendDeveloperLog({
+      kind: "info",
+      source: "workspace",
+      message: `Retired PDF source-map session after ${reason}.`
+    });
+  }
+
+  private async waitForExternalPreviewRefresh(timeoutMs = 60000): Promise<void> {
+    const startedAt = performance.now();
+    let stableFrames = 0;
+    let observedGeneration = this.pdfPreviewGeneration;
+    while (performance.now() - startedAt < timeoutMs) {
+      await new Promise<void>(resolve => window.setTimeout(resolve, 16));
+      const generationChanged = observedGeneration !== this.pdfPreviewGeneration;
+      observedGeneration = this.pdfPreviewGeneration;
+      if (
+        generationChanged
+        || this.pdfPreviewRunning
+        || this.queuedPdfPreviewContents !== null
+      ) {
+        stableFrames = 0;
+        continue;
+      }
+      stableFrames += 1;
+      if (stableFrames >= 3) return;
+    }
+    this.appendDeveloperLog({
+      kind: "warning",
+      source: "workspace",
+      message: "External preview refresh did not settle within 60000ms; cursor synchronization remains available for the last presented PDF."
+    });
   }
 
   private publishPerformanceMetric(metric: PerformanceMetric): void {
@@ -6979,6 +7083,7 @@ export class TypsastraWorkspaceController {
     this.pdfSyncSocket?.close();
     this.pdfSyncSocket = null;
     this.pdfSyncSocketUrl = "";
+    this.externalPreviewRefreshPending = false;
     this.lastPdfBase64 = "";
     this.imageZoomIn = null;
     this.imageZoomOut = null;

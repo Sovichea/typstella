@@ -8,6 +8,23 @@ export type WorkspaceChange = {
   paths: string[];
 };
 
+export function shouldSuppressWorkspaceSelfSave(
+  openFilesChanged: boolean,
+  reportedPathKeys: readonly string[],
+  openPathKeys: ReadonlySet<string>
+): boolean {
+  return !openFilesChanged
+    && reportedPathKeys.every(pathKey => openPathKeys.has(pathKey));
+}
+
+export function acceptedExternalChangePaths(
+  paths: readonly string[],
+  pathKey: (path: string) => string,
+  conflictPathKeys: ReadonlySet<string>
+): string[] {
+  return paths.filter(path => !conflictPathKeys.has(pathKey(path)));
+}
+
 export function workspaceChangeKind(type: WatchEventKind): WorkspaceChangeKind | null {
   if (typeof type === "string") return null;
   if ("create" in type) return "create";

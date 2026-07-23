@@ -75,6 +75,12 @@ Released July 23, 2026.
 
 ## v0.5.3 — portable active-file preview
 
+- Rebuild externally changed previews through one revision-safe pipeline so
+  forward and inverse synchronization cannot retain a stale render-cache task.
+- Filter oversized Tinymist vector frames from the PDF source-map bridge while
+  preserving the small position messages required by forward and inverse sync.
+- Decouple source-map warm-up from the active cursor so blank lines, comments,
+  directives, and other non-rendered source positions cannot cause a timeout.
 - Qualify debounced PDF render-on-type with representative text,
   complex-script, image, and vector documents on Windows WebView2, Linux
   WebKitGTK, and macOS WKWebView.

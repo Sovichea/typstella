@@ -16,8 +16,10 @@ describe("Tinymist preview data plane", () => {
   test("ignores binary document frames", async () => {
     expect(await tinymistDataPlaneFrameKind(bytes("new,font and vector payload"))).toBe("document");
     expect(await tinymistDataPlaneFrameKind(bytes("diff-v1,binary payload"))).toBe("document");
+    expect(await tinymistDataPlaneFrameKind(bytes("source-map-ready,"))).toBe("document");
     expect(await tinymistDataPlanePositionText(bytes("new,font and vector payload"))).toBeNull();
     expect(await tinymistDataPlanePositionText(bytes("diff-v1,binary payload"))).toBeNull();
+    expect(await tinymistDataPlanePositionText(bytes("source-map-ready,"))).toBeNull();
   });
 
   test("classifies source-map and unknown frames without decoding document payloads", async () => {

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { workspaceChangeKind } from "../src/workspace/workspaceWatcher";
+import {
+  acceptedExternalChangePaths,
+  shouldSuppressWorkspaceSelfSave,
+  workspaceChangeKind
+} from "../src/workspace/workspaceWatcher";
 
 describe("workspace watcher", () => {
   test("classifies structural and content changes", () => {
@@ -13,5 +17,33 @@ describe("workspace watcher", () => {
     expect(workspaceChangeKind({ access: { kind: "open", mode: "read" } })).toBeNull();
     expect(workspaceChangeKind("other")).toBeNull();
     expect(workspaceChangeKind("any")).toBeNull();
+  });
+
+  test("suppresses only matching self-save notifications", () => {
+    const openPaths = new Set(["c:/project/main.typ"]);
+    expect(shouldSuppressWorkspaceSelfSave(
+      false,
+      ["c:/project/main.typ"],
+      openPaths
+    )).toBeTrue();
+    expect(shouldSuppressWorkspaceSelfSave(
+      true,
+      ["c:/project/main.typ"],
+      openPaths
+    )).toBeFalse();
+    expect(shouldSuppressWorkspaceSelfSave(
+      false,
+      ["c:/project/image.png"],
+      openPaths
+    )).toBeFalse();
+  });
+
+  test("keeps conflicted dirty files out of external preview propagation", () => {
+    const paths = ["C:\\Project\\main.typ", "C:\\Project\\image.png"];
+    const key = (path: string) => path.replace(/\\/g, "/").toLowerCase();
+    const conflicts = new Set([key(paths[0])]);
+    expect(acceptedExternalChangePaths(paths, key, conflicts)).toEqual([
+      "C:\\Project\\image.png"
+    ]);
   });
 });

@@ -6,10 +6,12 @@ use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{
-    accept_hdr_async, connect_async,
+    accept_hdr_async, connect_async_with_config,
     tungstenite::{
         client::IntoClientRequest,
         handshake::server::{Request as WsServerRequest, Response as WsServerResponse},
+        protocol::WebSocketConfig,
+        Message as WsMessage,
     },
 };
 
@@ -2706,6 +2708,22 @@ fn preview_ws_origin(target_port: u16) -> String {
     format!("http://127.0.0.1:{target_port}")
 }
 
+const PREVIEW_WS_MAX_UPSTREAM_MESSAGE_BYTES: usize = 256 << 20;
+const PREVIEW_WS_SOURCE_MAP_READY_FRAME: &[u8] = b"source-map-ready,";
+
+fn preview_ws_upstream_config() -> WebSocketConfig {
+    WebSocketConfig::default()
+        .max_message_size(Some(PREVIEW_WS_MAX_UPSTREAM_MESSAGE_BYTES))
+        .max_frame_size(Some(PREVIEW_WS_MAX_UPSTREAM_MESSAGE_BYTES))
+}
+
+fn is_tinymist_vector_document_message(message: &WsMessage) -> bool {
+    match message {
+        WsMessage::Binary(bytes) => bytes.starts_with(b"new,") || bytes.starts_with(b"diff-v1,"),
+        _ => false,
+    }
+}
+
 fn report_preview_ws_proxy_error(direction: &str, error: tokio_tungstenite::tungstenite::Error) {
     use std::io::ErrorKind;
     use tokio_tungstenite::tungstenite::Error;
@@ -2801,7 +2819,13 @@ async fn start_preview_ws_proxy(target_url: String) -> Result<String, String> {
             outbound_request.headers_mut().insert("Origin", value);
         }
 
-        let server_ws = match connect_async(outbound_request).await {
+        let server_ws = match connect_async_with_config(
+            outbound_request,
+            Some(preview_ws_upstream_config()),
+            false,
+        )
+        .await
+        {
             Ok((socket, _response)) => socket,
             Err(error) => {
                 eprintln!("Preview WebSocket proxy upstream handshake failed: {error}");
@@ -2818,8 +2842,33 @@ async fn start_preview_ws_proxy(target_url: String) -> Result<String, String> {
             Ok::<(), tokio_tungstenite::tungstenite::Error>(())
         };
         let server_to_client = async {
+            let mut source_map_ready_sent = false;
             while let Some(message) = server_read.next().await {
-                client_write.send(message?).await?;
+                let message = message?;
+                // This bridge exists only for PDF forward/inverse sync. Tinymist
+                // renders a complete SVG update after a source lookup, which can
+                // be tens or hundreds of MiB even though Typsastra needs only the
+                // small jump/viewport frame. Accept the trusted loopback frame so
+                // tungstenite does not close the connection, then discard it
+                // before it is copied into WebView memory.
+                if is_tinymist_vector_document_message(&message) {
+                    // Completing this frame also means Tinymist's render actor
+                    // has built the source-map state needed by inverse sync.
+                    // Readiness must not depend on whether the cursor used for
+                    // the warm-up probe happens to map to visible document
+                    // content, so replace the discarded SVG with a tiny local
+                    // protocol sentinel.
+                    if !source_map_ready_sent {
+                        client_write
+                            .send(WsMessage::Binary(
+                                PREVIEW_WS_SOURCE_MAP_READY_FRAME.to_vec().into(),
+                            ))
+                            .await?;
+                        source_map_ready_sent = true;
+                    }
+                    continue;
+                }
+                client_write.send(message).await?;
             }
             Ok::<(), tokio_tungstenite::tungstenite::Error>(())
         };
@@ -2842,7 +2891,10 @@ async fn start_preview_ws_proxy(target_url: String) -> Result<String, String> {
 
 #[cfg(test)]
 mod preview_ws_proxy_tests {
-    use super::{parse_loopback_url, preview_ws_origin, start_preview_ws_proxy};
+    use super::{
+        is_tinymist_vector_document_message, parse_loopback_url, preview_ws_origin,
+        start_preview_ws_proxy, PREVIEW_WS_SOURCE_MAP_READY_FRAME,
+    };
     use futures_util::{SinkExt, StreamExt};
     use std::sync::{Arc, Mutex};
     use tokio::net::TcpListener;
@@ -2866,6 +2918,22 @@ mod preview_ws_proxy_tests {
     #[test]
     fn uses_the_tinymist_loopback_endpoint_as_upstream_origin() {
         assert_eq!(preview_ws_origin(34373), "http://127.0.0.1:34373");
+    }
+
+    #[test]
+    fn identifies_only_tinymist_vector_document_frames() {
+        assert!(is_tinymist_vector_document_message(&Message::Binary(
+            b"new,vector payload".to_vec().into()
+        )));
+        assert!(is_tinymist_vector_document_message(&Message::Binary(
+            b"diff-v1,vector payload".to_vec().into()
+        )));
+        assert!(!is_tinymist_vector_document_message(&Message::Binary(
+            b"jump,2 24.5 80.25".to_vec().into()
+        )));
+        assert!(!is_tinymist_vector_document_message(&Message::Text(
+            "current".into()
+        )));
     }
 
     #[tokio::test]
@@ -2921,6 +2989,46 @@ mod preview_ws_proxy_tests {
             observed_origin.lock().unwrap().as_deref(),
             Some(format!("http://127.0.0.1:{upstream_port}").as_str())
         );
+    }
+
+    #[tokio::test]
+    async fn drops_oversized_vector_frames_but_keeps_source_map_frames() {
+        let upstream = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream_port = upstream.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (stream, _) = upstream.accept().await.unwrap();
+            let mut socket = accept_hdr_async(stream, |_request: &Request, response: Response| {
+                Ok(response)
+            })
+            .await
+            .unwrap();
+            let mut vector = b"diff-v1,".to_vec();
+            vector.resize((17 << 20) + vector.len(), b'x');
+            socket.send(Message::Binary(vector.into())).await.unwrap();
+            socket
+                .send(Message::Binary(b"jump,7 12.5 40.25".to_vec().into()))
+                .await
+                .unwrap();
+            socket.close(None).await.unwrap();
+        });
+
+        let proxy_url = start_preview_ws_proxy(format!("ws://127.0.0.1:{upstream_port}"))
+            .await
+            .unwrap();
+        let (mut client, _) = connect_async(proxy_url).await.unwrap();
+        let ready = tokio::time::timeout(std::time::Duration::from_secs(10), client.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(ready.into_data(), PREVIEW_WS_SOURCE_MAP_READY_FRAME);
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(10), client.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(frame.into_data(), b"jump,7 12.5 40.25".as_slice());
+        server.await.unwrap();
     }
 }
 
