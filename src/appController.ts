@@ -3494,10 +3494,14 @@ export class TypsastraWorkspaceController {
           message: `Render generation ${generation}: invalidated ${preparedPaths.length} prepared file(s) and synchronized ${syncedPreparedDocuments} in-memory document(s) in Tinymist.`
         });
       }
-      // Tinymist normally writes <root>.pdf beside the Typst root. Register
-      // that output before awaiting the RPC because the workspace watcher can
-      // observe the write before Tinymist returns its result.
-      const anticipatedPdfPath = previewPath.replace(/\.typ$/i, ".pdf");
+      // Register the configured private output before awaiting the RPC because
+      // Tinymist can create it before the workspace watcher receives the
+      // command result. Do not reproduce the render mirror's relative path
+      // beneath the preview directory.
+      const cacheRoot = this.getCacheRootPath();
+      if (!cacheRoot) throw new Error("No PDF preview cache is available.");
+      const previewPdfName = fileNameFromPath(previewPath).replace(/\.typ$/i, ".pdf");
+      const anticipatedPdfPath = `${cacheRoot}/preview/${previewPdfName}`;
       const anticipatedPdfPathKey = filePathKey(anticipatedPdfPath);
       this.managedPreviewPdfPathKeys.add(anticipatedPdfPathKey);
       const pdfPath = await this.lspClient.exportPdfToFile(previewPath);

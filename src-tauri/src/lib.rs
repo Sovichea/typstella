@@ -28,7 +28,7 @@ use compatibility::{get_linux_renderer_compatibility, prepare_linux_renderer_rel
 use examples::prepare_examples_workspace;
 use render_prepare::{
     cancel_render_preparation, map_generated_to_source, map_source_to_generated,
-    prepare_render_file, prepare_render_project,
+    prepare_render_file, prepare_render_project, validate_existing_render_cache_owner,
 };
 use segmentation::{
     analyze_language_ranges, complete_language_word, get_provider_capabilities,
@@ -709,10 +709,14 @@ fn cleanup_workspace_preview_files(workspace_root_path: String) -> Result<(), St
     if !root.is_dir() {
         return Ok(());
     }
+    let cache_root = root.join(".typsastra").join("cache");
+    validate_existing_render_cache_owner(&root, &cache_root).map_err(|error| {
+        format!("Failed to validate preview cache ownership before starting Tinymist: {error}")
+    })?;
     cleanup_dir_previews(&root);
     // Migrate caches written by versions that linked PDF/image assets back to
     // the project. Plain cache files keep project-folder copies safe.
-    remove_cache_symlinks(&root.join(".typsastra").join("cache"));
+    remove_cache_symlinks(&cache_root);
     Ok(())
 }
 

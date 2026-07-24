@@ -3,7 +3,8 @@ import { describe, expect, test } from "bun:test";
 describe("compiled PDF transport", () => {
   test("exports previews to a private cache instead of returning Base64 through LSP", async () => {
     const source = await Bun.file(new URL("../src/compiler/lsp.ts", import.meta.url)).text();
-    expect(source).toContain('$root/.typsastra/cache/preview/$dir/$name');
+    expect(source).toContain('$root/.typsastra/cache/preview/$name');
+    expect(source).not.toContain('cache/preview/$dir/$name');
     expect(source).toContain("outputPath: PREVIEW_OUTPUT_PATH");
     expect(source).toContain("arguments: [path, {}, { write: true, open: false }]");
     expect(source).not.toContain("exportPdfToMemory");
@@ -22,6 +23,7 @@ describe("compiled PDF transport", () => {
     const exportRequest = source.indexOf("await this.lspClient.exportPdfToFile(previewPath)");
     expect(registration).toBeGreaterThan(-1);
     expect(exportRequest).toBeGreaterThan(registration);
+    expect(source).toContain('const anticipatedPdfPath = `${cacheRoot}/preview/${previewPdfName}`');
     expect(source).toContain("excludeManagedWorkspacePaths(");
   });
 
@@ -30,6 +32,18 @@ describe("compiled PDF transport", () => {
     expect(source).toContain("Every live preview compiles from Typsastra's private render mirror.");
     expect(source).not.toContain('const shouldMirror = this.settingsController.value.preview.renderMode === "on-type"');
     expect(source).not.toContain("if (!shouldMirror || !this.workspaceRootPath)");
+  });
+
+  test("validates copied workspace caches before starting Tinymist", async () => {
+    const source = await Bun.file(new URL("../src/appController.ts", import.meta.url)).text();
+    const validation = source.indexOf(
+      'await invoke("cleanup_workspace_preview_files", { workspaceRootPath: selected })'
+    );
+    const startup = source.indexOf(
+      'await this.restartTinymistSession("Connecting to new workspace root...")'
+    );
+    expect(validation).toBeGreaterThan(-1);
+    expect(startup).toBeGreaterThan(validation);
   });
 
   test("requires explicit confirmation before writing a user-facing PDF", async () => {

@@ -6,8 +6,9 @@ pub mod segment;
 pub mod sourcemap;
 
 pub use mirror::{
-    mirror_project_cancellable, prepare_single_in_memory_file, RenderPrepareOptions,
-    RenderPrepareResult, RenderPrepareWarning,
+    mirror_project_cancellable, prepare_single_in_memory_file,
+    validate_existing_render_cache_owner, RenderPrepareOptions, RenderPrepareResult,
+    RenderPrepareWarning,
 };
 pub use segment::KhmerTextSegmenter;
 pub use sourcemap::SourceMap;

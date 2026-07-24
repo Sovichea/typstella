@@ -6,7 +6,16 @@ use super::scanner::{scan_typst_content, ScanState};
 use super::segment::{prepare_khmer_text_for_rendering, KhmerTextSegmenter};
 use super::sourcemap::{MappingKind, SourceMap, SOURCE_MAP_VERSION};
 
-const RENDER_CACHE_LAYOUT_VERSION: &str = "2-hard-linked-assets";
+const RENDER_CACHE_LAYOUT_VERSION: &str = "3-flat-preview-output";
+const RENDER_CACHE_OWNER_SCHEMA_VERSION: u32 = 1;
+const RENDER_CACHE_OWNER_FILE: &str = "workspace-owner.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct RenderCacheOwner {
+    schema_version: u32,
+    workspace_root: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,10 +50,12 @@ pub fn mirror_project_cancellable(
     let project_root = &options.project_root;
     let cache_root = &options.cache_root;
 
+    ensure_render_cache_owner(project_root, cache_root).map_err(|error| error.to_string())?;
     let render_dir = cache_root.join("render");
     let maps_dir = cache_root.join("maps");
+    let preview_dir = cache_root.join("preview");
 
-    migrate_render_cache_layout(cache_root, &render_dir, &maps_dir)
+    migrate_render_cache_layout(cache_root, &render_dir, &maps_dir, &preview_dir)
         .map_err(|error| error.to_string())?;
     fs::create_dir_all(&render_dir).map_err(|e| e.to_string())?;
     if options.generate_source_map {
@@ -143,10 +154,81 @@ pub fn mirror_project_cancellable(
     })
 }
 
+fn normalized_workspace_identity(project_root: &Path) -> String {
+    let resolved = fs::canonicalize(project_root).unwrap_or_else(|_| project_root.to_path_buf());
+    let identity = resolved.to_string_lossy().replace('\\', "/");
+    #[cfg(windows)]
+    {
+        identity.to_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        identity
+    }
+}
+
+fn expected_render_cache_owner(project_root: &Path) -> RenderCacheOwner {
+    RenderCacheOwner {
+        schema_version: RENDER_CACHE_OWNER_SCHEMA_VERSION,
+        workspace_root: normalized_workspace_identity(project_root),
+    }
+}
+
+fn read_render_cache_owner(cache_root: &Path) -> Option<RenderCacheOwner> {
+    let bytes = fs::read(cache_root.join(RENDER_CACHE_OWNER_FILE)).ok()?;
+    serde_json::from_slice(&bytes).ok()
+}
+
+fn remove_render_cache(cache_root: &Path) -> Result<(), std::io::Error> {
+    let Ok(metadata) = fs::symlink_metadata(cache_root) else {
+        return Ok(());
+    };
+    if metadata.file_type().is_symlink() {
+        fs::remove_file(cache_root).or_else(|_| fs::remove_dir(cache_root))
+    } else {
+        fs::remove_dir_all(cache_root)
+    }
+}
+
+fn write_render_cache_owner(project_root: &Path, cache_root: &Path) -> Result<(), std::io::Error> {
+    fs::create_dir_all(cache_root)?;
+    let owner = expected_render_cache_owner(project_root);
+    let bytes = serde_json::to_vec_pretty(&owner).map_err(std::io::Error::other)?;
+    fs::write(cache_root.join(RENDER_CACHE_OWNER_FILE), bytes)
+}
+
+/// Invalidates a copied or moved workspace cache before any compiler process
+/// can observe hard links or generated sources owned by the former location.
+/// A missing cache remains missing until preview preparation is requested.
+pub fn validate_existing_render_cache_owner(
+    project_root: &Path,
+    cache_root: &Path,
+) -> Result<bool, std::io::Error> {
+    if !cache_root.exists() {
+        return Ok(false);
+    }
+    if read_render_cache_owner(cache_root).as_ref()
+        == Some(&expected_render_cache_owner(project_root))
+    {
+        return Ok(false);
+    }
+    remove_render_cache(cache_root)?;
+    Ok(true)
+}
+
+fn ensure_render_cache_owner(project_root: &Path, cache_root: &Path) -> Result<(), std::io::Error> {
+    let invalidated = validate_existing_render_cache_owner(project_root, cache_root)?;
+    if invalidated || !cache_root.exists() {
+        write_render_cache_owner(project_root, cache_root)?;
+    }
+    Ok(())
+}
+
 fn migrate_render_cache_layout(
     cache_root: &Path,
     render_dir: &Path,
     maps_dir: &Path,
+    preview_dir: &Path,
 ) -> Result<(), std::io::Error> {
     fs::create_dir_all(cache_root)?;
     let marker = cache_root.join("render-layout-version");
@@ -162,6 +244,9 @@ fn migrate_render_cache_layout(
     }
     if maps_dir.exists() {
         fs::remove_dir_all(maps_dir)?;
+    }
+    if preview_dir.exists() {
+        fs::remove_dir_all(preview_dir)?;
     }
     fs::write(marker, format!("{RENDER_CACHE_LAYOUT_VERSION}\n"))
 }
@@ -227,6 +312,7 @@ pub fn prepare_single_in_memory_file(
     let project_root = &options.project_root;
     let cache_root = &options.cache_root;
 
+    ensure_render_cache_owner(project_root, cache_root).map_err(|error| error.to_string())?;
     let render_dir = cache_root.join("render");
     let maps_dir = cache_root.join("maps");
 
@@ -507,14 +593,22 @@ mod tests {
         let cache_root = workspace.path().join(".typsastra/cache");
         let render_dir = cache_root.join("render");
         let maps_dir = cache_root.join("maps");
+        let preview_dir = cache_root.join("preview");
         fs::create_dir_all(&render_dir).unwrap();
         fs::create_dir_all(&maps_dir).unwrap();
+        fs::create_dir_all(preview_dir.join(".typsastra/cache/render")).unwrap();
         fs::write(render_dir.join("old-copy.png"), b"duplicated").unwrap();
         fs::write(maps_dir.join("old.typ.map.json"), b"{}").unwrap();
+        fs::write(
+            preview_dir.join(".typsastra/cache/render/main.pdf"),
+            b"old preview",
+        )
+        .unwrap();
 
-        migrate_render_cache_layout(&cache_root, &render_dir, &maps_dir).unwrap();
+        migrate_render_cache_layout(&cache_root, &render_dir, &maps_dir, &preview_dir).unwrap();
         assert!(!render_dir.exists());
         assert!(!maps_dir.exists());
+        assert!(!preview_dir.exists());
         assert_eq!(
             fs::read_to_string(cache_root.join("render-layout-version"))
                 .unwrap()
@@ -524,8 +618,76 @@ mod tests {
 
         fs::create_dir_all(&render_dir).unwrap();
         fs::write(render_dir.join("current.png"), b"keep").unwrap();
-        migrate_render_cache_layout(&cache_root, &render_dir, &maps_dir).unwrap();
+        migrate_render_cache_layout(&cache_root, &render_dir, &maps_dir, &preview_dir).unwrap();
         assert_eq!(fs::read(render_dir.join("current.png")).unwrap(), b"keep");
+    }
+
+    #[test]
+    fn invalidates_a_render_cache_copied_from_another_workspace() {
+        let source_workspace = tempfile::tempdir().unwrap();
+        let copied_parent = tempfile::tempdir().unwrap();
+        let copied_workspace = copied_parent.path().join("copied-project");
+        let source_cache = source_workspace.path().join(".typsastra/cache");
+        let copied_cache = copied_workspace.join(".typsastra/cache");
+        let source_asset = source_workspace.path().join("images/photo.png");
+
+        write_render_cache_owner(source_workspace.path(), &source_cache).unwrap();
+        fs::create_dir_all(source_asset.parent().unwrap()).unwrap();
+        fs::write(&source_asset, b"original asset").unwrap();
+        fs::create_dir_all(source_cache.join("render/images")).unwrap();
+        let source_cache_asset = source_cache.join("render/images/photo.png");
+        if fs::hard_link(&source_asset, &source_cache_asset).is_err() {
+            fs::copy(&source_asset, &source_cache_asset).unwrap();
+        }
+
+        fs::create_dir_all(&copied_cache).unwrap();
+        fs::copy(
+            source_cache.join(RENDER_CACHE_OWNER_FILE),
+            copied_cache.join(RENDER_CACHE_OWNER_FILE),
+        )
+        .unwrap();
+        fs::create_dir_all(copied_cache.join("render/images")).unwrap();
+        // Simulate a copy tool that preserves a cache link to the old
+        // workspace rather than materializing independent bytes.
+        let copied_cache_asset = copied_cache.join("render/images/photo.png");
+        if fs::hard_link(&source_asset, &copied_cache_asset).is_err() {
+            fs::copy(&source_asset, &copied_cache_asset).unwrap();
+        }
+        fs::create_dir_all(copied_workspace.join(".typsastra")).unwrap();
+        fs::write(
+            copied_workspace.join(".typsastra/config.json"),
+            b"{\"project\":\"keep\"}",
+        )
+        .unwrap();
+
+        assert!(validate_existing_render_cache_owner(&copied_workspace, &copied_cache).unwrap());
+        assert!(!copied_cache.exists());
+        assert_eq!(fs::read(&source_asset).unwrap(), b"original asset");
+        assert_eq!(
+            fs::read(copied_workspace.join(".typsastra/config.json")).unwrap(),
+            b"{\"project\":\"keep\"}"
+        );
+
+        ensure_render_cache_owner(&copied_workspace, &copied_cache).unwrap();
+        assert_eq!(
+            read_render_cache_owner(&copied_cache),
+            Some(expected_render_cache_owner(&copied_workspace))
+        );
+    }
+
+    #[test]
+    fn preserves_a_render_cache_owned_by_the_current_workspace() {
+        let workspace = tempfile::tempdir().unwrap();
+        let cache_root = workspace.path().join(".typsastra/cache");
+        write_render_cache_owner(workspace.path(), &cache_root).unwrap();
+        fs::create_dir_all(cache_root.join("render")).unwrap();
+        fs::write(cache_root.join("render/keep.png"), b"keep").unwrap();
+
+        assert!(!validate_existing_render_cache_owner(workspace.path(), &cache_root).unwrap());
+        assert_eq!(
+            fs::read(cache_root.join("render/keep.png")).unwrap(),
+            b"keep"
+        );
     }
 
     #[test]
