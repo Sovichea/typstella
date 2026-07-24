@@ -82,6 +82,9 @@ Released July 23, 2026.
 - Confine every live-preview source mirror, generated PDF, source map, and
   temporary compiler artifact to `.typsastra/cache`; require explicit user
   confirmation before creating or replacing an exported PDF in the workspace.
+- Materialize non-Typst render assets as regular hard links where supported,
+  with a portable copy fallback, so large asset collections are not duplicated
+  merely to preserve complete Typst path resolution.
 - Rebuild externally changed previews through one revision-safe pipeline so
   forward and inverse synchronization cannot retain a stale render-cache task.
 - Filter oversized Tinymist vector frames from the PDF source-map bridge while

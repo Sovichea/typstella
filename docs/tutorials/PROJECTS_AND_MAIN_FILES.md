@@ -30,6 +30,10 @@ artifacts stay under `.typsastra/cache`. Typsastra does not create generated
 files beside project sources unless the user explicitly confirms an export or
 file operation. Cache content is disposable: do not copy, commit, or share it.
 It can be rebuilt from source, and project export filters it automatically.
+To avoid duplicating large image collections, non-Typst assets use regular hard
+links when the workspace filesystem supports them and fall back to ordinary
+copies otherwise. Typsastra never uses symbolic links for render-cache assets.
+Removing the cache link does not remove the original project asset.
 
 The **Export PDF** command is separate from live preview. It asks for
 confirmation before creating or replacing the user-facing PDF in the project.

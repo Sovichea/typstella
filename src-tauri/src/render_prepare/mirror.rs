@@ -6,6 +6,8 @@ use super::scanner::{scan_typst_content, ScanState};
 use super::segment::{prepare_khmer_text_for_rendering, KhmerTextSegmenter};
 use super::sourcemap::{MappingKind, SourceMap, SOURCE_MAP_VERSION};
 
+const RENDER_CACHE_LAYOUT_VERSION: &str = "2-hard-linked-assets";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RenderPrepareWarning {
@@ -42,6 +44,8 @@ pub fn mirror_project_cancellable(
     let render_dir = cache_root.join("render");
     let maps_dir = cache_root.join("maps");
 
+    migrate_render_cache_layout(cache_root, &render_dir, &maps_dir)
+        .map_err(|error| error.to_string())?;
     fs::create_dir_all(&render_dir).map_err(|e| e.to_string())?;
     if options.generate_source_map {
         fs::create_dir_all(&maps_dir).map_err(|e| e.to_string())?;
@@ -137,6 +141,29 @@ pub fn mirror_project_cancellable(
         changed_files,
         warnings,
     })
+}
+
+fn migrate_render_cache_layout(
+    cache_root: &Path,
+    render_dir: &Path,
+    maps_dir: &Path,
+) -> Result<(), std::io::Error> {
+    fs::create_dir_all(cache_root)?;
+    let marker = cache_root.join("render-layout-version");
+    if fs::read_to_string(&marker)
+        .ok()
+        .is_some_and(|version| version.trim() == RENDER_CACHE_LAYOUT_VERSION)
+    {
+        return Ok(());
+    }
+
+    if render_dir.exists() {
+        fs::remove_dir_all(render_dir)?;
+    }
+    if maps_dir.exists() {
+        fs::remove_dir_all(maps_dir)?;
+    }
+    fs::write(marker, format!("{RENDER_CACHE_LAYOUT_VERSION}\n"))
 }
 
 fn clean_stale_cache_files(
@@ -301,11 +328,19 @@ fn walk_project_dir(
 }
 
 fn copy_asset_to_cache(src: &Path, dest: &Path) -> Result<bool, std::io::Error> {
-    // Cache artifacts must remain plain files. A file symlink back into the
+    // Cache artifacts must remain regular files. A symbolic link back into the
     // workspace can make Explorer and backup/copy tools follow the link while
     // duplicating a project, causing the operation to hang or recurse.
+    //
+    // A hard link has ordinary file semantics but shares the source file's
+    // storage allocation. Since the cache lives inside the workspace it will
+    // normally be on the same filesystem, so large unused asset collections do
+    // not consume their size twice. Filesystems that reject hard links retain
+    // the portable copy fallback.
     if let Ok(meta) = fs::symlink_metadata(dest) {
-        if meta.file_type().is_symlink() {
+        if meta.is_dir() {
+            fs::remove_dir_all(dest)?;
+        } else if meta.file_type().is_symlink() {
             fs::remove_file(dest)?;
         } else if let (Ok(src_meta), Ok(dest_meta)) = (fs::metadata(src), fs::metadata(dest)) {
             if src_meta.len() == dest_meta.len() {
@@ -317,10 +352,16 @@ fn copy_asset_to_cache(src: &Path, dest: &Path) -> Result<bool, std::io::Error> 
                     }
                 }
             }
+            fs::remove_file(dest)?;
         }
     }
 
-    fs::copy(src, dest)?;
+    let source_is_symlink = fs::symlink_metadata(src)
+        .map(|metadata| metadata.file_type().is_symlink())
+        .unwrap_or(false);
+    if source_is_symlink || fs::hard_link(src, dest).is_err() {
+        fs::copy(src, dest)?;
+    }
     Ok(true)
 }
 
@@ -421,7 +462,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn copies_pdf_assets_as_regular_cache_files() {
+    fn materializes_pdf_assets_as_regular_cache_files() {
         let workspace = tempfile::tempdir().unwrap();
         let source = workspace.path().join("figure.pdf");
         let cache_file = workspace.path().join(".typsastra/cache/render/figure.pdf");
@@ -433,6 +474,58 @@ mod tests {
         let metadata = fs::symlink_metadata(&cache_file).unwrap();
         assert!(metadata.file_type().is_file());
         assert!(!metadata.file_type().is_symlink());
+    }
+
+    #[test]
+    fn hard_linked_assets_share_storage_without_owning_the_source() {
+        let workspace = tempfile::tempdir().unwrap();
+        let probe_source = workspace.path().join("hard-link-probe-source");
+        let probe_dest = workspace.path().join("hard-link-probe-dest");
+        fs::write(&probe_source, b"probe").unwrap();
+        if fs::hard_link(&probe_source, &probe_dest).is_err() {
+            // The production path uses an ordinary copy on this filesystem.
+            return;
+        }
+        fs::remove_file(&probe_dest).unwrap();
+
+        let source = workspace.path().join("photo.png");
+        let cache_file = workspace.path().join(".typsastra/cache/render/photo.png");
+        fs::write(&source, b"original").unwrap();
+        fs::create_dir_all(cache_file.parent().unwrap()).unwrap();
+
+        assert!(copy_asset_to_cache(&source, &cache_file).unwrap());
+        fs::write(&source, b"updated").unwrap();
+        assert_eq!(fs::read(&cache_file).unwrap(), b"updated");
+
+        fs::remove_file(&cache_file).unwrap();
+        assert_eq!(fs::read(&source).unwrap(), b"updated");
+    }
+
+    #[test]
+    fn migrates_existing_render_copies_once() {
+        let workspace = tempfile::tempdir().unwrap();
+        let cache_root = workspace.path().join(".typsastra/cache");
+        let render_dir = cache_root.join("render");
+        let maps_dir = cache_root.join("maps");
+        fs::create_dir_all(&render_dir).unwrap();
+        fs::create_dir_all(&maps_dir).unwrap();
+        fs::write(render_dir.join("old-copy.png"), b"duplicated").unwrap();
+        fs::write(maps_dir.join("old.typ.map.json"), b"{}").unwrap();
+
+        migrate_render_cache_layout(&cache_root, &render_dir, &maps_dir).unwrap();
+        assert!(!render_dir.exists());
+        assert!(!maps_dir.exists());
+        assert_eq!(
+            fs::read_to_string(cache_root.join("render-layout-version"))
+                .unwrap()
+                .trim(),
+            RENDER_CACHE_LAYOUT_VERSION
+        );
+
+        fs::create_dir_all(&render_dir).unwrap();
+        fs::write(render_dir.join("current.png"), b"keep").unwrap();
+        migrate_render_cache_layout(&cache_root, &render_dir, &maps_dir).unwrap();
+        assert_eq!(fs::read(render_dir.join("current.png")).unwrap(), b"keep");
     }
 
     #[test]
