@@ -3203,6 +3203,14 @@ button.welcome-item:disabled {
   margin-right: 4px !important;
 }
 
+.cm-panel.cm-search .cm-search-match-count {
+  min-width: 34px;
+  color: var(--ui-header-text);
+  font: 11px var(--font-family-sans);
+  text-align: center;
+  white-space: nowrap;
+}
+
 .cm-panel.cm-search .cm-search-close {
   position: absolute !important;
   top: 4px !important;

@@ -1,10 +1,26 @@
-import { Extension, Compartment, EditorState, StateEffect, RangeSetBuilder, Prec } from "@codemirror/state";
+import { Extension, Compartment, EditorSelection, EditorState, StateEffect, RangeSetBuilder, Prec } from "@codemirror/state";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { lineNumbers, highlightActiveLineGutter, highlightActiveLine, drawSelection, dropCursor, keymap, EditorView, ViewPlugin, Decoration, DecorationSet, ViewUpdate } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, insertTab } from "@codemirror/commands";
-import { search, searchKeymap } from "@codemirror/search";
+import {
+  SearchQuery,
+  closeSearchPanel,
+  getSearchQuery,
+  search,
+  searchKeymap,
+  searchPanelOpen
+} from "@codemirror/search";
 import { baseEditorLayoutTheme, editorFontTheme, typstColorHighlighting, typstFontHighlighting, typstFunctionHighlighting, typstSemanticHighlighting, typstVariableHighlighting } from "./themes";
-import { codeFolding, foldGutter, foldKeymap, foldService, indentUnit, syntaxHighlighting } from "@codemirror/language";
+import {
+  codeFolding,
+  foldGutter,
+  foldKeymap,
+  foldedRanges,
+  foldService,
+  indentUnit,
+  syntaxHighlighting,
+  unfoldEffect
+} from "@codemirror/language";
 import { typstLanguage } from "./typstLanguage";
 import { editorDiagnosticsExtension } from "./diagnostics";
 import { indentationMarkers } from '@replit/codemirror-indentation-markers';
@@ -72,6 +88,245 @@ const completionNavigationHandler = Prec.highest(EditorView.domEventHandlers({
     return true;
   }
 }));
+
+type SearchRange = { from: number; to: number };
+
+export function firstSearchMatch(
+  state: EditorState,
+  query: SearchQuery,
+  from = 0,
+  to = state.doc.length
+): SearchRange | null {
+  if (!query.valid) return null;
+  const cursor = query.getCursor(state, from, to);
+  const result = cursor.next();
+  return result.done ? null : result.value;
+}
+
+export function foldedRangeForSearchMatch(
+  state: EditorState,
+  match: SearchRange
+): SearchRange | null {
+  let folded: SearchRange | null = null;
+  const matchTo = Math.max(match.to, Math.min(state.doc.length, match.from + 1));
+  foldedRanges(state).between(
+    Math.max(0, match.from - 1),
+    Math.min(state.doc.length, matchTo + 1),
+    (from, to) => {
+      if (!folded && from < matchTo && to > match.from) folded = { from, to };
+    }
+  );
+  return folded;
+}
+
+export function searchQueryHasVisibleMatch(
+  state: EditorState,
+  query: SearchQuery,
+  visibleRanges: readonly SearchRange[]
+): boolean {
+  return firstVisibleSearchMatch(state, query, visibleRanges) !== null;
+}
+
+export function firstVisibleSearchMatch(
+  state: EditorState,
+  query: SearchQuery,
+  visibleRanges: readonly SearchRange[]
+): SearchRange | null {
+  if (!query.valid) return null;
+  for (const range of visibleRanges) {
+    // Include a small boundary margin for regular expressions and matches that
+    // begin just outside a wrapped viewport range.
+    const cursor = query.getCursor(
+      state,
+      Math.max(0, range.from - 250),
+      Math.min(state.doc.length, range.to + 250)
+    );
+    for (let result = cursor.next(); !result.done; result = cursor.next()) {
+      if (
+        result.value.to > range.from
+        && result.value.from < range.to
+        && !foldedRangeForSearchMatch(state, result.value)
+      ) return result.value;
+      if (result.value.from >= range.to) break;
+    }
+  }
+  return null;
+}
+
+export function mergeVisibleSearchRanges(ranges: readonly SearchRange[]): SearchRange[] {
+  const sorted = ranges
+    .filter(range => range.to >= range.from)
+    .map(range => ({ from: range.from, to: range.to }))
+    .sort((a, b) => a.from - b.from || a.to - b.to);
+  const merged: SearchRange[] = [];
+  for (const range of sorted) {
+    const previous = merged[merged.length - 1];
+    if (previous && range.from <= previous.to) {
+      previous.to = Math.max(previous.to, range.to);
+    } else {
+      merged.push(range);
+    }
+  }
+  return merged;
+}
+
+function editorVisibleCanvasRanges(view: EditorView): SearchRange[] {
+  const scrollRect = view.scrollDOM.getBoundingClientRect();
+  const contentRect = view.contentDOM.getBoundingClientRect();
+  const left = Math.max(scrollRect.left, contentRect.left) + 1;
+  const right = Math.max(
+    left,
+    Math.min(scrollRect.right, scrollRect.left + view.scrollDOM.clientWidth, contentRect.right) - 1
+  );
+  const top = Math.max(scrollRect.top, contentRect.top) + 1;
+  const bottom = Math.max(top, Math.min(scrollRect.bottom, contentRect.bottom) - 1);
+  const step = Math.max(2, view.defaultLineHeight / 2);
+  const ranges: SearchRange[] = [];
+  const sampleRow = (y: number) => {
+    const leftPosition = view.posAtCoords({ x: left, y });
+    const rightPosition = view.posAtCoords({ x: right, y });
+    if (leftPosition === null && rightPosition === null) return;
+    const from = Math.min(leftPosition ?? rightPosition!, rightPosition ?? leftPosition!);
+    const to = Math.max(leftPosition ?? rightPosition!, rightPosition ?? leftPosition!);
+    ranges.push({ from, to });
+  };
+  for (let y = top; y < bottom; y += step) sampleRow(y);
+  sampleRow(bottom);
+  return mergeVisibleSearchRanges(ranges);
+}
+
+const visibleFirstSearchNavigation = ViewPlugin.fromClass(class {
+  private frame: number | null = null;
+
+  update(update: ViewUpdate): void {
+    const query = getSearchQuery(update.state);
+    const previousQuery = getSearchQuery(update.startState);
+    const panelOpened = searchPanelOpen(update.state) && !searchPanelOpen(update.startState);
+    if (
+      !searchPanelOpen(update.state)
+      || (!panelOpened && query.eq(previousQuery) && !update.geometryChanged)
+    ) return;
+    if (this.frame !== null) cancelAnimationFrame(this.frame);
+    this.frame = requestAnimationFrame(() => {
+      this.frame = null;
+      const currentQuery = getSearchQuery(update.view.state);
+      if (!searchPanelOpen(update.view.state) || !currentQuery.eq(query) || !currentQuery.valid) return;
+      const visibleCanvas = editorVisibleCanvasRanges(update.view);
+      const visible = firstVisibleSearchMatch(update.view.state, currentQuery, visibleCanvas);
+      const target = visible ?? firstSearchMatch(update.view.state, currentQuery);
+      if (!target) return;
+      const folded = foldedRangeForSearchMatch(update.view.state, target);
+      const selection = EditorSelection.single(target.from, target.to);
+      const effects = [
+        ...(folded ? [unfoldEffect.of(folded)] : []),
+        ...(visible ? [] : [EditorView.scrollIntoView(selection.main, { y: "center" })])
+      ];
+      update.view.dispatch({
+        selection,
+        effects,
+        userEvent: "select.search"
+      });
+    });
+  }
+
+  destroy(): void {
+    if (this.frame !== null) cancelAnimationFrame(this.frame);
+  }
+});
+
+const searchMatchCounter = ViewPlugin.fromClass(class {
+  private generation = 0;
+  private frame: number | null = null;
+
+  constructor(private readonly view: EditorView) {}
+
+  update(update: ViewUpdate): void {
+    if (
+      searchPanelOpen(update.state)
+      && (
+        !searchPanelOpen(update.startState)
+        || !getSearchQuery(update.state).eq(getSearchQuery(update.startState))
+        || update.docChanged
+        || update.selectionSet
+      )
+    ) {
+      this.schedule();
+    } else if (!searchPanelOpen(update.state)) {
+      this.cancel();
+    }
+  }
+
+  private statusElement(): HTMLElement | null {
+    const panel = this.view.dom.querySelector<HTMLElement>(".cm-panel.cm-search");
+    if (!panel) return null;
+    let status = panel.querySelector<HTMLElement>(".cm-search-match-count");
+    if (status) return status;
+    status = document.createElement("span");
+    status.className = "cm-search-match-count";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    const close = panel.querySelector('button[name="close"]');
+    panel.insertBefore(status, close);
+    return status;
+  }
+
+  private schedule(): void {
+    const generation = ++this.generation;
+    if (this.frame !== null) cancelAnimationFrame(this.frame);
+    this.frame = requestAnimationFrame(() => {
+      this.frame = null;
+      if (generation !== this.generation || !searchPanelOpen(this.view.state)) return;
+      const query = getSearchQuery(this.view.state);
+      const status = this.statusElement();
+      if (!status) return;
+      if (!query.valid) {
+        status.textContent = "0/0";
+        status.title = "No matches";
+        return;
+      }
+
+      const state = this.view.state;
+      const selection = state.selection.main;
+      const cursor = query.getCursor(state);
+      let total = 0;
+      let current = 0;
+      status.textContent = "…/…";
+      status.title = "Counting matches";
+
+      const scan = () => {
+        if (generation !== this.generation || this.view.state !== state) return;
+        const startedAt = performance.now();
+        for (let processed = 0; processed < 500 && performance.now() - startedAt < 4; processed++) {
+          const result = cursor.next();
+          if (result.done) {
+            status.textContent = `${current}/${total}`;
+            status.title = total === 0
+              ? "No matches"
+              : current > 0
+                ? `Match ${current} of ${total}`
+                : `${total} matches`;
+            this.frame = null;
+            return;
+          }
+          total += 1;
+          if (result.value.from === selection.from && result.value.to === selection.to) current = total;
+        }
+        this.frame = requestAnimationFrame(scan);
+      };
+      scan();
+    });
+  }
+
+  private cancel(): void {
+    this.generation += 1;
+    if (this.frame !== null) cancelAnimationFrame(this.frame);
+    this.frame = null;
+  }
+
+  destroy(): void {
+    this.cancel();
+  }
+});
 
 function foldedTypstPlaceholderSuffix(state: EditorState, range: { from: number; to: number }): string {
   const foldedText = state.doc.sliceString(range.from, range.to).trimEnd();
@@ -287,6 +542,7 @@ export function getEditorExtensions(
     contextualDoubleQuoteExtension,
     EditorView.domEventHandlers({
       mousedown: (event, view) => {
+        if (searchPanelOpen(view.state)) closeSearchPanel(view);
         if ((event.ctrlKey || event.metaKey) && event.button === 0) {
           console.log("[Ctrl+Click] Detected! Pos:", view.posAtCoords({ x: event.clientX, y: event.clientY }));
           const client = getClient();
@@ -344,7 +600,12 @@ export function getEditorExtensions(
     indentationGuidesCompartment.of(visibleIndentationMarkers()),
     tabSizeCompartment.of([EditorState.tabSize.of(2), indentUnit.of("  ")]),
     wrapCompartment.of(EditorView.lineWrapping),
-    search({ top: true }),
+    search({
+      top: true,
+      scrollToMatch: range => EditorView.scrollIntoView(range, { y: "center" })
+    }),
+    visibleFirstSearchNavigation,
+    searchMatchCounter,
     closeBracketsCompartment.of(closeBrackets()),
     bracketMatching(),
     bracketColorizer,
